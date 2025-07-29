@@ -51,6 +51,7 @@ void *ppt(void *vctx) {
         pthread_mutex_lock(&ctx->lock);
         while (!ctx->command) {
             pthread_cond_wait(&ctx->cmd_cond, &ctx->lock);
+            
         }
         
         int command = ctx->command;
@@ -89,26 +90,33 @@ uint64_t ppt_io(
     ist66_ppt_t *ctx = (ist66_ppt_t *) vctx;
     ist66_cu_t *cpu = ctx->cpu;
     
-    switch (ctl) {
-        case 1: {
-            ctx->command = 1;
-            if (ctx->done) {
-                ctx->done = 0;
-                intr_release(cpu, ctx->irq);
-            }
-            pthread_cond_signal(&ctx->cmd_cond);
-        } break;
-        case 2: {
-            ctx->command = 0;
-            if (ctx->done) {
-                ctx->done = 0;
-                intr_release(cpu, ctx->irq);
-            }
-        } break;
+    if (transfer != 14) {
+        switch (ctl) {
+            case 1: {
+                pthread_mutex_lock(&ctx->lock);
+                ctx->command = 1;
+                if (ctx->done) {
+                    ctx->done = 0;
+                    intr_release(cpu, ctx->irq);
+                }
+                pthread_cond_signal(&ctx->cmd_cond);
+                pthread_mutex_unlock(&ctx->lock);
+            } break;
+            case 2: {
+                pthread_mutex_lock(&ctx->lock);
+                ctx->command = 0;
+                if (ctx->done) {
+                    ctx->done = 0;
+                    intr_release(cpu, ctx->irq);
+                }
+                pthread_mutex_unlock(&ctx->lock);
+            } break;
+        }
     }
     
     if (transfer == 14) {
-        return (ctx->done << 1) | (ctx->command & 1);
+        int status = (ctx->done << 1) | (ctx->command & 1);
+        return (uint64_t) status;
     }
     
     else if (transfer == 0) {
@@ -122,9 +130,7 @@ void destroy_ppt(ist66_cu_t *cpu, int id) {
     ist66_ppt_t *ctx = (ist66_ppt_t *) cpu->ioctx[id];
     
     if (ctx->running) {
-        ctx->command = -1;
-        pthread_cond_signal(&ctx->cmd_cond);
-        pthread_join(ctx->thread, NULL);
+        pthread_cancel(ctx->thread);
     }
     
     pthread_mutex_destroy(&ctx->lock);

@@ -9,7 +9,11 @@
 #define SKIP(x) (!!((x) & (1L << 37)))
 
 #define EXT6(x) ((x) & (1L << 5) ? (x) | 0xFFFFFFFFFFFFFFC0 : (x))
+#define EXT7(x) ((x) & (1L << 6) ? (x) | 0xFFFFFFFFFFFFFF80 : (x))
 #define EXT18(x) ((x) & (1L << 17) ? (x) | 0xFFFFFFFFFFFC0000 : (x))
+
+#include <stdint.h>
+#include <stdio.h>
 
 uint64_t compute(
     uint64_t a, uint64_t b, int c,  // a, b, carry
@@ -36,10 +40,11 @@ static inline uint64_t exec_aa(
     uint64_t mk_u = ((inst >> 7) & 0x3F);
     uint64_t rt_u = (inst & 0x3F);
     
-    int mk = (int) (EXT6(mk_u));
-    int rt = (int) (EXT6(rt_u));
+    int mk = (int) (EXT7(mk_u));
+    int rt = (int) (EXT7(rt_u));
     
-    return compute(a, b, c, op, ci, cond, nl, rc, mk, rt);
+    uint64_t result = compute(a, b, c, op, ci, cond, nl, rc, mk, rt);
+    return result;
 }
 
 #endif
