@@ -65,9 +65,20 @@ static inline void do_intr(ist66_cu_t *cpu, int irq) {
     cpu->c[C_PSW] = cpu->memory[2 * irq] & 0xFF7FFFFFF;
 }
 
+#define X_USER      0   // unimplemented instruction
+#define X_INST      1   // illegal instruction
+#define X_MEMX      2   // no such memory
+#define X_DEVX      3   // no such device
+#define X_PPFR      4   // problem protection fault - read/exec
+#define X_PPFW      5   // problem protection fault - write
+#define X_PPFS      6   // problem protection fault - system management
+#define X_TIME      7   // timer
+#define X_MCHK      14  // machine check
+#define X_PWRF      15  // power failure
+
 static inline void do_except(ist66_cu_t *cpu, int exc) {
     do_intr(cpu, 15);
-    cpu->c[C_CW] |= (((uint64_t) irq) & 0xF) << 24;
+    cpu->c[C_CW] |= (((uint64_t) exc) & 0xF) << 24;
 }
 
 static inline void leave_intr(ist66_cu_t *cpu) {
