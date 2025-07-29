@@ -9,6 +9,7 @@
 #include "ppt.h"
 
 void intr_assert(ist66_cu_t *cpu, int irq) {
+    /* Max hardware IRQ is 14 */
     pthread_mutex_lock(&(cpu->lock));
     cpu->pending[irq]++;
     if (irq > cpu->max_pending && ((cpu->mask >> (15 - irq)) & 1)) {
@@ -384,8 +385,12 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 0604: {
+            case 0604: { // STK
                 set_key(cpu, cpu->a[ac], ea);
+                set_pc(cpu, get_pc(cpu) + 1);
+            } break;
+            case 0605: { // STCTL
+                write_mem(cpu, 0, ea, cpu->c[ac & 0x7]);
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
             default: {
