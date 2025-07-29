@@ -70,13 +70,14 @@ void *ppt(void *vctx) {
             } else {
                 ctx->buf = (uint8_t) ch;
             }
+            
+            pthread_mutex_lock(&ctx->lock);
             if (!ctx->done) {
-                pthread_mutex_lock(&ctx->lock);
                 ctx->command = 0;
                 ctx->done = 1;
                 intr_assert(cpu, ctx->irq);
-                pthread_mutex_unlock(&ctx->lock);
             }
+            pthread_mutex_unlock(&ctx->lock);
         }
     }
     
