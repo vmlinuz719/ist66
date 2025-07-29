@@ -65,6 +65,11 @@ static inline void do_intr(ist66_cu_t *cpu, int irq) {
     cpu->c[C_PSW] = cpu->memory[2 * irq] & 0xFF7FFFFFF;
 }
 
+static inline void do_except(ist66_cu_t *cpu, int exc) {
+    do_intr(cpu, 15);
+    cpu->c[C_CW] |= (((uint64_t) irq) & 0xF) << 24;
+}
+
 static inline void leave_intr(ist66_cu_t *cpu) {
     uint64_t old_irql = (cpu->c[C_CW] >> 28) & 0xF;
     cpu->c[C_PSW] = cpu->memory[32 + 2 * old_irql];
