@@ -109,10 +109,13 @@ uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
     
     switch (index) {
         case 0: {
-            ea_l = ((cpu->c[C_CW] & 0x3FFFF) << 9) + disp;
+            ea_l = disp;
         } break;
         case 1: {
-            ea_l = (cpu->c[C_PSW] & MASK_36) + disp;
+            ea_l = ((cpu->c[C_CW] & 0x3FFFF) << 9) + disp;
+        } break;
+        case 2: {
+            ea_l = (cpu->c[C_PSW] & MASK_ADDR) + disp;
         } break;
         case 14: {
             ea_l = cpu->a[13];
