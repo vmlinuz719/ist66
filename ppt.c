@@ -71,9 +71,11 @@ void *ppt(void *vctx) {
                 ctx->buf = (uint8_t) ch;
             }
             if (!ctx->done) {
+                pthread_mutex_lock(&ctx->lock);
                 ctx->command = 0;
                 ctx->done = 1;
                 intr_assert(cpu, ctx->irq);
+                pthread_mutex_unlock(&ctx->lock);
             }
         }
     }

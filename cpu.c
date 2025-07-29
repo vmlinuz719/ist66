@@ -539,17 +539,21 @@ int main(int argc, char *argv[]) {
     cpu.memory[512] = 0xF08E00000;      // XOR    1,1
     cpu.memory[513] = 0xF11608000;      // XOR    2,2,SKP
     cpu.memory[514] = 0x00000000C;      // DW     12
+    
     cpu.memory[515] = 0xDC001F00A;      // NTS    10
+    
     cpu.memory[516] = 0xDC002E00A;      // SKPDN  10
     cpu.memory[517] = 0x0000BFFFF;      // JMP    .-1
     cpu.memory[518] = 0xDC001000A;      // INS    0,10,0
     cpu.memory[519] = 0xE0022C000;      // MOV#   0,0,SNZ
     cpu.memory[520] = 0x0000BFFFC;      // JMP    .-4
+    
     cpu.memory[521] = 0xE00201080;      // MOVM   0,0,33
     cpu.memory[522] = 0xE08A00003;      // MOVR   1,1,3
     cpu.memory[523] = 0xF00A00000;      // OR     0,1
     cpu.memory[524] = 0x0290BFFF6;      // ISE    2,.-10
     cpu.memory[525] = 0x0000BFFF7;      // JMP    .-9
+    
     cpu.memory[526] = 0xC00800000;      // HLT    1
     
     fprintf(stderr, "HALT: stop code %012lo\n", run(&cpu, 512));
