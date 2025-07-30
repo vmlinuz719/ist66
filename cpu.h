@@ -8,6 +8,7 @@
 #define C_PSW 0
 #define C_CW 1
 #define MEM_FAULT (1L << 36)
+#define KEY_FAULT (1L << 37)
 
 typedef struct ist66_cu ist66_cu_t;
 
