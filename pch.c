@@ -7,7 +7,7 @@
 #include <errno.h>    
 
 #include "cpu.h"
-#include "ppt.h"
+#include "pch.h"
 
 typedef struct {
     ist66_cu_t *cpu;
@@ -21,7 +21,7 @@ typedef struct {
     pthread_mutex_t lock;
     pthread_cond_t cmd_cond;
     int running, command, done;
-} ist66_ppt_t;
+} ist66_pch_t;
 
 static inline int msleep(long msec) {
     struct timespec ts;
@@ -42,8 +42,8 @@ static inline int msleep(long msec) {
     return res;
 }
 
-void *ppt(void *vctx) {
-    ist66_ppt_t *ctx = (ist66_ppt_t *) vctx;
+void *pch(void *vctx) {
+    ist66_pch_t *ctx = (ist66_pch_t *) vctx;
     ist66_cu_t *cpu = ctx->cpu;
     
     ctx->running = 1;
@@ -62,14 +62,8 @@ void *ppt(void *vctx) {
         }
         
         else if (command == 1) {
-            msleep(2);
-            int ch = fgetc(ctx->file);
-            if (ch == EOF) {
-                ctx->running = 0;
-                ctx->buf = 0;
-            } else {
-                ctx->buf = (uint8_t) ch;
-            }
+            fputc(ctx->buf, ctx->file);
+            msleep(16);
             
             pthread_mutex_lock(&ctx->lock);
             if (!ctx->done) {
@@ -84,14 +78,18 @@ void *ppt(void *vctx) {
     return NULL;
 }
 
-uint64_t ppt_io(
+uint64_t pch_io(
     void *vctx,
     uint64_t data,
     int ctl,
     int transfer
 ) {
-    ist66_ppt_t *ctx = (ist66_ppt_t *) vctx;
+    ist66_pch_t *ctx = (ist66_pch_t *) vctx;
     ist66_cu_t *cpu = ctx->cpu;
+    
+    if (transfer == 1) {
+        ctx->buf = (uint8_t) data;
+    }
     
     if (transfer != 14) {
         switch (ctl) {
@@ -122,15 +120,11 @@ uint64_t ppt_io(
         return (uint64_t) status;
     }
     
-    else if (transfer == 0) {
-        return ctx->buf;
-    }
-    
     else return 0;
 }
 
-void destroy_ppt(ist66_cu_t *cpu, int id) {
-    ist66_ppt_t *ctx = (ist66_ppt_t *) cpu->ioctx[id];
+void destroy_pch(ist66_cu_t *cpu, int id) {
+    ist66_pch_t *ctx = (ist66_pch_t *) cpu->ioctx[id];
     
     if (ctx->running) {
         pthread_cancel(ctx->thread);
@@ -141,23 +135,23 @@ void destroy_ppt(ist66_cu_t *cpu, int id) {
     fclose(ctx->file);
     free(ctx);
     
-    fprintf(stderr, "EXIT: ppt on %04o\n", id);
+    fprintf(stderr, "EXIT: pch on %04o\n", id);
 }
 
-void init_ppt(ist66_cu_t *cpu, int id) {
-    ist66_ppt_t *ctx = calloc(sizeof(ist66_ppt_t), 1);
+void init_pch(ist66_cu_t *cpu, int id) {
+    ist66_pch_t *ctx = calloc(sizeof(ist66_pch_t), 1);
     cpu->ioctx[id] = ctx;
-    cpu->io_destroy[id] = destroy_ppt;
-    cpu->io[id] = ppt_io;
+    cpu->io_destroy[id] = destroy_pch;
+    cpu->io[id] = pch_io;
     
     ctx->cpu = cpu;
-    ctx->irq = 4;
-    ctx->file = stdin;
+    ctx->irq = 6;
+    ctx->file = stdout;
     
     pthread_mutex_init(&ctx->lock, NULL);
     pthread_cond_init(&ctx->cmd_cond, NULL);
     
-    pthread_create(&ctx->thread, NULL, ppt, ctx);
+    pthread_create(&ctx->thread, NULL, pch, ctx);
     
-    fprintf(stderr, "INIT: ppt on %04o\n", id);
+    fprintf(stderr, "INIT: pch on %04o\n", id);
 }

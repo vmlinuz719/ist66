@@ -7,6 +7,7 @@
 #include "alu.h"
 #include "cpu.h"
 #include "ppt.h"
+#include "pch.h"
 
 void intr_assert(ist66_cu_t *cpu, int irq) {
     /* Max hardware IRQ is 14 */
@@ -534,6 +535,7 @@ int main(int argc, char *argv[]) {
     
     /* set I/O initializers here */
     cpu.io_init[012] = init_ppt;
+    cpu.io_init[013] = init_pch;
     
     for (int i = 0; i < cpu.max_io; i++) {
         if (cpu.io_init[i] != NULL) {
