@@ -41,11 +41,13 @@ struct ist66_cu {
     void **ioctx;
     int max_io;
     
+    pthread_t thread;
     pthread_mutex_t lock;
+    pthread_cond_t intr_cond;
     int pending[16];
     int max_pending;
     uint16_t mask;
-    int running;
+    int running, exit;
 };
 
 static inline void halt(ist66_cu_t *cpu) {

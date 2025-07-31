@@ -17,6 +17,7 @@ void intr_assert(ist66_cu_t *cpu, int irq) {
         cpu->max_pending = irq;
         cpu->running = 1;
     }
+    pthread_cond_signal(&cpu->intr_cond);
     pthread_mutex_unlock(&(cpu->lock));
 }
 
@@ -695,11 +696,10 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-uint64_t run(ist66_cu_t *cpu, uint64_t init_pc) {
-    cpu->running = 1;
-    set_pc(cpu, init_pc);
+void *run(void *vctx) {
+    ist66_cu_t *cpu = (ist66_cu_t *) vctx;
     
-    while (cpu->running) {
+    while (!cpu->exit) {
         if (cpu->do_edit) {
             exec_all(cpu, cpu->xeq_inst);
             cpu->do_edit = 0;
@@ -714,17 +714,29 @@ uint64_t run(ist66_cu_t *cpu, uint64_t init_pc) {
             do_intr(cpu, cpu->max_pending);
         }
         
-        uint64_t inst = read_mem(cpu, cpu->c[C_PSW] >> 28, get_pc(cpu));
-        if (inst == MEM_FAULT) {
-            do_except(cpu, X_MEMX);
-        } else if (inst == KEY_FAULT) {
-            do_except(cpu, X_PPFR);
+        if (cpu->running) {
+            uint64_t inst = read_mem(cpu, cpu->c[C_PSW] >> 28, get_pc(cpu));
+            if (inst == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+            } else if (inst == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+            } else {
+                exec_all(cpu, inst);
+            }
         } else {
-            exec_all(cpu, inst);
+            pthread_mutex_lock(&cpu->lock);
+            if (current_irql == 0xF || cpu->mask == 0) {
+                cpu->exit = 1;
+            } else {
+                while (!cpu->running) {
+                    pthread_cond_wait(&cpu->intr_cond, &cpu->lock);
+                }
+            }
+            pthread_mutex_unlock(&cpu->lock);
         }
     }
     
-    return cpu->stop_code;
+    return NULL;
 }
 
 int main(int argc, char *argv[]) {
@@ -734,6 +746,7 @@ int main(int argc, char *argv[]) {
     cpu.memory = calloc(sizeof(uint64_t), 65536);
     cpu.mem_size = 65536;
     pthread_mutex_init(&(cpu.lock), NULL);
+    pthread_cond_init(&cpu.intr_cond, NULL);
     
     cpu.io_init = calloc(sizeof(ist66_io_init_t), 512);
     cpu.io_destroy = calloc(sizeof(ist66_io_init_t), 512);
@@ -771,7 +784,12 @@ int main(int argc, char *argv[]) {
     
     cpu.memory[526] = 0xC00800000;      // HLT    1
     
-    fprintf(stderr, "HALT: stop code %012lo\n", run(&cpu, 512));
+    set_pc(&cpu, 512);
+    cpu.running = 1;
+    pthread_create(&cpu.thread, NULL, run, &cpu);
+    pthread_join(cpu.thread, NULL);
+    
+    fprintf(stderr, "HALT: stop code %012lo\n", cpu.stop_code);
     
     for (int i = 0; i < cpu.max_io; i++) {
         if (cpu.io_destroy[i] != NULL) {
@@ -785,5 +803,6 @@ int main(int argc, char *argv[]) {
     free(cpu.io);
     free(cpu.ioctx);
     pthread_mutex_destroy(&(cpu.lock));
+    pthread_cond_destroy(&cpu.intr_cond);
     return 0;
 }
