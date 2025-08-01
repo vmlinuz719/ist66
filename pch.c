@@ -11,7 +11,7 @@
 
 typedef struct {
     ist66_cu_t *cpu;
-    int irq;
+    int id, irq;
     
     FILE *file;
     uint8_t buf;
@@ -66,8 +66,8 @@ void *pch(void *vctx) {
             msleep(16);
             
             pthread_mutex_lock(&ctx->lock);
+            ctx->command = 0;
             if (!ctx->done) {
-                ctx->command = 0;
                 ctx->done = 1;
                 intr_assert(cpu, ctx->irq);
             }
@@ -135,23 +135,38 @@ void destroy_pch(ist66_cu_t *cpu, int id) {
     fclose(ctx->file);
     free(ctx);
     
-    fprintf(stderr, "EXIT: pch on %04o\n", id);
+    fprintf(stderr, "/DEV-I-UNIT %04o PCH CLOSED\n", id);
 }
 
-void init_pch(ist66_cu_t *cpu, int id) {
+void init_pch_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
     ist66_pch_t *ctx = calloc(sizeof(ist66_pch_t), 1);
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_pch;
     cpu->io[id] = pch_io;
     
     ctx->cpu = cpu;
-    ctx->irq = 6;
-    ctx->file = stdout;
+    ctx->id = id;
+    ctx->irq = irq;
+    ctx->file = fd;
     
     pthread_mutex_init(&ctx->lock, NULL);
     pthread_cond_init(&ctx->cmd_cond, NULL);
     
     pthread_create(&ctx->thread, NULL, pch, ctx);
+}
+
+void init_pch(ist66_cu_t *cpu, int id, int irq) {
+    init_pch_any(cpu, id, irq, stdin);
+    fprintf(stderr, "/DEV-I-UNIT %04o PCH IRQ %02o STDIN\n", id, irq);
+}
+
+void init_pch_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
+    FILE *fd = fopen(fname, "wb");
+    if (fd == NULL) {
+        fprintf(stderr, "/DEV-E-UNIT %04o PCH FILE ERROR\n", id);
+        return;
+    }
     
-    fprintf(stderr, "INIT: pch on %04o\n", id);
+    init_pch_any(cpu, id, irq, fd);
+    fprintf(stderr, "/DEV-I-UNIT %04o PCH IRQ %02o %s\n", id, irq, fname);
 }

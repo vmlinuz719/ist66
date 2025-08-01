@@ -8,6 +8,7 @@
 #include "cpu.h"
 #include "ppt.h"
 #include "pch.h"
+#include "lpt.h"
 
 void intr_assert(ist66_cu_t *cpu, int irq) {
     /* Max hardware IRQ is 14 */
@@ -753,8 +754,9 @@ int main(int argc, char *argv[]) {
     cpu.ioctx = calloc(sizeof(void *), 512);
     cpu.max_io = 512;
 
-    init_ppt(&cpu, 012);
-    init_pch(&cpu, 013);
+    init_ppt(&cpu, 012, 4);
+    init_lpt_ex(&cpu, 013, 5, "/dev/null");
+    init_pch(&cpu, 014, 6);
     
     cpu.memory[512] = 0xF08E00000;      // XOR    1,1
     cpu.memory[513] = 0xF11608000;      // XOR    2,2,SKP
@@ -781,7 +783,7 @@ int main(int argc, char *argv[]) {
     pthread_create(&cpu.thread, NULL, run, &cpu);
     pthread_join(cpu.thread, NULL);
     
-    fprintf(stderr, "HALT: stop code %012lo\n", cpu.stop_code);
+    fprintf(stderr, "/CPU-I-EXITING WITH CODE %012lo\n", cpu.stop_code);
     
     for (int i = 0; i < cpu.max_io; i++) {
         if (cpu.io_destroy[i] != NULL) {
