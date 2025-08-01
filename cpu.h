@@ -19,7 +19,7 @@ typedef uint64_t (*ist66_io_t) (
     int /* transfer */
 );
 
-typedef void (*ist66_io_init_t) (
+typedef void (*ist66_io_dtor_t) (
     ist66_cu_t * /* cpu */,
     int /* id */
 );
@@ -35,8 +35,7 @@ struct ist66_cu {
     uint64_t *memory;
     uint32_t mem_size;
     
-    ist66_io_init_t *io_init;
-    ist66_io_init_t *io_destroy;
+    ist66_io_dtor_t *io_destroy;
     ist66_io_t *io;
     void **ioctx;
     int max_io;

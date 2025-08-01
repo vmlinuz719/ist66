@@ -748,21 +748,13 @@ int main(int argc, char *argv[]) {
     pthread_mutex_init(&(cpu.lock), NULL);
     pthread_cond_init(&cpu.intr_cond, NULL);
     
-    cpu.io_init = calloc(sizeof(ist66_io_init_t), 512);
-    cpu.io_destroy = calloc(sizeof(ist66_io_init_t), 512);
+    cpu.io_destroy = calloc(sizeof(ist66_io_dtor_t), 512);
     cpu.io = calloc(sizeof(ist66_io_t), 512);
     cpu.ioctx = calloc(sizeof(void *), 512);
     cpu.max_io = 512;
-    
-    /* set I/O initializers here */
-    cpu.io_init[012] = init_ppt;
-    cpu.io_init[013] = init_pch;
-    
-    for (int i = 0; i < cpu.max_io; i++) {
-        if (cpu.io_init[i] != NULL) {
-            cpu.io_init[i](&cpu, i);
-        }
-    }
+
+    init_ppt(&cpu, 012);
+    init_pch(&cpu, 013);
     
     cpu.memory[512] = 0xF08E00000;      // XOR    1,1
     cpu.memory[513] = 0xF11608000;      // XOR    2,2,SKP
@@ -798,7 +790,6 @@ int main(int argc, char *argv[]) {
     }
     
     free(cpu.memory);
-    free(cpu.io_init);
     free(cpu.io_destroy);
     free(cpu.io);
     free(cpu.ioctx);
