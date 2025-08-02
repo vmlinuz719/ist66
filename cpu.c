@@ -8,7 +8,7 @@
 #include "cpu.h"
 #include "ppt.h"
 #include "pch.h"
-#include "lpt.h"
+// #include "lpt.h" // commented out until I get back to add the files smh
 
 void intr_assert(ist66_cu_t *cpu, int irq) {
     /* Max hardware IRQ is 14 */
@@ -755,7 +755,7 @@ int main(int argc, char *argv[]) {
     cpu.max_io = 512;
 
     init_ppt(&cpu, 012, 4);
-    init_lpt_ex(&cpu, 013, 5, "/dev/null");
+    // init_lpt_ex(&cpu, 013, 5, "/dev/null");
     init_pch(&cpu, 014, 6);
     
     cpu.memory[512] = 0xF08E00000;      // XOR    1,1
