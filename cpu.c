@@ -798,6 +798,9 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     else if (inst >> 27 <= 027) {
         exec_am(cpu, inst);
     }
+    else if (inst >> 27 == 030) {
+        exec_call(cpu, inst);
+    }
     else if (inst >> 27 == 0670) {
         exec_io1(cpu, inst);
     }
