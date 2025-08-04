@@ -44,7 +44,7 @@ struct ist66_cu {
     pthread_mutex_t lock;
     pthread_cond_t intr_cond;
     int pending[16];
-    int max_pending;
+    int min_pending;
     uint16_t mask;
     int running, exit;
 };
@@ -79,7 +79,7 @@ static inline void do_intr(ist66_cu_t *cpu, int irq) {
 #define X_PWRF      15  // power failure
 
 static inline void do_except(ist66_cu_t *cpu, int exc) {
-    do_intr(cpu, 15);
+    do_intr(cpu, 0);
     cpu->c[C_CW] |= (((uint64_t) exc) & 0xF) << 24;
 }
 

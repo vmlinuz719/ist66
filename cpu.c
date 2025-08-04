@@ -14,8 +14,8 @@ void intr_assert(ist66_cu_t *cpu, int irq) {
     /* Max hardware IRQ is 14 */
     pthread_mutex_lock(&(cpu->lock));
     cpu->pending[irq]++;
-    if (irq > cpu->max_pending && ((cpu->mask >> (15 - irq)) & 1)) {
-        cpu->max_pending = irq;
+    if (irq < cpu->min_pending && ((cpu->mask >> irq) & 1)) {
+        cpu->min_pending = irq;
         cpu->running = 1;
     }
     pthread_cond_signal(&cpu->intr_cond);
@@ -27,26 +27,26 @@ void intr_release(ist66_cu_t *cpu, int irq) {
     if (cpu->pending[irq] > 0) {
         cpu->pending[irq]--;
     }
-    int new_max_pending = cpu->max_pending;
-    while (new_max_pending > 0 
-        && ((((cpu->mask >> (15 - new_max_pending)) & 1) == 0)
-            || (cpu->pending[new_max_pending] == 0))) {
-        new_max_pending--;
+    int new_min_pending = cpu->min_pending;
+    while (new_min_pending < 15 
+        && ((((cpu->mask >> new_min_pending) & 1) == 0)
+            || (cpu->pending[new_min_pending] == 0))) {
+        new_min_pending++;
     }
-    cpu->max_pending = new_max_pending;
+    cpu->min_pending = new_min_pending;
     pthread_mutex_unlock(&(cpu->lock));
 }
 
 void intr_set_mask(ist66_cu_t *cpu, uint16_t mask) {
     pthread_mutex_lock(&(cpu->lock));
     cpu->mask = mask;
-    int new_max_pending = 15;
-    while (new_max_pending > 0 
-        && ((((cpu->mask >> (15 - new_max_pending)) & 1) == 0)
-            || (cpu->pending[new_max_pending] == 0))) {
-        new_max_pending--;
+    int new_min_pending = 15;
+    while (new_min_pending < 15 
+        && ((((cpu->mask >> new_min_pending) & 1) == 0)
+            || (cpu->pending[new_min_pending] == 0))) {
+        new_min_pending++;
     }
-    cpu->max_pending = new_max_pending;
+    cpu->min_pending = new_min_pending;
     pthread_mutex_unlock(&(cpu->lock));
 }
 
@@ -711,8 +711,8 @@ void *run(void *vctx) {
         }
         
         uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
-        if (cpu->max_pending > current_irql) {
-            do_intr(cpu, cpu->max_pending);
+        if (cpu->min_pending < current_irql) {
+            do_intr(cpu, cpu->min_pending);
         }
         
         if (cpu->running) {
