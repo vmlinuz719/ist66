@@ -828,6 +828,7 @@ void *run(void *vctx) {
         
         uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
         if (cpu->min_pending < current_irql) {
+            fprintf(stderr, "%ld -> %d\n", current_irql, cpu->min_pending);
             do_intr(cpu, cpu->min_pending);
         }
         
@@ -842,7 +843,7 @@ void *run(void *vctx) {
             }
         } else {
             pthread_mutex_lock(&cpu->lock);
-            if (current_irql == 0xF || cpu->mask == 0) {
+            if (current_irql == 0x0 || cpu->mask == 0) {
                 cpu->exit = 1;
             } else {
                 while (!cpu->running) {
@@ -869,6 +870,7 @@ int main(int argc, char *argv[]) {
     cpu.io = calloc(sizeof(ist66_io_t), 512);
     cpu.ioctx = calloc(sizeof(void *), 512);
     cpu.max_io = 512;
+    cpu.mask = 0xFFFF;
 
     init_ppt(&cpu, 012, 4);
     init_lpt_ex(&cpu, 013, 5, "/dev/null");
