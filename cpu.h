@@ -52,7 +52,7 @@ struct ist66_cu {
 static inline void halt(ist66_cu_t *cpu) {
     pthread_mutex_lock(&(cpu->lock));
     uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
-    if (cpu->max_pending <= current_irql) {
+    if (cpu->min_pending >= current_irql) {
         cpu->running = 0;
     }
     pthread_mutex_unlock(&(cpu->lock));

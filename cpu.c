@@ -157,7 +157,7 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
         case 0: { // JMP
             set_pc(cpu, ea);
         } break;
-        case 1: { // CALL
+        case 1: { // JSR
             cpu->a[12] = (get_pc(cpu) + 1) & MASK_ADDR;
             set_pc(cpu, ea);
         } break;
@@ -659,6 +659,119 @@ void exec_io1(ist66_cu_t *cpu, uint64_t inst) {
     } else {
         // Privilege
         do_except(cpu, X_PPFS);
+    }
+}
+
+void exec_call(ist66_cu_t *cpu, uint64_t inst) {
+    uint64_t ea = comp_mr(cpu, inst);
+    
+    if (ea == MEM_FAULT) {
+        do_except(cpu, X_MEMX);
+        return;
+    } else if (ea == KEY_FAULT) {
+        do_except(cpu, X_PPFR);
+        return;
+    }
+    
+    switch ((inst >> 23) & 0xF) {
+        case 0: { // CALL
+            uint64_t mask = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (mask == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (mask == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            mask &= MASK_36;
+            
+            uint64_t temp_sp = cpu->a[13];
+            
+            for (int i = 0; i < 16; i++) {
+                if ((mask << i) & 1) {
+                    int reg = 15 - i;
+                    uint64_t w_res =
+                        write_mem(
+                            cpu, cpu->c[C_PSW] >> 28, --temp_sp, cpu->a[reg]
+                        );
+                    if (w_res == MEM_FAULT) {
+                        do_except(cpu, X_MEMX);
+                        return;
+                    } else if (w_res == KEY_FAULT) {
+                        do_except(cpu, X_PPFW);
+                        return;
+                    }
+                }
+            }
+            
+            uint64_t last_two[2] = {mask, (get_pc(cpu) + 1) & MASK_ADDR};
+            
+            for (int i = 0; i < 2; i++) {
+                uint64_t w_res =
+                    write_mem(
+                        cpu, cpu->c[C_PSW] >> 28, --temp_sp, last_two[i]
+                    );
+                if (w_res == MEM_FAULT) {
+                    do_except(cpu, X_MEMX);
+                    return;
+                } else if (w_res == KEY_FAULT) {
+                    do_except(cpu, X_PPFW);
+                    return;
+                }
+            }
+            
+            cpu->a[13] = temp_sp;
+            set_pc(cpu, ea + 1);
+        } break;
+        case 1: { // RET
+            uint64_t temp_sp = cpu->a[13];
+            uint64_t last_two[2]; // return addr, mask
+            
+            for (int i = 0; i < 2; i++) {
+                uint64_t r_res =
+                    read_mem(
+                        cpu, cpu->c[C_PSW] >> 28, temp_sp++
+                    );
+                if (r_res == MEM_FAULT) {
+                    do_except(cpu, X_MEMX);
+                    return;
+                } else if (r_res == KEY_FAULT) {
+                    do_except(cpu, X_PPFR);
+                    return;
+                }
+                last_two[i] = r_res & MASK_36;
+            }
+            
+            uint64_t mask = last_two[1];
+            int restored_sp = 0;
+            
+            for (int i = 0; i < 16; i++) {
+                if ((mask << (15 - i)) & 1) {
+                    int reg = i;
+                    uint64_t r_res =
+                        read_mem(
+                            cpu, cpu->c[C_PSW] >> 28, temp_sp++
+                        );
+                    if (r_res == MEM_FAULT) {
+                        do_except(cpu, X_MEMX);
+                        return;
+                    } else if (r_res == KEY_FAULT) {
+                        do_except(cpu, X_PPFR);
+                        return;
+                    }
+                    
+                    cpu->a[reg] = r_res & MASK_36;
+                    if (reg == 13) restored_sp = 1;
+                }
+            }
+            
+            set_pc(cpu, last_two[0]);
+            if (!restored_sp) cpu->a[13] = temp_sp;
+        } break;
+        default: {
+            // UMR
+            do_except(cpu, X_USER);
+        }
     }
 }
 
