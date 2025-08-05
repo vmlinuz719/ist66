@@ -816,7 +816,7 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
 void *run(void *vctx) {
     ist66_cu_t *cpu = (ist66_cu_t *) vctx;
     
-    while (!cpu->exit) {
+    do {
         if (cpu->do_edit) {
             exec_all(cpu, cpu->xeq_inst);
             cpu->do_edit = 0;
@@ -845,32 +845,74 @@ void *run(void *vctx) {
             pthread_mutex_lock(&cpu->lock);
             if (current_irql == 0x0 || cpu->mask == 0) {
                 cpu->exit = 1;
-            } else {
+            } else if (!cpu->exit) {
                 while (!cpu->running) {
                     pthread_cond_wait(&cpu->intr_cond, &cpu->lock);
                 }
             }
             pthread_mutex_unlock(&cpu->lock);
         }
-    }
+    } while (!cpu->exit || cpu->do_edit);
     
     return NULL;
 }
 
+void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, uint64_t max_io) {
+    memset(cpu, 0, sizeof(ist66_cu_t));
+    
+    cpu->memory = calloc(sizeof(uint64_t), mem_size);
+    cpu->mem_size = mem_size;
+    
+    cpu->io_destroy = calloc(sizeof(ist66_io_dtor_t), max_io);
+    cpu->io = calloc(sizeof(ist66_io_t), max_io);
+    cpu->ioctx = calloc(sizeof(void *), max_io);
+    cpu->max_io = max_io;
+    cpu->mask = 0xFFFF;
+    
+    pthread_mutex_init(&cpu->lock, NULL);
+    pthread_cond_init(&cpu->intr_cond, NULL);
+}
+
+void start_cpu(ist66_cu_t *cpu, int do_step) {
+    cpu->running = 1;
+    cpu->exit = do_step;
+    pthread_create(&cpu->thread, NULL, run, cpu);
+}
+
+void stop_cpu(ist66_cu_t *cpu) {
+    cpu->running = 1;
+    cpu->exit = 1;
+    pthread_cond_signal(&cpu->intr_cond);
+    pthread_join(cpu->thread, NULL);
+    cpu->running = 0;
+}
+
+void wait_for_cpu(ist66_cu_t *cpu) {
+    pthread_join(cpu->thread, NULL);
+    cpu->running = 0;
+}
+
+void destroy_cpu(ist66_cu_t *cpu) {
+    if (!cpu->exit) stop_cpu(cpu);
+    
+    for (int i = 0; i < cpu->max_io; i++) {
+        if (cpu->io_destroy[i] != NULL) {
+            cpu->io_destroy[i](cpu, i);
+        }
+    }
+    
+    free(cpu->memory);
+    free(cpu->io_destroy);
+    free(cpu->io);
+    free(cpu->ioctx);
+    pthread_mutex_destroy(&cpu->lock);
+    pthread_cond_destroy(&cpu->intr_cond);
+}
+
 int main(int argc, char *argv[]) {
     ist66_cu_t cpu;
-    memset(&cpu, 0, sizeof(cpu));
     
-    cpu.memory = calloc(sizeof(uint64_t), 65536);
-    cpu.mem_size = 65536;
-    pthread_mutex_init(&(cpu.lock), NULL);
-    pthread_cond_init(&cpu.intr_cond, NULL);
-    
-    cpu.io_destroy = calloc(sizeof(ist66_io_dtor_t), 512);
-    cpu.io = calloc(sizeof(ist66_io_t), 512);
-    cpu.ioctx = calloc(sizeof(void *), 512);
-    cpu.max_io = 512;
-    cpu.mask = 0xFFFF;
+    init_cpu(&cpu, 65536, 512);
 
     init_ppt(&cpu, 012, 4);
     init_lpt_ex(&cpu, 013, 5, "/dev/null");
@@ -897,23 +939,9 @@ int main(int argc, char *argv[]) {
     cpu.memory[526] = 0xC00800000;      // HLT    1
     
     set_pc(&cpu, 512);
-    cpu.running = 1;
-    pthread_create(&cpu.thread, NULL, run, &cpu);
-    pthread_join(cpu.thread, NULL);
+    start_cpu(&cpu, 0);
+    wait_for_cpu(&cpu);
     
-    fprintf(stderr, "/CPU-I-EXITING WITH CODE %012lo\n", cpu.stop_code);
-    
-    for (int i = 0; i < cpu.max_io; i++) {
-        if (cpu.io_destroy[i] != NULL) {
-            cpu.io_destroy[i](&cpu, i);
-        }
-    }
-    
-    free(cpu.memory);
-    free(cpu.io_destroy);
-    free(cpu.io);
-    free(cpu.ioctx);
-    pthread_mutex_destroy(&(cpu.lock));
-    pthread_cond_destroy(&cpu.intr_cond);
+    destroy_cpu(&cpu);
     return 0;
 }

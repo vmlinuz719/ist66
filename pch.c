@@ -156,8 +156,8 @@ void init_pch_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
 }
 
 void init_pch(ist66_cu_t *cpu, int id, int irq) {
-    init_pch_any(cpu, id, irq, stdin);
-    fprintf(stderr, "/DEV-I-UNIT %04o PCH IRQ %02o STDIN\n", id, irq);
+    init_pch_any(cpu, id, irq, stdout);
+    fprintf(stderr, "/DEV-I-UNIT %04o PCH IRQ %02o STDOUT\n", id, irq);
 }
 
 void init_pch_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
