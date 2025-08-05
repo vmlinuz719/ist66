@@ -816,6 +816,8 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
 void *run(void *vctx) {
     ist66_cu_t *cpu = (ist66_cu_t *) vctx;
     
+    fprintf(stderr, "/CPU-I-STARTING\n");
+    
     do {
         if (cpu->do_edit) {
             exec_all(cpu, cpu->xeq_inst);
@@ -854,10 +856,11 @@ void *run(void *vctx) {
         }
     } while (!cpu->exit || cpu->do_edit);
     
+    fprintf(stderr, "/CPU-I-STOP CODE %012lo\n", cpu->stop_code);
     return NULL;
 }
 
-void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, uint64_t max_io) {
+void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     memset(cpu, 0, sizeof(ist66_cu_t));
     
     cpu->memory = calloc(sizeof(uint64_t), mem_size);
@@ -871,6 +874,7 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, uint64_t max_io) {
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
+    fprintf(stderr, "/CPU-I-INIT TYPE 66/10 %ldW %d MAXDEV\n", mem_size, max_io);
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
@@ -907,6 +911,8 @@ void destroy_cpu(ist66_cu_t *cpu) {
     free(cpu->ioctx);
     pthread_mutex_destroy(&cpu->lock);
     pthread_cond_destroy(&cpu->intr_cond);
+    
+    fprintf(stderr, "/CPU-I-DONE\n");
 }
 
 int main(int argc, char *argv[]) {
