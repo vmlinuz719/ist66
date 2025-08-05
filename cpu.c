@@ -912,8 +912,10 @@ void destroy_cpu(ist66_cu_t *cpu) {
     pthread_mutex_destroy(&cpu->lock);
     pthread_cond_destroy(&cpu->intr_cond);
     
-    fprintf(stderr, "/CPU-I-DONE\n");
+    fprintf(stderr, "/CPU-I-CLOSED\n");
 }
+
+
 
 int main(int argc, char *argv[]) {
     ist66_cu_t cpu;
@@ -944,9 +946,122 @@ int main(int argc, char *argv[]) {
     
     cpu.memory[526] = 0xC00800000;      // HLT    1
     
-    set_pc(&cpu, 512);
-    start_cpu(&cpu, 0);
-    wait_for_cpu(&cpu);
+    char cmd[512];
+    int running = 1;
+    uint64_t ptr = 0;
+    
+    while (running) {
+        printf("> ");
+        if (fgets(cmd, sizeof(cmd), stdin) == NULL) break;
+        cmd[strcspn(cmd, "\n")] = 0;
+        cmd[sizeof(cmd) - 1] = 0;
+        
+        int i = 0;
+        while ((cmd[i] == ' ' || cmd[i] == '\t') && i < sizeof(cmd) - 1) i++;
+        
+        if (cmd[i]) {
+            if (cmd[i] == '/') {
+                char *end;
+                uint64_t new_ptr = strtol(cmd + i + 1, &end, 8);
+                if (end > cmd + i + 1 && new_ptr <= 0777777777) {
+                    ptr = new_ptr;
+                    i += end - (cmd + i);
+                }
+                else {
+                    printf("? Bad address\n");
+                    continue;
+                }
+            }
+            
+            while ((cmd[i] == ' ' || cmd[i] == '\t') && i < sizeof(cmd) - 1)
+                i++;
+            
+            if (cmd[i] == '?') {
+                printf("%09lo\n", ptr & MASK_ADDR);
+            }
+            
+            else if (cmd[i] == '.') {
+                i++;
+                while (
+                    (cmd[i] == ' ' || cmd[i] == '\t')
+                    && i < sizeof(cmd) - 1
+                ) i++;
+                
+                uint64_t to_print;
+                if (cmd[i] == '\0') to_print = 1;
+                else {
+                    char *end;
+                    to_print = strtol(cmd + i, &end, 8);
+                    if (!(end > cmd + i && to_print <= 0777777777)) {
+                        printf("? Bad count\n");
+                        continue;
+                    }
+                }
+                
+                for (int j = 0; j < to_print; j++) {
+                    if (j == 0) printf("%09lo: ", ptr & MASK_ADDR);
+                    else if (j % 4 == 0) printf("\n%09lo: ", ptr & MASK_ADDR);
+                    uint64_t data = read_mem
+                        (&cpu, 0, ptr++ & MASK_ADDR);
+                    if (data & MEM_FAULT) {
+                        printf("? Bad address\n");
+                        break;
+                    } else {
+                        printf("%012lo ", data & MASK_36);
+                    }
+                }
+                printf("\n");
+            }
+            
+            else if (cmd[i] == '=') {
+                char *saveptr = NULL;
+                char *rest = cmd + i + 1;
+                char *tok = NULL;
+                
+                while ((tok = strtok_r(rest, " \t", &saveptr))) {
+                    rest = NULL;
+                    char *end = NULL;
+                    uint64_t data = strtol(tok, &end, 8);
+                    if (!(end > tok && data <= 0777777777777)) {
+                        printf("? Bad data\n");
+                        break;
+                    }
+                    
+                    uint64_t result = write_mem
+                        (&cpu, 0, ptr++ & MASK_ADDR, data);
+                    if (result & MEM_FAULT) {
+                        printf("? Bad address\n");
+                        break;
+                    }
+                }
+            }
+            
+            else if (cmd[i] == 'W') {
+                start_cpu(&cpu, 0);
+                wait_for_cpu(&cpu);
+                int c;
+                while ((c = getchar()) != '\n' && c != EOF) { }
+            }
+            
+            else if (cmd[i] == 'S') {
+                start_cpu(&cpu, 0);
+            }
+            
+            else if (cmd[i] == 'P') {
+                if (cpu.running)
+                    stop_cpu(&cpu);
+                ptr = get_pc(&cpu);
+            }
+            
+            else if (cmd[i] == 'G') {
+                set_pc(&cpu, ptr);
+            }
+            
+            else if (cmd[i] == 'X') {
+                running = 0;
+            }
+        }
+    }
     
     destroy_cpu(&cpu);
     return 0;
