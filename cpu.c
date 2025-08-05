@@ -897,7 +897,7 @@ void wait_for_cpu(ist66_cu_t *cpu) {
 }
 
 void destroy_cpu(ist66_cu_t *cpu) {
-    if (!cpu->exit) stop_cpu(cpu);
+    if (!cpu->exit && cpu->running) stop_cpu(cpu);
     
     for (int i = 0; i < cpu->max_io; i++) {
         if (cpu->io_destroy[i] != NULL) {
