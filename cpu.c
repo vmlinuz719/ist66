@@ -1055,6 +1055,14 @@ int main(int argc, char *argv[]) {
             
             else if (cmd[i] == 'G') {
                 set_pc(&cpu, ptr);
+                if (cmd[i + 1] == 'W') {
+                    start_cpu(&cpu, 0);
+                    wait_for_cpu(&cpu);
+                    int c;
+                    while ((c = getchar()) != '\n' && c != EOF) { }
+                } else if (cmd[i + 1] == 'S') {
+                    start_cpu(&cpu, 0);
+                }
             }
             
             else if (cmd[i] == 'X') {
