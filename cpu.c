@@ -856,6 +856,7 @@ void *run(void *vctx) {
     fprintf(stderr, "/CPU-I-STARTING\n");
     
     do {
+        int done_edit = 0;
         if (cpu->do_edit) {
             exec_all(cpu, cpu->xeq_inst);
             cpu->do_edit = 0;
@@ -863,22 +864,25 @@ void *run(void *vctx) {
                 set_pc(cpu, get_pc(cpu) + 1);
                 cpu->do_edsk = 0;
             }
+            done_edit = 1;
         }
         
         uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
         if (cpu->min_pending < current_irql) {
-            fprintf(stderr, "%ld -> %d\n", current_irql, cpu->min_pending);
+            // fprintf(stderr, "%ld -> %d\n", current_irql, cpu->min_pending);
             do_intr(cpu, cpu->min_pending);
         }
         
         if (cpu->running) {
-            uint64_t inst = read_mem(cpu, cpu->c[C_PSW] >> 28, get_pc(cpu));
-            if (inst == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-            } else if (inst == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-            } else {
-                exec_all(cpu, inst);
+            if (!done_edit) {
+                uint64_t inst = read_mem(cpu, cpu->c[C_PSW] >> 28, get_pc(cpu));
+                if (inst == MEM_FAULT) {
+                    do_except(cpu, X_MEMX);
+                } else if (inst == KEY_FAULT) {
+                    do_except(cpu, X_PPFR);
+                } else {
+                    exec_all(cpu, inst);
+                }
             }
         } else {
             pthread_mutex_lock(&cpu->lock);
@@ -1123,3 +1127,4 @@ int main(int argc, char *argv[]) {
     destroy_cpu(&cpu);
     return 0;
 }
+
