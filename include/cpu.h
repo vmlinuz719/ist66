@@ -29,8 +29,8 @@ struct ist66_cu {
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
     uint64_t stop_code;
     
-    uint64_t xeq_inst;
-    int do_edit, do_edsk;
+    uint64_t xeq_inst, inc_addr, inc_data;
+    int do_edit, do_edsk, do_inc;
     
     uint64_t *memory;
     uint32_t mem_size;
@@ -65,6 +65,9 @@ static inline void do_intr(ist66_cu_t *cpu, int irq) {
     cpu->c[C_CW] = (((uint64_t) irq) << 32) | (current_irql << 28);
     cpu->c[C_CW] |= cpu->memory[1 + 2 * irq] & 0x3FFFF;
     cpu->c[C_PSW] = cpu->memory[2 * irq] & 0xFF7FFFFFF;
+    cpu->do_inc = 0;
+    cpu->do_edit = 0;
+    cpu->do_edsk = 0;
 }
 
 #define X_USER      0   // unimplemented instruction

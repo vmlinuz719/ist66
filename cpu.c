@@ -136,10 +136,47 @@ uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
     ea_l &= MASK_36;
     
     if (indirect) {
-        ea_l = read_mem(cpu, cpu->c[C_PSW] >> 28, ea_l & MASK_ADDR);
+        uint64_t new_ea = 
+            read_mem(cpu, cpu->c[C_PSW] >> 28, ea_l & MASK_ADDR);
+            
+        if (
+            new_ea == MEM_FAULT
+            || new_ea == KEY_FAULT
+            || !(new_ea & (1L << 35))
+        )
+            return new_ea;
+        
+        else {
+            uint64_t mode = (new_ea >> 33) & 3;
+            uint64_t inc = (new_ea >> 27) & 63;
+            inc = EXT6(inc);
+            uint64_t disp = new_ea & MASK_ADDR;
+            
+            if (mode == 0) {
+                cpu->do_inc = 1;
+                cpu->inc_addr = ea_l;
+                cpu->inc_data = (
+                    ((disp + inc) & MASK_ADDR)
+                    | (new_ea & ~(MASK_ADDR))
+                );
+                return disp;
+            }
+            
+            else if (mode == 1) {
+                cpu->do_inc = 1;
+                cpu->inc_addr = ea_l;
+                cpu->inc_data = (
+                    ((disp - inc) & MASK_ADDR)
+                    | (new_ea & ~(MASK_ADDR))
+                );
+                return ((disp - inc) & MASK_ADDR);
+            }
+            
+            else return MEM_FAULT;
+        }
     }
     
-    return ea_l;
+    else return ea_l;
 }
 
 void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
@@ -853,6 +890,18 @@ void *run(void *vctx) {
                 }
             }
             pthread_mutex_unlock(&cpu->lock);
+        }
+        
+        if (cpu->do_inc) {
+            uint64_t w_res =
+                write_mem
+                    (cpu, cpu->c[C_PSW] >> 28, cpu->inc_addr, cpu->inc_data);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+            }
+            cpu->do_inc = 0;
         }
     } while (!cpu->exit || cpu->do_edit);
     
