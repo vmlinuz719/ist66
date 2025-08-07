@@ -18,7 +18,7 @@ all: $(TARGET)
 
 # Link the object files into the executable
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -flto -o $@ $^
 
 # Compile each .c into a .o
 %.o: %.c
