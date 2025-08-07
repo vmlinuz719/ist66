@@ -78,6 +78,7 @@ static inline void do_intr(ist66_cu_t *cpu, int irq) {
 #define X_PPFW      5   // problem protection fault - write
 #define X_PPFS      6   // problem protection fault - system management
 #define X_TIME      7   // timer
+#define X_DIVZ      8   // divide by zero
 #define X_MCHK      14  // machine check
 #define X_PWRF      15  // power failure
 

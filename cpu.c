@@ -259,6 +259,59 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+void exec_md(ist66_cu_t *cpu, uint64_t inst) {
+    uint64_t ea = comp_mr(cpu, inst);
+    
+    if (ea == MEM_FAULT) {
+        do_except(cpu, X_MEMX);
+        return;
+    } else if (ea == KEY_FAULT) {
+        do_except(cpu, X_PPFR);
+        return;
+    }
+    
+    switch ((inst >> 23) & 0xF) {
+        case 0: { // MPY
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            xmul(cpu->a[1], data, &cpu->a[0], &cpu->a[2]);
+            
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 1: { // DIV
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            } else if (data == 0) {
+                do_except(cpu, X_DIVZ);
+                return;
+            }
+            data &= MASK_36;
+            
+            cpu->a[1] = (cpu->a[0] / data) & MASK_36;
+            cpu->a[2] = (cpu->a[0] % data) & MASK_36;
+            
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        default: {
+            // UMR
+            do_except(cpu, X_USER);
+        }
+    }
+}
+
 void exec_am(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     uint64_t ac = (inst >> 23) & 0xF;
@@ -835,6 +888,9 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     else if (inst >> 27 <= 027) {
         exec_am(cpu, inst);
     }
+    else if (inst >> 27 == 030) {
+        exec_md(cpu, inst);
+    }
     else if (inst >> 27 == 0100) {
         exec_call(cpu, inst);
     }
@@ -967,8 +1023,6 @@ void destroy_cpu(ist66_cu_t *cpu) {
     
     fprintf(stderr, "/CPU-I-CLOSED\n");
 }
-
-
 
 int main(int argc, char *argv[]) {
     ist66_cu_t cpu;

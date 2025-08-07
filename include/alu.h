@@ -47,5 +47,33 @@ static inline uint64_t exec_aa(
     return result;
 }
 
+static inline void xmul(
+    uint64_t a,
+    uint64_t b,
+    uint64_t *rl,
+    uint64_t *rh
+) {
+    uint64_t ah = (a >> 18) & 0777777;
+    uint64_t al = a & 0777777;
+    uint64_t bh = (b >> 18) & 0777777;
+    uint64_t bl = b & 0777777;
+    
+    uint64_t blal = bl * al;
+    uint64_t blah = bl * ah;
+    uint64_t bhal = bh * al;
+    uint64_t bhah = bh * ah;
+    
+    // AAAAAAaaaaaa * BBBBBBbbbbbb
+    // = (aaaaaa * bbbbbb)
+    // + (AAAAAA * bbbbbb) << 18
+    // + (aaaaaa * BBBBBB) << 18
+    // + (AAAAAA * BBBBBB) << 36
+    
+    *rl = blal + ((blah & 0777777) << 18) + ((bhal & 0777777) << 18);
+    *rh = bhah + (blah >> 18) + (bhal >> 18);
+    *rh += (*rl >> 36);
+    *rl &= MASK_36;
+}
+
 #endif
 
