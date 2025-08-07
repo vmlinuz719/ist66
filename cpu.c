@@ -331,8 +331,12 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
             
-            cpu->a[1] = (cpu->a[0] / data) & MASK_36;
-            cpu->a[2] = (cpu->a[0] % data) & MASK_36;
+            int64_t data_s = (int64_t) (EXT36(data));
+            uint64_t ac = cpu->a[0];
+            int64_t ac_s = (int64_t) (EXT36(ac));
+            
+            cpu->a[1] = ((uint64_t) (ac_s / data_s)) & MASK_36;
+            cpu->a[2] = ((uint64_t) (ac_s % data_s)) & MASK_36;
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;

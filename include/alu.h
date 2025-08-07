@@ -11,6 +11,7 @@
 #define EXT6(x) ((x) & (1L << 5) ? (x) | 0xFFFFFFFFFFFFFFC0 : (x))
 #define EXT7(x) ((x) & (1L << 6) ? (x) | 0xFFFFFFFFFFFFFF80 : (x))
 #define EXT18(x) ((x) & (1L << 17) ? (x) | 0xFFFFFFFFFFFC0000 : (x))
+#define EXT36(x) ((x) & (1L << 35) ? (x) | 0xFFFFFFF000000000 : (x))
 
 #include <stdint.h>
 #include <stdio.h>
@@ -53,6 +54,18 @@ static inline void xmul(
     uint64_t *rl,
     uint64_t *rh
 ) {
+    int negate = 0;
+    
+    if (a & (1L << 35)) {
+        negate ^= 1;
+        a = ((~a) + 1) & MASK_36;
+    }
+    
+    if (b & (1L << 35)) {
+        negate ^= 1;
+        b = ((~b) + 1) & MASK_36;
+    }
+    
     uint64_t ah = (a >> 18) & 0777777;
     uint64_t al = a & 0777777;
     uint64_t bh = (b >> 18) & 0777777;
@@ -73,6 +86,13 @@ static inline void xmul(
     *rh = bhah + (blah >> 18) + (bhal >> 18);
     *rh += (*rl >> 36);
     *rl &= MASK_36;
+    
+    if (negate) {
+        *rl = (~(*rl) + 1) & MASK_37;
+        *rh = (~(*rh)) & MASK_36;
+        *rh += *rl >> 36;
+        *rl &= MASK_36;
+    }
 }
 
 #endif
