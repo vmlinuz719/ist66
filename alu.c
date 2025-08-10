@@ -136,7 +136,6 @@ uint64_t compute(
     int rt                          // rotate
 ) {
     if ((mk & 0x70) == 0x40) {
-        // ADR encoding; mk = -rt
         mk = -rt;
     }
     

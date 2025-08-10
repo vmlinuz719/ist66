@@ -1017,6 +1017,28 @@ void exec_io1(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute a call or return with register save mask
+ *
+ * These are the function call instructions from opcode 030; the 9-bit opcode is
+ * followed by a 4-bit function selector
+ *    - 0: @c CLM - call with mask
+ *       - Load call mask from effective address
+ *       - For bits \a n = 35 to 20, push accumulator (\a n - 20) to stack
+ *       - Push mask then finally return address to stack
+ *       - Set program counter to effective address + 1
+ *    - 1: @c RTM - return with mask
+ *       - Pop program counter from stack
+ *       - Pop mask from stack
+ *       - For bits \a n = 20 to 35, pop accumulator (\a n - 20) from stack
+ *
+ * Any other function selector will raise an unimplemented instruction trap. If
+ * any portion of a mask call or return instruction (e.g. push, pop) fails, all
+ * changes to CPU state will be rolled back to allow a retry.
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ */
 void exec_call(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
@@ -1128,6 +1150,94 @@ void exec_call(ist66_cu_t *cpu, uint64_t inst) {
             do_except(cpu, X_USER);
         }
     }
+}
+
+/**
+ * @brief Execute an instruction with two (three) accumulator(s)
+ *
+ * These are the type "AA" instructions from opcode 700+; the format is as
+ * follows:
+ *    - Opcode: 4 bits
+ *    - Rotate through carry: 1 bit
+ *       - If this bit is set, the implicit rotate operation will include the
+ *         carry flag for a 37-bit rotate
+ *    - Source accumulator select \a m: 4 bits
+ *    - Target accumulator select \a n: 4 bits
+ *    - Function: 3 bits
+ *       - Opcode 14, fn 0: @c OCA - result is one's complement of AC\a m
+ *       - Opcode 14, fn 1: @c NEA - result is two's complement of AC\a m
+ *       - Opcode 14, fn 2: @c DAA - result is AC\a m
+ *       - Opcode 14, fn 3: @c ICA - result is AC\a m + 1, complement carry flag
+ *         on carry out
+ *       - Opcode 14, fn 4: @c ACA - result is AC\a m + one's complement of
+ *         AC\a n, complement carry flag on carry out
+ *       - Opcode 14, fn 5: @c SUA - result is AC\a m + two's complement of
+ *         AC\a n, complement carry flag on carry out
+ *       - Opcode 14, fn 6: @c ADA - result is AC\a m + AC\a n, complement carry
+ *         flag on carry out
+ *       - Opcode 14, fn 7: @c OCA - result is AC\a m bitwise AND AC\a n
+ *       - Opcode 15, fn 2: @c IOA - result is AC\a m bitwise OR AC\a n
+ *       - Opcode 15, fn 6: @c XOA - result is AC\a m bitwise OR AC\a n
+ *       - Any other combination: result is 0
+ *    - Carry flag mode: 2 bits; do this BEFORE arithmetic operation
+ *       - 0: Preserve carry flag
+ *       - 1: Clear carry flag
+ *       - 2: Set carry flag
+ *       - 3: Complement carry flag
+ *    - Skip mode: 3 bits; do this AFTER instruction is complete
+ *       - 0: Do not skip next instruction
+ *       - 1: Always skip next instruction
+ *       - 2: Skip if carry flag unset
+ *       - 3: Skip if carry flag set
+ *       - 4: Skip if result is zero
+ *       - 5: Skip if result is nonzero
+ *       - 6: Skip if carry flag and/or result is zero
+ *       - 7: Skip if carry flag and result are nonzero
+ *    - No load: 1 bit, do not save result if set
+ *    - Bit mask: Signed 7 bits; AFTER rotate
+ *       - After the implicit rotate operation, the carry flag will replace this
+ *         many bits from the left (most significant) if the value of this field
+ *         is positive, otherwise it will replace that many bits from the right
+ *       - The result of using a bit mask width \a x such that \a |x| > 36 is
+ *         not well defined UNLESS the first three bits are equal to 4 (1, 0, 0)
+ *       - In that case, the remaining four bits are used to encode a third
+ *         accumulator select \a d, the final result of the operation is stored
+ *         in that accumulator and the bit mask width is set equal to the rotate
+ *         field (i.e. a non-zero rotate value will effect a bit shift rather
+ *         than rotate); otherwise the result is stored in AC\a n
+ *    - Rotate: Signed 7 bits; AFTER arithmetic operation but BEFORE mask
+ *       - The initial result of the arithmetic operation is rotated (including
+ *         the new carry flag if the rotate-through-carry bit is set) this many
+ *         bits to the left (right if value is negative)
+ *       - The result of a rotation \a x such that \a |x| > 36 (37 if rotating
+ *         through carry) is not well defined
+ *       
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ * @param a First operand
+ * @param b Second operand
+ * @param c Current carry flag
+ */
+uint64_t exec_aa(
+    uint64_t inst,
+    uint64_t a, uint64_t b, int c
+) {
+    int op = (int) ((inst >> 20) & 0x7);
+    op |= (int) ((inst >> 29) & 0x8);
+    int ci = (int) ((inst >> 18) & 0x3);
+    int cond = (int) ((inst >> 15) & 0x7);
+    int nl = (int) ((inst >> 14) & 0x1);
+    int rc = (int) ((inst >> 31) & 0x1);
+    
+    uint64_t mk_u = ((inst >> 7) & 0x3F);
+    uint64_t rt_u = (inst & 0x3F);
+    
+    int mk = (int) (EXT7(mk_u));
+    int rt = (int) (EXT7(rt_u));
+    
+    uint64_t result = compute(a, b, c, op, ci, cond, nl, rc, mk, rt);
+    return result;
 }
 
 void exec_all(ist66_cu_t *cpu, uint64_t inst) {
