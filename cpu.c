@@ -1,3 +1,8 @@
+/**
+ * @file cpu.c
+ * Implements core CPU functionality
+ */
+
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -11,8 +16,22 @@
 #include "pch.h"
 #include "lpt.h"
 
+/**
+ * @brief Assert a priority interrupt signal
+ *
+ * IST-66 supports 14 interrupt priority levels (1-14; smaller number = higher
+ * priority). Multiple devices may assert a single IRQ at a time. The emulated
+ * CPU tracks the lowest (highest priority) IRQ that is asserted and unmasked.
+ * Therefore, increment the count of devices asserting the chosen IRQ, update
+ * the lowest pending IRQ and poke the CPU thread to start it if the selected
+ * IRQ is not masked.
+ *
+ * DO NOT ATTEMPT TO ASSERT IRQ 0 OR >=15
+ *
+ * @param cpu Emulated CPU context
+ * @param irq IRQ priority level (1-14, smaller number = higher priority)
+ */
 void intr_assert(ist66_cu_t *cpu, int irq) {
-    /* Max hardware IRQ is 14 */
     pthread_mutex_lock(&(cpu->lock));
     cpu->pending[irq]++;
     if (irq < cpu->min_pending && ((cpu->mask >> irq) & 1)) {
@@ -23,6 +42,15 @@ void intr_assert(ist66_cu_t *cpu, int irq) {
     pthread_mutex_unlock(&(cpu->lock));
 }
 
+/**
+ * @brief Release a priority interrupt signal
+ *
+ * Decrement the count of devices asserting the chosen IRQ and update the lowest
+ * pending IRQ to reflect this.
+ *
+ * @param cpu Emulated CPU context
+ * @param irq IRQ priority level (1-14, smaller number = higher priority)
+ */
 void intr_release(ist66_cu_t *cpu, int irq) {
     pthread_mutex_lock(&(cpu->lock));
     if (cpu->pending[irq] > 0) {
@@ -38,10 +66,22 @@ void intr_release(ist66_cu_t *cpu, int irq) {
     pthread_mutex_unlock(&(cpu->lock));
 }
 
+/**
+ * @brief Set the IRQ mask
+ *
+ * Update the interrupt mask. Less significant bits of the 16-bit mask
+ * correspond to higher priority levels (rightmost bit is level 0, leftmost bit
+ * is level 15). If a bit is set to 1, its corresponding IRQ priority level is
+ * enabled. The lowest pending IRQ must be recalculated to account for any newly
+ * masked or unmasked priority levels. (Remember, only IRQ 1-14 are usable!)
+ *
+ * @param cpu Emulated CPU context
+ * @param mask New IRQ mask
+ */
 void intr_set_mask(ist66_cu_t *cpu, uint16_t mask) {
     pthread_mutex_lock(&(cpu->lock));
     cpu->mask = mask;
-    int new_min_pending = 15;
+    int new_min_pending = 1;
     while (new_min_pending < 15 
         && ((((cpu->mask >> new_min_pending) & 1) == 0)
             || (cpu->pending[new_min_pending] == 0))) {
@@ -51,6 +91,25 @@ void intr_set_mask(ist66_cu_t *cpu, uint16_t mask) {
     pthread_mutex_unlock(&(cpu->lock));
 }
 
+/**
+ * @brief Read a 36-bit word from CPU memory or return an error value
+ *
+ * IST-66 assigns to each 512-word page of memory an 8-bit memory protection
+ * key. This key may be 0x00 (supervisor only), 0x01-0xFD (protected), 0xFE
+ * (readable to all) or 0xFF (readable/writable to all). To read memory, a
+ * 27-bit address is first bounds-checked against the amount of available
+ * memory; if this check fails, this function returns a MEM_FAULT error value.
+ * Then the protection key (usually the current key from control register 1,
+ * Control Word) is checked against the target page's key. A read will succeed
+ * and return a 36-bit word if either the provided key is equal to 0, the key
+ * matches the one in memory or the key in memory is 0xFE or 0xFF; otherwise
+ * this function returns a KEY_FAULT error value.
+ *
+ * @param cpu Emulated CPU context
+ * @param key Storage key to test
+ * @param address Memory address
+ * @return Contents of memory, MEM_FAULT or KEY_FAULT
+ */
 uint64_t read_mem(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
     address &= MASK_ADDR;
     
@@ -69,6 +128,23 @@ uint64_t read_mem(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
     else return cpu->memory[address] & MASK_36;
 }
 
+/**
+ * @brief Write a 36-bit word to CPU memory or return an error value
+ *
+ * To write memory, a 27-bit address is first bounds-checked against the amount
+ * of available memory; if this check fails, this function returns a MEM_FAULT
+ * error value. Then the protection key (usually the current key from control
+ * register 1, Control Word) is checked against the target page's key. A write
+ * will succeed and return a 36-bit word if either the provided key is equal to
+ * 0, the key matches the one in memory or the key in memory is 0xFF; otherwise
+ * this function returns a KEY_FAULT error value.
+ *
+ * @param cpu Emulated CPU context
+ * @param key Storage key to test
+ * @param address Memory address
+ * @param data 36-bit word to write
+ * @return Zero, MEM_FAULT or KEY_FAULT
+ */
 uint64_t write_mem(
     ist66_cu_t *cpu,
     uint8_t key,
@@ -94,6 +170,20 @@ uint64_t write_mem(
     return 0;
 }
 
+/**
+ * @brief Set a page's memory protection key
+ *
+ * This emulator uses a 64-bit word to store each 36-bit word of memory; there
+ * is some extra space left over. The memory protection key for a given page is
+ * stored in the eight bits immediately to the left of the low 36 bits of the
+ * first word in the page. Of course, bounds-check each key set operation and
+ * return MEM_FAULT on failure.
+ *
+ * @param cpu Emulated CPU context
+ * @param key Storage key to write
+ * @param address Memory address
+ * @return Zero or MEM_FAULT
+ */
 uint64_t set_key(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
     if (address >= cpu->mem_size) {
         return MEM_FAULT;
@@ -105,6 +195,42 @@ uint64_t set_key(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
     return 0;
 }
 
+/**
+ * @brief Compute an effective address
+ *
+ * Most (all) IST-66 memory reference instructions use a format similar to the
+ * DEC PDP-10: one indirect bit, one four-bit index selector and one 18-bit
+ * signed displacement. Unlike the PDP-10 however, several of the index selector
+ * values have special significance:
+ *    - 0: No index register
+ *    - 1: Use "direct page" 18-bit base in CR1 (Control Word)
+ *    - 2: PC-relative
+ *    - 3-13: Index register is AC3-AC13 (X0-X8, LR, SP)
+ *    - 14: Post-increment AC13 (SP) by displacement
+ *    - 15: Pre-decrement AC13 (SP) by displacement
+ *
+ * The computed address is thus a 36-bit word; as of now only the low 27 bits
+ * are used for addressing even though all 36 bits are generated by this
+ * operation.
+ *
+ * If an indirect address was specified, we now must perform an additional step
+ * or two - the real address must be fetched from memory and if this operation
+ * fails, either MEM_FAULT or KEY_FAULT is the result. If the most significant
+ * bit of the fetched word is not set, then that is the final address. If it is
+ * set, the next eight bits indicate a more advanced addressing mode:
+ *    - Octal 0xx: Post-increment address field by signed 6-bit immediate xx
+ *    - Octal 1xx: Pre-decrement address field by signed 6-bit immediate xx
+ *    - 2xx, 3xx: Reserved (MEM_FAULT)
+ * 
+ * The result of an increment/decrement indirect address is written back to
+ * memory after the successful completion of the instruction that computed it.
+ * Should the instruction fail, all internal state pertaining to this operation
+ * is cleared so it may be retried.
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ * @return Address, MEM_FAULT or KEY_FAULT
+ */
 uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
     int indirect = (inst >> 22) & 1;
     uint64_t index = (inst >> 18) & 0xF;
@@ -666,9 +792,6 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
 }
 
 void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
-    
-    // TODO: decide how to handle faults
-    
     uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
     if (!key) {
         uint64_t ea = comp_mr(cpu, inst);
