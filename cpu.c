@@ -306,6 +306,21 @@ uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
     else return ea_l;
 }
 
+/**
+ * @brief Execute an instruction with a memory reference
+ *
+ * These are the basic type "MR" instructions from opcode 000; the 9-bit opcode
+ * is followed by a 4-bit function selector
+ *    - 0: @c JMP - set program counter to effective address
+ *    - 1: @c JSR - save PC to AC12/LR, set program counter to effective address
+ *    - 2: @c ISZ - increment contents of memory, skip next instruction if zero
+ *    - 3: @c DSZ - decrement contents of memory, skip next instruction if zero
+ *
+ * Any other function selector will raise an unimplemented instruction trap.
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ */
 void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
@@ -386,6 +401,25 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute a multiplication or division
+ *
+ * These are the multiply/divide instructions from opcode 030; the 9-bit opcode
+ * is followed by a 4-bit function selector
+ *    - 0: @c MPY - multiply AC1/MQ by contents of memory for a 72-bit result in
+ *      AC2:AC0 (XY:AC, most significant bits in AC2/XY)
+ *    - 1: @c MPA - multiply AC1/MQ by contents of memory and add 72-bit result
+ *      to AC2:AC0 (XY:AC) (complement carry flag on carry out of XY)
+ *    - 1: @c MNA - multiply AC1/MQ by contents of memory and subtract 72-bit
+ *      result from AC2:AC0 (XY:AC) (complement carry flag on carry out of XY)
+ *    - 3: @c DIV - divide AC by contents of memory for a 36-bit result in MQ;
+ *      store remainder (modulo) in XY
+ *
+ * Any other function selector will raise an unimplemented instruction trap.
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ */
 void exec_md(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
@@ -505,6 +539,47 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute an instruction with a memory reference and accumulator
+ *
+ * These are the type "AM" instructions from opcode 000-026; the 9-bit opcode is
+ * followed by a 4-bit accumulator selector \a n
+ *    - 001: @c EDT - bitwise OR AC\a n with contents of memory and execute
+ *      the resulting value as an instruction
+ *    - 002: @c ESK - bitwise OR AC\a n with contents of memory and execute
+ *      the resulting value as an instruction; skip the next instruction in
+ *      series
+ *       - Note: the program counter remains unchanged. Any PC-relative
+ *         operations effected by @c EDT/ESK will occur relative to the
+ *         location of the @c EDT/ESK instruction rather than the called
+ *         instruction. The behavior of calling @c EDT/ESK with @c EDT/ESK is
+ *         not well-defined but will not violate protection.
+ *    - 003: @c LAD - load effective address to AC\a n
+ *    - 004: @c AAD - add effective address to AC\a n, complement carry flag on
+ *      carry out
+ *    - 005: @c ISE - increment AC\a n, complement carry flag on carry out, skip
+ *      next instruction if AC\a n = contents of memory
+ *    - 006: @c DSE - decrement AC\a n, complement carry flag on carry out, skip
+ *      next instruction if AC\a n = contents of memory
+ *    - 007: @c LAS - load effective address << 17 to AC\a n
+ *    - 010: @c LCO - load one's complement of contents of memory to AC\a n
+ *    - 011: @c LNG - load two's complement of contents of memory to AC\a n
+ *    - 012: @c LAC - load contents of memory to AC\a n
+ *    - 013: @c DAC - store contents of AC\a n to memory
+ *    - 014: @c ADC - add one's complement of contents of memory to AC\a n,
+ *      complement carry flag on carry out
+ *    - 015: @c SUB - add two's complement of contents of memory to AC\a n,
+ *      complement carry flag on carry out
+ *    - 016: @c ADD - add contents of memory to AC\a n, complement carry flag on
+ *      carry out
+ *    - 017: @c AND - bitwise AND contents of memory to AC\a n
+ *    - 022: @c IOR - bitwise OR contents of memory to AC\a n
+ *    - 026: @c XOR - bitwise XOR contents of memory to AC\a n
+ *
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ */
 void exec_am(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     uint64_t ac = (inst >> 23) & 0xF;
