@@ -15,6 +15,8 @@
 #include "pch.h"
 #include "lpt.h"
 
+#include "softfloat.h"
+
 /**
  * @brief Assert a priority interrupt signal
  *

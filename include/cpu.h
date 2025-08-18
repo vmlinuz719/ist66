@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <pthread.h>
 
+#include "softfloat.h"
+
 #define MASK_ADDR 0x7FFFFFFL
 #define C_PSW 0
 #define C_CW 1
@@ -27,6 +29,7 @@ typedef void (*ist66_io_dtor_t) (
 struct ist66_cu {
     uint64_t a[16]; // accumulators
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
+    extFloat80_t f[16];
     uint64_t stop_code;
     
     uint64_t xeq_inst, inc_addr, inc_data;
