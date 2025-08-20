@@ -104,3 +104,12 @@ void ist66f_to_extF80M(uint64_t x, uint64_t y, extFloat80_t *z) {
     z->signExp = new_exp;
 }
 
+/**
+ * @brief Round a 64-bit significand to a 27-bit one
+ *
+ * Note: the 64-bit significand does NOT have an implicit leading one.
+ *
+ * @param x uint64_t significand
+ * @param y address to store 27-bit result
+ * @return 1 if normalization occurs else 0
+ */
