@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "alu.h"
+#include "fpu.h"
 #include "cpu.h"
 #include "ppt.h"
 #include "pch.h"

@@ -23,17 +23,6 @@ uint64_t exp8_to_i36(uint8_t exp) {
 }
 
 /**
- * @brief Convert bias-11 to int36
- * @param exp Exponent
- * @return int36 stored in uint64_t
- */
-uint64_t exp11_to_i36(uint16_t exp) {
-    int64_t result = (int64_t) exp;
-    result -= 1023;
-    return result & MASK_36;
-}
-
-/**
  * @brief Convert bias-15 to int36
  * @param exp Exponent
  * @return int36 stored in uint64_t
@@ -55,22 +44,7 @@ uint8_t i36_to_exp8(uint64_t exp) {
     else if (exp_s > 128) return 0xFF;
     else {
         exp_s += 127;
-        return ((uint64_t) exp_s) & 0xFF;
-    }
-}
-
-/**
- * @brief Convert int36 to bias-11
- * @param exp Exponent as int36 stored in uint64_t
- * @return Bias-11 exponent (0x000 if too small, 0x7FF if too big)
- */
-uint16_t i36_to_exp11(uint64_t exp) {
-    int64_t exp_s = (int64_t) (EXT36(exp));
-    if (exp_s < -1023) return 0;
-    else if (exp_s > 1024) return 0x7FF;
-    else {
-        exp_s += 1023;
-        return ((uint64_t) exp_s) & 0x7FF;
+        return (uint8_t) exp_s;
     }
 }
 
@@ -88,6 +62,8 @@ uint16_t i36_to_exp15(uint64_t exp) {
         return ((uint64_t) exp_s) & 0x7FFF;
     }
 }
+
+// TODO: consider enhanced subnormal support
 
 /**
  * @brief Convert IST-66 float to extF80M
@@ -119,13 +95,12 @@ int rndsig(uint64_t src, uint64_t *dst) {
     int orig_leading = src >> 63;
     uint64_t to_truncate = src & MASK_36;
     
-    uint64_t result = src & (~((uint64_t) MASK_36));
     if (
-        (to_truncate == 1L << 36 && (src & (1L << 37))) ||
-        (to_truncate > 1L << 36)
+        (to_truncate == 1L << 35 && (src & (1L << 36))) ||
+        (to_truncate > 1L << 35)
     ) {
         // round to nearest, ties to even
-        src += (1L << 37);
+        src += (1L << 36);
     }
     
     *dst = (src >> 36) & 0777777777L;
@@ -142,7 +117,7 @@ int rndsig(uint64_t src, uint64_t *dst) {
  * @return 1 on overflow, -1 on underflow, else 0
  */
 int extF80M_to_ist66f72(extFloat80_t *x, uint64_t *y, uint64_t *z) {
-    if (x->signExp & 0x7FFF == 0x7FFF) {
+    if ((x->signExp & 0x7FFF) == 0x7FFF) {
         // NaN or infinity
         *y = (0xFFL << 27) | ((x->signif >> 36) & 0777777777L);
         *z = x->signif & MASK_36;
@@ -152,10 +127,9 @@ int extF80M_to_ist66f72(extFloat80_t *x, uint64_t *y, uint64_t *z) {
         return 0;
     }
     
-    int sign = !!(x->signExp & (1 << 15));
     uint8_t new_exp = i36_to_exp8(exp15_to_i36(x->signExp & 0x7FFF));
     
-    if (new_exp == 0 && (x->signif & (1L << 63))) {
+    if (new_exp == 0 && (x->signif)) {
         // underflow
         *y = 0;
         *z = 0;
@@ -173,6 +147,7 @@ int extF80M_to_ist66f72(extFloat80_t *x, uint64_t *y, uint64_t *z) {
     else {
         // value
         *y = (((uint64_t) new_exp) << 27) | ((x->signif >> 36) & 0777777777L);
+        
         *z = x->signif & MASK_36;
         if ((x->signExp & (1 << 15))) {
             *y |= 1L << 35;
@@ -189,7 +164,7 @@ int extF80M_to_ist66f72(extFloat80_t *x, uint64_t *y, uint64_t *z) {
  * @return 1 on overflow, -1 on underflow, else 0
  */
 int extF80M_to_ist66f36(extFloat80_t *x, uint64_t *y, int rnd) {
-    if (x->signExp & 0x7FFF == 0x7FFF) {
+    if ((x->signExp & 0x7FFF) == 0x7FFF) {
         // NaN or infinity
         *y = (0xFFL << 27) | ((x->signif >> 36) & 0777777777L);
         if ((x->signExp & (1 << 15))) {
@@ -198,10 +173,9 @@ int extF80M_to_ist66f36(extFloat80_t *x, uint64_t *y, int rnd) {
         return 0;
     }
     
-    int sign = !!(x->signExp & (1 << 15));
     uint8_t new_exp = i36_to_exp8(exp15_to_i36(x->signExp & 0x7FFF));
     
-    if (new_exp == 0 && (x->signif & (1L << 63))) {
+    if (new_exp == 0 && (x->signif)) {
         // underflow
         *y = 0;
         return -1;
@@ -241,3 +215,42 @@ int extF80M_to_ist66f36(extFloat80_t *x, uint64_t *y, int rnd) {
         return 0;
     }
 }
+
+/*
+int main(int argc, char *argv[]) {
+    extFloat80_t f;
+    f.signExp = 16510;
+    f.signif = 0UL - 1;
+    
+    uint64_t a, b, c;
+    
+    int z = extF80M_to_ist66f72(&f, &a, &b);
+    printf(
+        "%02lX:%016lX %c %c\n",
+        (a >> 27) & 0xFF,
+        ((a & 0777777777L) << 36) | b,
+        (a >> 35) ? '-' : ' ',
+        z ? '*' : ' '
+    );
+    
+    z = extF80M_to_ist66f36(&f, &a, 0);
+    printf(
+        "%02lX:%016lX %c %c\n",
+        (a >> 27) & 0xFF,
+        ((a & 0777777777L) << 36),
+        (a >> 35) ? '-' : ' ',
+        z ? '*' : ' '
+    );
+    
+    z = extF80M_to_ist66f36(&f, &a, 1);
+    printf(
+        "%02lX:%016lX %c %c\n",
+        (a >> 27) & 0xFF,
+        ((a & 0777777777L) << 36),
+        (a >> 35) ? '-' : ' ',
+        z ? '*' : ' '
+    );
+    
+    return 0;
+}
+*/
