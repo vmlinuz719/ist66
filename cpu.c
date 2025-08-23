@@ -945,7 +945,18 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 0605: { // STCTL
+            case 0605: { // LCT
+                uint64_t data = read_mem(cpu, 0, ea);
+                if (data == MEM_FAULT) {
+                    do_except(cpu, X_MEMX);
+                   return;
+                }
+                data &= MASK_36;
+            
+                cpu->c[ac] = data & MASK_36;
+                set_pc(cpu, get_pc(cpu) + 1);
+            } break;
+            case 0606: { // STCTL
                 uint64_t w_res = write_mem(cpu, 0, ea, cpu->c[ac & 0x7]);
                 if (w_res == MEM_FAULT) {
                     do_except(cpu, X_MEMX);
