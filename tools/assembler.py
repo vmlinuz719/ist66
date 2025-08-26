@@ -27,8 +27,8 @@ class Card:
 
 def generate_address(
     arg: str,
-    symbols: Optional[dict[str, int]] = None
-    pc: Optional[int] = 0
+    symbols: Optional[dict[str, int]] = None,
+    pc: int = 0
 ) -> int:
     """
     123456          displacement only
@@ -38,9 +38,52 @@ def generate_address(
     123456+         A13 post-increment
     123456-         A13 pre-decrement
     @               indirect
-    $               label (relative to PC if PC relative mode used)
+    Leading zero for octal, leading any other digit for decimal
+    Leading letter for label
     """
-    pass
+    if arg[0] == '@':
+        indirect = True
+        arg = arg[1:]
+    else:
+        indirect = False
+    
+    if arg[0] == '_':
+        mode = 1 # direct page
+        arg = arg[1:]
+    elif arg[0] == '.':
+        mode = 2 # relative
+        arg = arg[1:]
+    elif len(arg.split('(')) == 2:
+        args = arg.split('(') # indexed
+        mode = int(args[1].rstrip(')'))
+        if mode > 13 or mode < 3:
+            raise ValueError("No such index register")
+        arg = args[0]
+    elif arg[-1] == '+':
+        mode = 14 # A13++
+        arg = arg[:-1]
+    elif arg[-1] == '-':
+        mode = 15 # --A13
+        arg = arg[:-1]
+    else:
+        mode = 0 # absolute
+    
+    print(arg)
+    
+    if arg[0] == '0' or arg[0:2] == '-0':
+        disp = int(arg, 8) & 0o777777777
+    elif arg[0] in '0123456789-':
+        disp = int(arg, 10) & 0o777777777
+    else:
+        label = symbols[arg]
+        if mode == 2:
+            label -= pc
+        disp = label & 0o777777777
+    
+    result = (mode << 18) | disp
+    if indirect:
+        result |= 1 << 22
+    return result
 
 class AssemblerModule(ABC):
     @abstractmethod
