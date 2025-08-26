@@ -68,8 +68,6 @@ def generate_address(
     else:
         mode = 0 # absolute
     
-    print(arg)
-    
     if arg[0] == '0' or arg[0:2] == '-0':
         disp = int(arg, 8) & 0o777777777
     elif arg[0] in '0123456789-':
@@ -87,11 +85,119 @@ def generate_address(
 
 class AssemblerModule(ABC):
     @abstractmethod
-    def size(self, arg: str) -> int:
+    def size(self, card: Card) -> int:
+        pass
+        
+    @abstractmethod
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> int:
         pass
     
-    def assemble(self, arg: str) -> int:
-        pass
+    opcodes: dict[str, int]
+    
+    @abstractmethod
+    def __init__(self):
+        self.opcodes = {}
+
+class AssembleMR(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 1
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> int:
+        address = generate_address(card.argument.strip(), symbols, pc)
+        return (self.opcodes[card.command.strip().upper()] << 23) | address
+    
+    def __init__(self):
+        self.opcodes = {
+            "JMP": 0,
+            "JSR": 1,
+            "ISZ": 2,
+            "DSZ": 3,
+            
+            "MPY": 0x180,
+            "MPA": 0x181,
+            "MNA": 0x182,
+            "DIV": 0x183,
+            
+            "CLM": 0x400,
+            "RTM": 0x401,
+            
+            "XIN": 0x1820,
+            "RMS": 0x1821,
+            "LMS": 0x1822,
+            "DMS": 0x1823,
+        }
+
+class AssembleAM(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 1
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> int:
+        args = card.argument.strip().split(",")
+        if len(args) == 2:
+            register = int(args[0])
+            if register < 0 or register > 15:
+                raise ValueError("No such register")
+        elif len(args) == 1:
+            register = 0
+        else:
+            raise ValueError("Syntax error")
+            
+        address = generate_address(args[-1], symbols, pc)
+        return (
+            (self.opcodes[card.command.strip().upper()] << 27)
+            | (register << 23)
+            | address
+        )
+    
+    def __init__(self):
+        self.opcodes = {
+            "EDT": 0o001,
+            "ESK": 0o002,
+            
+            "LAD": 0o003,
+            "AAD": 0o004,
+            
+            "ISE": 0o005,
+            "DSE": 0o006,
+            
+            "LAS": 0o007,
+            
+            "LCO": 0o010,
+            "LNG": 0o011,
+            "LAC": 0o012,
+            "DAC": 0o013,
+            
+            "ADC": 0o014,
+            "SUB": 0o015,
+            "ADD": 0o016,
+            "AND": 0o017,
+            "IOR": 0o022,
+            "XOR": 0o026,
+            
+            "HLT": 0o600,
+            "INT": 0o601,
+            
+            "LMK": 0o603,
+            "DMK": 0o604,
+            
+            "LCT": 0o605,
+            "DCT": 0o606,
+        }
 
 class Assembler:
     symbols: dict[str, int]
@@ -100,7 +206,7 @@ class Assembler:
 
 """
         * A longer comment blah blah blah                               00001000
-LABEL008 ADD   0,7,'123456701                   This is the comment     00001020
+LABEL008 DIV   123(6)                           This is the comment     00001020
 
 >>> string[0:8].strip()
 'LABEL008'
