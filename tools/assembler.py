@@ -20,8 +20,8 @@ class Card:
         
         else:
             self.comment = full_card[48:72].rstrip() or None
-            self.command = full_card[9:15].rstrip() or None
-            self.argument = full_card[15:48].rstrip() or None
+            self.command = full_card[9:17].rstrip() or None
+            self.argument = full_card[17:48].rstrip() or None
         
         self.number = full_card[72:80].rstrip()
 
@@ -209,7 +209,7 @@ class Assembler:
 
 """
         * A longer comment blah blah blah                               00001000
-LABEL008 DIV   123(6)                           This is the comment     00001020
+LABEL008 DIV     123(6)                         This is the comment     00001020
 
 >>> string[0:8].strip()
 'LABEL008'
