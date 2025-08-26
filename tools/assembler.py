@@ -102,6 +102,9 @@ class AssemblerModule(ABC):
     @abstractmethod
     def __init__(self):
         self.opcodes = {}
+    
+    def will_assemble(self, card: Card) -> bool:
+        return (card.command.strip().upper() in self.opcodes)
 
 class AssembleMR(AssemblerModule):
     def size(self, card: Card) -> int:
