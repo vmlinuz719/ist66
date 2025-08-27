@@ -286,6 +286,68 @@ class AssembleAA(AssemblerModule):
     def will_assemble(self, card: Card) -> bool:
         return (card.command.strip().upper()[0:3] in self.opcodes)
 
+class AssembleData(AssemblerModule):
+    def size(self, card: Card) -> int:
+        args = card.argument.strip().split(",")
+        return len(args)
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> list[int]:
+        args = card.argument.strip().split(",")
+        result = []
+        for arg in args:
+            if arg[0] == '0' or arg[0:2] == '-0':
+                result.append(int(arg, 8) & 0o777777777)
+            elif arg[0] in '0123456789-':
+                result.append(int(arg, 10) & 0o777777777)
+        return result
+        
+    def __init__(self):
+        self.opcodes = {
+            "DW": 0
+        }
+
+class AssembleCommand(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 0
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> list[int]:
+        args = card.argument.strip().split(",")
+        result = []
+        if len(args) == 1:
+            arg = args[0]
+            if arg[0] == '0' or arg[0:2] == '-0':
+                disp = int(arg, 8)
+            elif arg[0] in '0123456789-':
+                disp = int(arg, 10)
+            
+            command = card.command.strip().upper()
+            if command == "BSS":
+                result.append((pc + disp) & 0o777777777)
+            elif command == "ORIGIN":
+                result.append(disp & 0o777777777)
+            else:
+                raise ValueError("Syntax error")
+                
+            return result
+        else:
+            raise ValueError("Syntax error")
+        
+    def __init__(self):
+        self.opcodes = {
+            "BSS": 0,
+            "ORIGIN": 0
+        }
+
 class Assembler:
     symbols: dict[str, int]
     
