@@ -94,7 +94,7 @@ class AssemblerModule(ABC):
         card: Card,
         symbols: dict[str, int],
         pc: int
-    ) -> int:
+    ) -> list[int]:
         pass
     
     opcodes: dict[str, int]
@@ -115,9 +115,9 @@ class AssembleMR(AssemblerModule):
         card: Card,
         symbols: dict[str, int],
         pc: int
-    ) -> int:
+    ) -> list[int]:
         address = generate_address(card.argument.strip(), symbols, pc)
-        return (self.opcodes[card.command.strip().upper()] << 23) | address
+        return [(self.opcodes[card.command.strip().upper()] << 23) | address]
     
     def __init__(self):
         self.opcodes = {
@@ -149,7 +149,7 @@ class AssembleAM(AssemblerModule):
         card: Card,
         symbols: dict[str, int],
         pc: int
-    ) -> int:
+    ) -> list[int]:
         args = card.argument.strip().split(",")
         if len(args) == 2:
             register = int(args[0])
@@ -161,11 +161,11 @@ class AssembleAM(AssemblerModule):
             raise ValueError("Syntax error")
             
         address = generate_address(args[-1], symbols, pc)
-        return (
+        return [(
             (self.opcodes[card.command.strip().upper()] << 27)
             | (register << 23)
             | address
-        )
+        )]
     
     def __init__(self):
         self.opcodes = {
@@ -202,6 +202,90 @@ class AssembleAM(AssemblerModule):
             "DCT": 0o606,
         }
 
+def get_paren_arg(arg: str) -> str:
+    spl = arg.strip().split('(')
+    return spl[1].rstrip(')').strip()
+
+def get_paren_number(arg: str) -> int:
+    contents = get_paren_arg(arg)
+    if contents[0] == '0' or contents[0:2] == '-0':
+        return int(contents, 8) & 0o777777777
+    elif contents[0] in '0123456789-':
+        return int(contents, 10) & 0o777777777
+
+def assemble_aa_arg(arg: str) -> int:
+    def static(x):
+        return lambda y: x
+        
+    args_tbl = {
+        #       fn                bits shl extra
+        "SDA": (get_paren_number, 4,   7,  0x2000    ),
+        
+        "MSK": (get_paren_number, 7,   7,  0         ),
+        "RTA": (get_paren_number, 7,   0,  0         ),
+        "RTC": (get_paren_number, 7,   0,  0x80000000),
+        
+        "NLA": (static(1),        1,   14, 0         ),
+        
+        "CLC": (static(1),        2,   18, 0         ),
+        "STC": (static(2),        2,   18, 0         ),
+        "CMC": (static(3),        2,   18, 0         ),
+        
+        "SKP": (static(1),        3,   15, 0         ),
+        "SZC": (static(2),        3,   15, 0         ),
+        "SNC": (static(3),        3,   15, 0         ),
+        "SZR": (static(4),        3,   15, 0         ),
+        "SNR": (static(5),        3,   15, 0         ),
+        "SEZ": (static(6),        3,   15, 0         ),
+        "SBN": (static(7),        3,   15, 0         ),
+    }
+    
+    fn, bits, shl, extra = args_tbl[arg[0:3]]
+    return ((fn(arg[3:]) & ((1 << bits) - 1)) << shl) | extra
+
+class AssembleAA(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 1
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> list[int]:
+        args = card.argument.strip().split(",")
+        if len(args) >= 2:
+            src = int(args[0])
+            tgt = int(args[1])
+            if src < 0 or src > 15 or tgt < 0 or tgt > 15:
+                raise ValueError("No such register")
+            result = (src << 27) | (tgt << 23)
+            for arg in args[2:]:
+                result |= assemble_aa_arg(arg)
+            opcode = self.opcodes[card.command.strip().upper()]
+            opcode_split = ((opcode >> 4) << 32) | ((opcode & 7) << 20)
+            return [result | opcode_split]
+        else:
+            raise ValueError("Syntax error")
+
+        
+    def __init__(self):
+        self.opcodes = {
+            "OCA": 0xE0,
+            "NEA": 0xE1,
+            "DAA": 0xE2,
+            "ICA": 0xE3,
+            "ACA": 0xE4,
+            "SUA": 0xE5,
+            "ADA": 0xE6,
+            "ANA": 0xE7,
+            "IOA": 0xF2,
+            "XOA": 0xF6,
+        }
+
+    def will_assemble(self, card: Card) -> bool:
+        return (card.command.strip().upper()[0:3] in self.opcodes)
+
 class Assembler:
     symbols: dict[str, int]
     
@@ -209,7 +293,7 @@ class Assembler:
 
 """
         * A longer comment blah blah blah                               00001000
-LABEL008 DIV     123(6)                         This is the comment     00001020
+LABEL008 ADA     1,2,CLC,SDA(3),RTA(3),SZR      This is the comment     00001020
 
 >>> string[0:8].strip()
 'LABEL008'
