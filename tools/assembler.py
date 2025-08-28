@@ -69,14 +69,14 @@ def generate_address(
         mode = 0 # absolute
     
     if arg[0] == '0' or arg[0:2] == '-0':
-        disp = int(arg, 8) & 0o777777777
+        disp = int(arg, 8) & 0o777777
     elif arg[0] in '0123456789-':
-        disp = int(arg, 10) & 0o777777777
+        disp = int(arg, 10) & 0o777777
     else:
         label = symbols[arg]
         if mode == 2:
             label -= pc
-        disp = label & 0o777777777
+        disp = label & 0o777777
     
     result = (mode << 18) | disp
     if indirect:
@@ -240,7 +240,7 @@ def assemble_aa_arg(arg: str) -> int:
         "SBN": (static(7),        3,   15, 0         ),
     }
     
-    fn, bits, shl, extra = args_tbl[arg[0:3]]
+    fn, bits, shl, extra = args_tbl[arg[0:3].upper()]
     return ((fn(arg[3:]) & ((1 << bits) - 1)) << shl) | extra
 
 class AssembleAA(AssemblerModule):
@@ -311,6 +311,61 @@ class AssembleData(AssemblerModule):
             "DW": 0
         }
 
+class AssembleIO(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 1
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> list[int]:
+        args = card.argument.strip().split(",")
+        command = card.command.strip().upper()
+        opcode = self.opcodes[command]
+        dev = args[0]
+
+        if dev[0] == '0' or dev[0:2] == '-0':
+           result = int(dev, 8) & 0o7777
+        elif dev[0] in '0123456789-':
+            result = int(dev, 10) & 0o7777
+        
+        result |= (0o670 << 27) | (opcode << 12)
+        
+        if command[0:2] == "IN" or command[0:2] == "OU":
+            register = int(args[1])
+            if register < 0 or register > 15:
+                raise ValueError("No such register")
+            
+            buffer = int(args[2])
+            if buffer < 0 or buffer > 6:
+                raise ValueError("No such buffer")
+            
+            result |= (register << 23) | (buffer << 13)
+        
+        return [result]
+        
+    def __init__(self):
+        self.opcodes = {
+            "NTR": 0x0F,
+            "NTS": 0x1F,
+            "NTC": 0x2F,
+            "NTP": 0x3F,
+            "INP": 0x00,
+            "INS": 0x10,
+            "INC": 0x20,
+            "INP": 0x30,
+            "OUT": 0x01,
+            "OUS": 0x11,
+            "OUC": 0x21,
+            "OUP": 0x31,
+            "SKB": 0x0E,
+            "SNB": 0x1E,
+            "SKD": 0x2E,
+            "SND": 0x3E,
+        }
+
 class AssembleCommand(AssemblerModule):
     def size(self, card: Card) -> int:
         return 0
@@ -350,12 +405,85 @@ class AssembleCommand(AssemblerModule):
 
 class Assembler:
     symbols: dict[str, int]
+    pc: int
+    cards: list[Card]
     
+    output: dict[int, list[int]]
     
+    modules: list[AssemblerModule]
+    
+    def __init__(self, filename: str):
+        self.symbols = {}
+        self.pc = 0
+        self.cards = []
+        self.output = {}
+        
+        self.modules = [
+            AssembleMR(),
+            AssembleAM(),
+            AssembleAA(),
+            AssembleIO(),
+            AssembleData()
+        ]
+        
+        self.commands = AssembleCommand()
+        
+        with open(filename) as file:
+            for line in file:
+                if line.rstrip() != "":
+                    self.cards.append(Card(line.rstrip()))
+    
+    def get_syms(self):
+        for card in self.cards:
+            if card.symbol is not None:
+                self.symbols[card.symbol] = self.pc
+        
+            if card.command is not None:
+                is_command = True
+                for module in self.modules:
+                    if module.will_assemble(card):
+                        is_command = False
+                        self.pc += module.size(card)
+                if is_command:
+                    self.pc = (
+                        self.commands.assemble(card, self.symbols, self.pc)[0]
+                    )
+    
+    def assemble(self):
+        current_sym = 0
+        for card in self.cards:        
+            if card.command is not None:
+                is_command = True
+                for module in self.modules:
+                    if module.will_assemble(card):
+                        self.output[current_sym] = (
+                            self.output.get(current_sym, []) + (
+                                module.assemble(card, self.symbols, self.pc)
+                            )
+                        )
+                        is_command = False
+                        self.pc += module.size(card)
+                if is_command:
+                    old_pc = self.pc
+                    self.pc = (
+                        self.commands.assemble(card, self.symbols, self.pc)[0]
+                    )
+                    if old_pc != self.pc:
+                        current_sym = self.pc
 
 """
         * A longer comment blah blah blah                               00001000
 LABEL008 ADA     1,2,CLC,SDA(3),RTA(3),SZR      This is the comment     00001020
+
+         origin  512
+
+start    xoa     1,1
+         xoa     2,2,skp
+         dw      12
+         
+         dw      0670000370012
+         
+ppt_loop jmp     .start
 
 >>> string[0:8].strip()
 'LABEL008'
