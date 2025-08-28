@@ -273,7 +273,7 @@ class AssembleAA(AssemblerModule):
         self.opcodes = {
             "OCA": 0xE0,
             "NEA": 0xE1,
-            "DAA": 0xE2,
+            "MVA": 0xE2,
             "ICA": 0xE3,
             "ACA": 0xE4,
             "SUA": 0xE5,

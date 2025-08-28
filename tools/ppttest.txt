@@ -8,13 +8,14 @@ TWELVE   DW      12
          NTS     10
          
 PPT_LOOP SKD     10
-         JMP     .-1
+         JMP     .PPT_LOOP
+         
          INS     10,0,0
-         DAA     0,0,NLA,SNR
+         MVA     0,0,NLA,SNR
          JMP     .PPT_LOOP
 
-         DAA     0,0,MSK(33)
-         DAA     1,1,RTA(3)
+         MVA     0,0,MSK(33)
+         MVA     1,1,RTA(3)
          IOA     0,1
          ISE     2,.TWELVE
          JMP     .PPT_LOOP
