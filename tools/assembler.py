@@ -41,6 +41,7 @@ def generate_address(
     Leading zero for octal, leading any other digit for decimal
     Leading letter for label
     """
+    arg = arg.strip()
     if arg[0] == '@':
         indirect = True
         arg = arg[1:]
@@ -240,8 +241,8 @@ def assemble_aa_arg(arg: str) -> int:
         "SBN": (static(7),        3,   15, 0         ),
     }
     
-    fn, bits, shl, extra = args_tbl[arg[0:3].upper()]
-    return ((fn(arg[3:]) & ((1 << bits) - 1)) << shl) | extra
+    fn, bits, shl, extra = args_tbl[arg.strip()[0:3].upper()]
+    return ((fn(arg.strip()[3:]) & ((1 << bits) - 1)) << shl) | extra
 
 class AssembleAA(AssemblerModule):
     def size(self, card: Card) -> int:
