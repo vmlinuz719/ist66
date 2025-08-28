@@ -297,18 +297,49 @@ class AssembleData(AssemblerModule):
         symbols: dict[str, int],
         pc: int
     ) -> list[int]:
+        command = card.command.strip().upper()
         args = card.argument.strip().split(",")
-        result = []
-        for arg in args:
-            if arg[0] == '0' or arg[0:2] == '-0':
-                result.append(int(arg, 8) & 0o777777777)
-            elif arg[0] in '0123456789-':
-                result.append(int(arg, 10) & 0o777777777)
-        return result
+        if command == "DW":
+            result = []
+            for arg in args:
+                if arg[0] == '0' or arg[0:2] == '-0':
+                    result.append(int(arg, 8) & 0o777777777)
+                elif arg[0] in '0123456789-':
+                    result.append(int(arg, 10) & 0o777777777)
+            return result
+        elif command == "USING":
+            result = 0
+            for arg in args:
+                if len(arg.split("-")) == 2:
+                    start_end = arg.split("-")
+                    start = int(start_end[0])
+                    end = int(start_end[1])
+                    
+                    if (
+                        (start < 0 or start > 15) or
+                        (end < 0 or end > 15) or
+                        (start >= end)
+                    ):
+                        raise ValueError("Bad USING range")
+                    
+                    for i in range(start, end + 1):
+                        result |= 1 << (15 - i)
+                elif "-" not in arg:
+                    i = int(arg)
+                    if i < 0 or i > 15:
+                        raise ValueError("Bad USING register")
+                    else:
+                        result |= 1 << (15 - i)
+                else:
+                    raise ValueError("Bad USING register")
+            return [result]
+        else:
+            raise ValueError("Syntax error")
         
     def __init__(self):
         self.opcodes = {
-            "DW": 0
+            "DW": 0,
+            "USING": 0
         }
 
 class AssembleIO(AssemblerModule):
