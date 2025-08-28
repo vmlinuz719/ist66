@@ -502,31 +502,3 @@ class Assembler:
                     )
                     if old_pc != self.pc:
                         current_sym = self.pc
-
-"""
-        * A longer comment blah blah blah                               00001000
-LABEL008 ADA     1,2,CLC,SDA(3),RTA(3),SZR      This is the comment     00001020
-
-         origin  512
-
-start    xoa     1,1
-         xoa     2,2,skp
-         dw      12
-         
-         dw      0670000370012
-         
-ppt_loop jmp     .start
-
->>> string[0:8].strip()
-'LABEL008'
->>> string[8].strip()
-''
->>> string[9:15].strip()
-'ADD'
->>> string[15:48].strip()
-"0,7,'123456701"
->>> string[48:72].strip()
-'This is the comment'
->>> string[72:80].strip()
-'00001020'
-"""
