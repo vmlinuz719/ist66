@@ -287,6 +287,42 @@ class AssembleAA(AssemblerModule):
     def will_assemble(self, card: Card) -> bool:
         return (card.command.strip().upper()[0:3] in self.opcodes)
 
+class AssembleBX(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 1
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> list[int]:
+        args = card.argument.strip().split(",")
+        if len(args) > 1 and len(args) < 4:
+            src = int(args[0])
+            tgt = int(args[1])
+            if len(args) == 3:
+                bs = int(args[2])
+                if bs < 0 or bs > 63:
+                    raise ValueError("Bad byte size")
+            else:
+                bs = 0
+
+            opcode = self.opcodes[card.command.strip().upper()]
+            return [(opcode << 27) | (src << 23) | (tgt << 18) | bs]
+        else:
+            raise ValueError("Syntax error")
+
+        
+    def __init__(self):
+        self.opcodes = {
+            "LAB": 0o040,
+            "DAB": 0o041,
+            "IXB": 0o042,
+            "ILB": 0o043,
+            "IDB": 0o044
+        }
+
 class AssembleData(AssemblerModule):
     def size(self, card: Card) -> int:
         args = card.argument.strip().split(",")
@@ -454,6 +490,7 @@ class Assembler:
             AssembleMR(),
             AssembleAM(),
             AssembleAA(),
+            AssembleBX(),
             AssembleIO(),
             AssembleData()
         ]
