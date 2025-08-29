@@ -868,6 +868,148 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute a byte instruction
+ *
+ * These are the type "BX" instructions from opcode 040-045; the 9-bit opcode is
+ * followed by a 4-bit accumulator selector \a n
+ *
+ * A byte pointer is 3 unused bits, a 6-bit bit offset and a 27-bit word
+ * address. See the PDP-10 for how byte extraction and index incrementation
+ * work.
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ */
+void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
+    uint64_t ac = (inst >> 23) & 0xF;
+    uint64_t ix = (inst >> 18) & 0xF;
+    uint64_t bs = inst & 0x3F;
+    
+    uint64_t ea = cpu->a[ix] & MASK_ADDR;
+    uint64_t sh = cpu->a[ix] >> 27;
+    
+    switch ((inst >> 27) & 0x1FF) {
+        case 040: { // LAB
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            data >>= sh;
+            data &= (1L << bs) - 1;
+            
+            cpu->a[ac] = data;
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 041: { // DAB
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            uint64_t mask = ((1L << bs) - 1) << sh;
+            uint64_t wr_data = (cpu->a[ac] << sh) & mask;
+            data &= ~mask;
+            data |= wr_data;
+            
+            uint64_t w_res =
+                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 042: { // IXB
+            sh -= bs;
+            if (sh > 36) {
+                sh = (36 - bs) & 0x3F;
+                ea = (ea + 1) & MASK_ADDR;
+            }
+            cpu->a[ac] = ea | (sh << 27);
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 043: { // ILB
+            sh -= bs;
+            if (sh > 36) {
+                sh = (36 - bs) & 0x3F;
+                ea = (ea + 1) & MASK_ADDR;
+            }
+            cpu->a[ix] = ea | (sh << 27);
+            
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            data >>= sh;
+            data &= (1L << bs) - 1;
+            
+            cpu->a[ac] = data;
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 044: { // IDB
+            sh -= bs;
+            if (sh > 36) {
+                sh = (36 - bs) & 0x3F;
+                ea = (ea + 1) & MASK_ADDR;
+            }
+            cpu->a[ix] = ea | (sh << 27);
+            
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            uint64_t mask = ((1L << bs) - 1) << sh;
+            uint64_t wr_data = (cpu->a[ac] << sh) & mask;
+            data &= ~mask;
+            data |= wr_data;
+            
+            uint64_t w_res =
+                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        default: {
+            // Illegal
+            do_except(cpu, X_INST);
+        }
+    }
+}
+
 void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
     if (!key) {
