@@ -890,7 +890,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t sh = cpu->a[ix] >> 27;
     
     switch ((inst >> 27) & 0x1FF) {
-        case 040: { // LAB
+        case 040: { // LCH
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -907,7 +907,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = data;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 041: { // DAB
+        case 041: { // DCH
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -935,7 +935,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 042: { // IXB
+        case 042: { // ICX
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -944,7 +944,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = ea | (sh << 27);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 043: { // ILB
+        case 043: { // ILC
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -968,7 +968,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = data;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 044: { // IDB
+        case 044: { // IDC
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;

@@ -316,11 +316,11 @@ class AssembleBX(AssemblerModule):
         
     def __init__(self):
         self.opcodes = {
-            "LAB": 0o040,
-            "DAB": 0o041,
-            "IXB": 0o042,
-            "ILB": 0o043,
-            "IDB": 0o044
+            "LCH": 0o040,
+            "DCH": 0o041,
+            "ICX": 0o042,
+            "ILC": 0o043,
+            "IDC": 0o044
         }
 
 class AssembleData(AssemblerModule):
