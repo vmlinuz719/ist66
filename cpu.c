@@ -1436,6 +1436,105 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Logically OR the FPU status into XY and clear it
+ *
+ * As we can't be sure which bits Berkeley SoftFloat has chosen to represent the
+ * IEEE exceptions - but only of their names - this function will test each one
+ * individually, logically OR it into register XY and then clear the thread-
+ * local value of @c softfloat_exceptionFlags .
+ *
+ * @param cpu Emulated CPU context
+ */
+void update_fpu_status(ist66_cu_t *cpu) {
+    int flags[5] = {
+        softfloat_flag_inexact,
+        softfloat_flag_underflow,
+        softfloat_flag_overflow,
+        softfloat_flag_infinite,
+        softfloat_flag_invalid
+    };
+    for (int i = 0; i < 5; i++) {
+        if ((softfloat_exceptionFlags & flags[i])) {
+            cpu->a[2] |= 1 << i;
+        }
+    }
+    softfloat_exceptionFlags = 0;
+}
+
+/**
+ * @brief Execute a floating-point instruction with a memory reference
+ *
+ * These are the basic type "FP" instructions from opcode 034; the 7-bit opcode
+ * and 2-bit FPU accumulator selector are followed by a 4-bit function selector
+ *    - 0: @c LFS - load FPU accumulator, single precision
+ *    - 1: @c LFD - load FPU accumulator, double precision
+ *
+ * Any other function selector will raise an unimplemented instruction trap.
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ */
+void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
+    uint64_t ea = comp_mr(cpu, inst);
+    
+    if (ea == MEM_FAULT) {
+        do_except(cpu, X_MEMX);
+        return;
+    } else if (ea == KEY_FAULT) {
+        do_except(cpu, X_PPFR);
+        return;
+    }
+    
+    uint64_t fpac = (inst >> 27) & 3;
+    fpac |= (cpu->c[C_FCW] & 3) << 2;
+    
+    switch ((inst >> 23) & 0xF) {
+        case 0: { // LFS
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            ist66f_to_extF80M(data, 0, &(cpu->f[fpac]));
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 1: { // LFD
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            uint64_t data_l = read_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1);
+            if (data_l == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data_l == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data_l &= MASK_36;
+            
+            ist66f_to_extF80M(data, data_l, &(cpu->f[fpac]));
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        default: {
+            // UMR
+            do_except(cpu, X_USER);
+        }
+    }
+}
+ 
 void *run(void *vctx) {
     ist66_cu_t *cpu = (ist66_cu_t *) vctx;
     

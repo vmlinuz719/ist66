@@ -9,6 +9,7 @@
 #define MASK_ADDR 0x7FFFFFFL
 #define C_PSW 0
 #define C_CW 1
+#define C_FCW 2
 #define MEM_FAULT (1L << 36)
 #define KEY_FAULT (1L << 37)
 
