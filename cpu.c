@@ -1545,6 +1545,37 @@ void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
             cpu->f[fpac].signExp = exp;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
+        case 3: { // LXS
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            uint64_t data_l = read_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1);
+            if (data_l == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data_l == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data_l &= MASK_36;
+            
+            uint64_t sign = data >> 35;
+            data |= 1L << 35;
+            data <<= 28;
+            data |= data_l >> 8;
+            if ((data_l & 0xFF)) cpu->a[2] |= 1;
+            cpu->f[fpac].signif = data;
+            cpu->f[fpac].signExp =
+                (cpu->f[fpac].signExp & 0x7FFF) | (sign << 15);
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
         case 4: { // DFS
             uint64_t data;
             int inexact = 0;
