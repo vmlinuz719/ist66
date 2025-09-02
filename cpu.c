@@ -317,6 +317,8 @@ uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
  *    - 1: @c JSR - save PC to AC12/LR, set program counter to effective address
  *    - 2: @c ISZ - increment contents of memory, skip next instruction if zero
  *    - 3: @c DSZ - decrement contents of memory, skip next instruction if zero
+ *    - 4: @c SZR - skip if contents of memory equal zero
+ *    - 5: @c SNZ - skip if contents of memory not equal to zero
  *
  * Any other function selector will raise an unimplemented instruction trap.
  *
@@ -391,6 +393,40 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
             }
             
             if (SKIP(result)) {
+                set_pc(cpu, get_pc(cpu) + 2);
+            } else {
+                set_pc(cpu, get_pc(cpu) + 1);
+            }
+        } break;
+        case 4: { // SZR
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            if (data == 0) {
+                set_pc(cpu, get_pc(cpu) + 2);
+            } else {
+                set_pc(cpu, get_pc(cpu) + 1);
+            }
+        } break;
+        case 5: { // SNZ
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            if (data != 0) {
                 set_pc(cpu, get_pc(cpu) + 2);
             } else {
                 set_pc(cpu, get_pc(cpu) + 1);
@@ -575,6 +611,8 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
  *    - 016: @c ADD - add contents of memory to AC\a n, complement carry flag on
  *      carry out
  *    - 017: @c AND - bitwise AND contents of memory to AC\a n
+ *    - 020: @c JZA - jump if AC\a n zero
+ *    - 021: @c JNA - jump if AC\a n nonzero
  *    - 022: @c IOR - bitwise OR contents of memory to AC\a n
  *    - 026: @c XOR - bitwise XOR contents of memory to AC\a n
  *
@@ -824,6 +862,14 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 020: { // JZA
+            if (cpu->a[ac] == 0) set_pc(cpu, ea);
+            else set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 021: { // JNA
+            if (cpu->a[ac] != 0) set_pc(cpu, ea);
+            else set_pc(cpu, get_pc(cpu) + 1);
         } break;
         case 022: { // ORM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
