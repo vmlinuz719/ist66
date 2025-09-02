@@ -1509,6 +1509,89 @@ void update_fpu_status(ist66_cu_t *cpu) {
 }
 
 /**
+ * @brief Execute a floating-point instruction with three FPAC registers
+ *
+ * @param cpu Emulated CPU context
+ * @param inst Instruction
+ */
+void exec_fp2(ist66_cu_t *cpu, uint64_t inst) {
+    int rmod = !!(cpu->c[C_FCW] & 4);
+    uint64_t rmod_override = (inst >> 15) & 3;
+    if (rmod_override == 1) rmod = 0;
+    else if (rmod_override == 2) rmod = 1;
+    
+    uint64_t fpac_d = (inst >> 27) & 3;
+    fpac_d |= (cpu->c[C_FCW] & 3) << 2;
+    
+    uint64_t fpac_t = (inst >> 18) & 3;
+    fpac_t |= (cpu->c[C_FCW] & 3) << 2;
+    
+    uint64_t fpac_s = (inst >> 20) & 3;
+    fpac_s |= (cpu->c[C_FCW] & 3) << 2;
+    
+    softfloat_roundingMode = rmod 
+        ? softfloat_round_near_even
+        : softfloat_round_minMag;
+    
+    switch ((inst >> 23) & 0xF) {
+        case 8: { // FAD
+            extF80M_add(
+                &(cpu->f[fpac_s]),
+                &(cpu->f[fpac_t]),
+                &(cpu->f[fpac_d])
+            );
+        } break;
+        case 9: { // FSB
+            extF80M_sub(
+                &(cpu->f[fpac_s]),
+                &(cpu->f[fpac_t]),
+                &(cpu->f[fpac_d])
+            );
+        } break;
+        case 10: { // FMY
+            extF80M_mul(
+                &(cpu->f[fpac_s]),
+                &(cpu->f[fpac_t]),
+                &(cpu->f[fpac_d])
+            );
+        } break;
+        case 11: { // FDV
+            extF80M_div(
+                &(cpu->f[fpac_s]),
+                &(cpu->f[fpac_t]),
+                &(cpu->f[fpac_d])
+            );
+        } break;
+        case 12: { // FSQ
+            extF80M_sqrt(
+                &(cpu->f[fpac_s]),
+                &(cpu->f[fpac_d])
+            );
+        } break;
+        case 13: { // FEQ
+            cpu->a[0] = extF80M_eq(
+                &(cpu->f[fpac_s]),
+                &(cpu->f[fpac_t])
+            );
+        } break;
+        case 14: { // FLE
+            cpu->a[0] = extF80M_le(
+                &(cpu->f[fpac_s]),
+                &(cpu->f[fpac_t])
+            );
+        } break;
+        case 15: { // FLT
+            cpu->a[0] = extF80M_lt(
+                &(cpu->f[fpac_s]),
+                &(cpu->f[fpac_t])
+            );
+        } break;
+    }
+    
+    update_fpu_status(cpu);
+    set_pc(cpu, get_pc(cpu) + 1);
+}
+/**
  * @brief Execute a floating-point instruction with a memory reference
  *
  * These are the basic type "FP" instructions from opcode 034; the 7-bit opcode
@@ -1520,6 +1603,16 @@ void update_fpu_status(ist66_cu_t *cpu) {
  * @param inst Instruction
  */
 void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
+    if (!!(cpu->c[C_FCW] & 8)) {
+        do_except(cpu, X_NFPU);
+        return;
+    }
+    
+    if (((inst >> 23) & 0xF) >= 8) {
+        // exec_fp2(cpu, inst);
+        return;
+    }
+    
     uint64_t ea = comp_mr(cpu, inst);
     
     if (ea == MEM_FAULT) {
