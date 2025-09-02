@@ -1467,8 +1467,6 @@ void update_fpu_status(ist66_cu_t *cpu) {
  *
  * These are the basic type "FP" instructions from opcode 034; the 7-bit opcode
  * and 2-bit FPU accumulator selector are followed by a 4-bit function selector
- *    - 0: @c LFS - load FPU accumulator, single precision
- *    - 1: @c LFD - load FPU accumulator, double precision
  *
  * Any other function selector will raise an unimplemented instruction trap.
  *
@@ -1526,6 +1524,86 @@ void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
             data_l &= MASK_36;
             
             ist66f_to_extF80M(data, data_l, &(cpu->f[fpac]));
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 2: { // LXE
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            
+            uint64_t exp = i36_to_exp15(data);
+            if (exp == 0x0000 && data != 0x0000) cpu->a[2] |= 2;
+            else if (exp == 0x7FFF) cpu->a[2] |= 4;
+            
+            exp |= cpu->f[fpac].signExp & 0x8000;
+            cpu->f[fpac].signExp = exp;
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 4: { // DFS
+            uint64_t data;
+            int inexact = 0;
+            if ((cpu->f[fpac].signif & 0777777777)) inexact = 1;
+            
+            int xflow = extF80M_to_ist66f36(
+                &(cpu->f[fpac]),
+                &data,
+                cpu->c[C_FCW] & 4
+            );
+            
+            uint64_t w_res =
+                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
+            if (inexact) cpu->a[2] |= 1;
+            if (xflow == -1) cpu->a[2] |= 2;
+            if (xflow == 1) cpu->a[2] |= 4;
+            
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 5: { // DFH
+            uint64_t data, data_l;
+            
+            int xflow = extF80M_to_ist66f72(
+                &(cpu->f[fpac]),
+                &data,
+                &data_l
+            );
+            
+            uint64_t w_res =
+                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
+            w_res =
+                write_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1, data_l);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
+            if (xflow == -1) cpu->a[2] |= 2;
+            if (xflow == 1) cpu->a[2] |= 4;
+            
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
         default: {
