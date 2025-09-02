@@ -1683,6 +1683,52 @@ void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
+        case 6: { // DXE
+            uint64_t data = exp15_to_i36(cpu->f[fpac].signExp & 0x7FFF);
+            
+            uint64_t w_res =
+                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 7: { // DXS
+            uint64_t data, data_l;
+            
+            uint64_t sign = cpu->f[fpac].signExp >> 15;
+            data = (cpu->f[fpac].signif >> 28) & MASK_36;
+            data &= ~(1L << 35);
+            data |= sign << 35;
+            data_l = (cpu->f[fpac].signif << 8) & MASK_36;
+            
+            uint64_t w_res =
+                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
+            w_res =
+                write_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1, data_l);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
         default: {
             // UMR
             do_except(cpu, X_USER);
