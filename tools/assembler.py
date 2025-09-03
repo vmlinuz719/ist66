@@ -1,5 +1,6 @@
 from typing import Optional
 from abc import ABC, abstractmethod
+import sys
 
 class Card:
     symbol: Optional[str]
@@ -344,9 +345,9 @@ class AssembleData(AssemblerModule):
             result = []
             for arg in args:
                 if arg[0] == '0' or arg[0:2] == '-0':
-                    result.append(int(arg, 8) & 0o777777777)
+                    result.append(int(arg, 8) & 0o777777777777)
                 elif arg[0] in '0123456789-':
-                    result.append(int(arg, 10) & 0o777777777)
+                    result.append(int(arg, 10) & 0o777777777777)
                 else:
                     result.append(symbols[arg])
             return result
@@ -545,3 +546,24 @@ class Assembler:
                     )
                     if old_pc != self.pc:
                         current_sym = self.pc
+
+    def print_ppt(self):
+        keys = list(self.output.keys())
+        for k in range(0, len(keys)):
+            blk = keys[k]
+            print(f"{blk:0{9}o}", end = "")
+            for i in self.output[blk]:
+                for sh in range(30, -1, -6):
+                    c = ((i >> sh) & 0o77) + 32
+                    print(chr(c), end = "")
+            if k == len(keys) - 1:
+                print("~")
+            else:
+                print("|", end = "")
+
+if __name__ == "__main__":
+    assembler = Assembler(sys.argv[1])
+    assembler.get_syms()
+    assembler.assemble()
+    assembler.print_ppt()
+    
