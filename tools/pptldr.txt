@@ -1,3 +1,14 @@
+        ****************************************************************
+        * SYCOM SYSTEM-700 PAPER TAPE BOOTSTRAP PROGRAM
+        *
+        * READS A SERIES OF TAPE RECORDS STARTING WITH AN OCTAL ADDRESS
+        * FOLLOWED BY A SEQUENCE OF PRINTABLE ASCII CHARACTERS 040-137
+        * CORRESPONDING TO OCTAL NUMBERS 00-77 AND TERMINATED BY A | OR
+        * ~ CHARACTER. ~ TELLS THE PROGRAM TO STOP READING THE TAPE AND
+        * PAUSE EXECUTION, | TELLS IT TO CONTINUE READING THE NEXT
+        * RECORD.
+        *
+
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
         
          ORIGIN  512
