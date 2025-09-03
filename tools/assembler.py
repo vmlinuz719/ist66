@@ -427,7 +427,7 @@ class AssembleIO(AssemblerModule):
             "NTS": 0x1F,
             "NTC": 0x2F,
             "NTP": 0x3F,
-            "INP": 0x00,
+            "INR": 0x00,
             "INS": 0x10,
             "INC": 0x20,
             "INP": 0x30,
