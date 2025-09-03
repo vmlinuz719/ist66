@@ -347,6 +347,8 @@ class AssembleData(AssemblerModule):
                     result.append(int(arg, 8) & 0o777777777)
                 elif arg[0] in '0123456789-':
                     result.append(int(arg, 10) & 0o777777777)
+                else:
+                    result.append(symbols[arg])
             return result
         elif command == "USING":
             result = 0

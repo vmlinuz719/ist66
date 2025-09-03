@@ -1441,47 +1441,6 @@ uint64_t exec_aa(
     return result;
 }
 
-void exec_all(ist66_cu_t *cpu, uint64_t inst) {
-    if (inst >> 33 == 0x7) { // ALU operation
-        uint64_t acs = (inst >> 27) & 0xF;
-        uint64_t acd = (inst >> 23) & 0xF;
-        uint64_t result = exec_aa(inst, cpu->a[acs], cpu->a[acd], get_cf(cpu));
-        if (((inst >> 11) & 0x7) == 0x4) {
-            // ADR encoding; save to alternate register
-            acd = (inst >> 7) & 0xF;
-        }
-        cpu->a[acd] = result & MASK_36;
-        set_cf(cpu, (result >> 36) & 1);
-        if (SKIP(result)) {
-            set_pc(cpu, get_pc(cpu) + 2);
-        } else {
-            set_pc(cpu, get_pc(cpu) + 1); 
-        }
-    }
-    else if (inst >> 27 == 0) {
-        exec_mr(cpu, inst);
-    }
-    else if (inst >> 27 <= 027) {
-        exec_am(cpu, inst);
-    }
-    else if (inst >> 27 == 030) {
-        exec_md(cpu, inst);
-    }
-    else if (inst >> 27 == 0100) {
-        exec_call(cpu, inst);
-    }
-    else if (inst >> 27 == 0670) {
-        exec_io1(cpu, inst);
-    }
-    else if (inst >> 33 == 06) {
-        exec_smi(cpu, inst);
-    }
-    else {
-        // Illegal
-        do_except(cpu, X_INST);
-    }
-}
-
 /**
  * @brief Logically OR the FPU status into XY and clear it
  *
@@ -1828,6 +1787,53 @@ void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
         }
     }
 }
+
+void exec_all(ist66_cu_t *cpu, uint64_t inst) {
+    if (inst >> 33 == 0x7) { // ALU operation
+        uint64_t acs = (inst >> 27) & 0xF;
+        uint64_t acd = (inst >> 23) & 0xF;
+        uint64_t result = exec_aa(inst, cpu->a[acs], cpu->a[acd], get_cf(cpu));
+        if (((inst >> 11) & 0x7) == 0x4) {
+            // ADR encoding; save to alternate register
+            acd = (inst >> 7) & 0xF;
+        }
+        cpu->a[acd] = result & MASK_36;
+        set_cf(cpu, (result >> 36) & 1);
+        if (SKIP(result)) {
+            set_pc(cpu, get_pc(cpu) + 2);
+        } else {
+            set_pc(cpu, get_pc(cpu) + 1); 
+        }
+    }
+    else if (inst >> 27 == 0) {
+        exec_mr(cpu, inst);
+    }
+    else if (inst >> 27 <= 027) {
+        exec_am(cpu, inst);
+    }
+    else if (inst >> 27 == 030) {
+        exec_md(cpu, inst);
+    }
+    else if (inst >> 27 == 034) {
+        exec_fp1(cpu, inst);
+    }
+    else if (inst >> 27 == 0100) {
+        exec_call(cpu, inst);
+    }
+    else if (inst >> 27 == 0670) {
+        exec_io1(cpu, inst);
+    }
+    else if (inst >> 30 == 04) {
+        exec_bx(cpu, inst);
+    }
+    else if (inst >> 33 == 06) {
+        exec_smi(cpu, inst);
+    }
+    else {
+        // Illegal
+        do_except(cpu, X_INST);
+    }
+}
  
 void *run(void *vctx) {
     ist66_cu_t *cpu = (ist66_cu_t *) vctx;
@@ -1956,25 +1962,37 @@ int main(int argc, char *argv[]) {
     init_lpt_ex(&cpu, 013, 5, "/dev/null");
     init_pch(&cpu, 014, 6);
     
-    cpu.memory[512] = 0xF08E00000;      // XOR    1,1
-    cpu.memory[513] = 0xF11608000;      // XOR    2,2,SKP
-    cpu.memory[514] = 0x00000000C;      // DW     12
-    
-    cpu.memory[515] = 0xDC001F00A;      // NTS    10
-    
-    cpu.memory[516] = 0xDC002E00A;      // SKPDN  10
-    cpu.memory[517] = 0x0000BFFFF;      // JMP    .-1
-    cpu.memory[518] = 0xDC001000A;      // INS    0,10,0
-    cpu.memory[519] = 0xE0022C000;      // MOV#   0,0,SNZ
-    cpu.memory[520] = 0x0000BFFFC;      // JMP    .-4
-    
-    cpu.memory[521] = 0xE00201080;      // MOVM   0,0,33
-    cpu.memory[522] = 0xE08A00003;      // MOVR   1,1,3
-    cpu.memory[523] = 0xF00A00000;      // OR     0,1
-    cpu.memory[524] = 0x0290BFFF6;      // ISE    2,.-10
-    cpu.memory[525] = 0x0000BFFF7;      // JMP    .-9
-    
-    cpu.memory[526] = 0xC00800000;      // HLT    1
+    cpu.memory[512] = 0xDC001F00A;
+    cpu.memory[513] = 0xF22600000;
+    cpu.memory[514] = 0xF11600000;
+    cpu.memory[515] = 0xDC002E00A;
+    cpu.memory[516] = 0x0000BFFFF;
+    cpu.memory[517] = 0xDC001000A;
+    cpu.memory[518] = 0xE0022C000;
+    cpu.memory[519] = 0x0000BFFFC;
+    cpu.memory[520] = 0xE00241080;
+    cpu.memory[521] = 0xE22200003;
+    cpu.memory[522] = 0xF02200000;
+    cpu.memory[523] = 0x029080011;
+    cpu.memory[524] = 0x0000BFFF7;
+    cpu.memory[525] = 0x01893FFFF;
+    cpu.memory[526] = 0xDC002E00A;
+    cpu.memory[527] = 0x0000BFFFF;
+    cpu.memory[528] = 0xDC181000A;
+    cpu.memory[529] = 0xE19A2C000;
+    cpu.memory[530] = 0x0000BFFFC;
+    cpu.memory[531] = 0x0190FFFDE;
+    cpu.memory[532] = 0x029080009;
+    cpu.memory[533] = 0x000080002;
+    cpu.memory[534] = 0x0000BFFEB;
+    cpu.memory[535] = 0x029080007;
+    cpu.memory[536] = 0x000080002;
+    cpu.memory[537] = 0xC008BFFE7;
+    cpu.memory[538] = 0x121040006;
+    cpu.memory[539] = 0x0000BFFF3;
+    cpu.memory[540] = 0x000000009;
+    cpu.memory[541] = 0x00000005B;
+    cpu.memory[542] = 0x00000005E;
     
     char cmd[512];
     int running = 1;

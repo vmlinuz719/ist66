@@ -1,0 +1,45 @@
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+        
+         ORIGIN  512
+
+PPT_INIT NTS     10
+
+START    XOA     4,4
+         XOA     2,2
+         
+GET_ADDR SKD     10
+         JMP     .GET_ADDR
+         
+         INS     10,0,0
+         MVA     0,0,NLA,SNR
+         JMP     .GET_ADDR
+
+         MVA     0,0,CLC,MSK(33)
+         MVA     4,4,RTA(3)
+         IOA     0,4
+         ISE     2,.NINE
+         JMP     .GET_ADDR
+         
+         LAD     1,-1(4)
+         
+GET_DATA SKD     10
+         JMP     .GET_DATA
+         
+         INS     10,3,0
+         MVA     3,3,NLA,SNR
+         JMP     .GET_DATA
+         
+         LAD     2,-042(3)
+         ISE     2,.PIPEMN1
+         JMP     .2
+         JMP     .START
+         ISE     2,.TILDE
+         JMP     .2
+         HLT     1,.PPT_INIT
+         
+         IDC     2,1,6
+         JMP     .GET_DATA
+
+NINE     DW      9
+PIPEMN1  DW      91
+TILDE    DW      94
