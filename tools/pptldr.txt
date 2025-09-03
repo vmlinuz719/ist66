@@ -4,7 +4,7 @@
 
 PPT_INIT NTS     10
 
-START    XOA     4,4
+START    XOA     3,3
          XOA     2,2
          
 GET_ADDR SKD     10
@@ -15,12 +15,12 @@ GET_ADDR SKD     10
          JMP     .GET_ADDR
 
          MVA     0,0,CLC,MSK(33)
-         MVA     4,4,RTA(3)
-         IOA     0,4
+         MVA     3,3,RTA(3)
+         IOA     0,3
          ISE     2,.NINE
          JMP     .GET_ADDR
          
-         LAD     1,-1(4)
+         LAD     1,-1(3)
          
 GET_DATA SKD     10
          JMP     .GET_DATA
