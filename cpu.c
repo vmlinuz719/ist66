@@ -611,8 +611,6 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
  *    - 016: @c ADD - add contents of memory to AC\a n, complement carry flag on
  *      carry out
  *    - 017: @c AND - bitwise AND contents of memory to AC\a n
- *    - 020: @c JZA - jump if AC\a n zero
- *    - 021: @c JNA - jump if AC\a n nonzero
  *    - 022: @c IOR - bitwise OR contents of memory to AC\a n
  *    - 026: @c XOR - bitwise XOR contents of memory to AC\a n
  *
@@ -862,14 +860,6 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 020: { // JZA
-            if (cpu->a[ac] == 0) set_pc(cpu, ea);
-            else set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 021: { // JNA
-            if (cpu->a[ac] != 0) set_pc(cpu, ea);
-            else set_pc(cpu, get_pc(cpu) + 1);
         } break;
         case 022: { // ORM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);

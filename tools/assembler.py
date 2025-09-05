@@ -193,8 +193,6 @@ class AssembleAM(AssemblerModule):
             "SUB": 0o015,
             "ADD": 0o016,
             "AND": 0o017,
-            "JZA": 0o020,
-            "JNA": 0o021,
             "IOR": 0o022,
             "XOR": 0o026,
 
