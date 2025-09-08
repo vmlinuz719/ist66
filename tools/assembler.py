@@ -339,7 +339,6 @@ def ascii7(string: str) -> list[int]:
             result.append(char)
             char = 0
     result.append(char)
-    print(result)
     return result
 
 class AssembleData(AssemblerModule):
