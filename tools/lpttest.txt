@@ -1,0 +1,34 @@
+        ****************************************************************
+        * SYCOM SYSTEM-700 LINE PRINTER TEST PROGRAM
+        *
+        * FAMOUS "HELLO WORLD" EXAMPLE.
+        *
+
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+        
+         ORIGIN  1024
+
+START    NTS     11
+         LAD     3,.STRMI1
+
+LPT_LOOP SNB     11
+         JMP     .LPT_LOOP
+         
+         ILC     0,3,7
+         MVA     0,0,NLA,SNR
+         JMP     .END
+         
+         OUS     11,0,0
+         JMP     .LPT_LOOP
+
+END      SNB     11
+         JMP     .END
+         
+         LAD     0,012
+         OUS     11,0,0
+         
+         XOA     0,0
+         HLT     0,.START
+
+STRMI1   BSS     1
+         ASCII   Hello, World!!!
