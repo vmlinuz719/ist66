@@ -326,10 +326,29 @@ class AssembleBX(AssemblerModule):
             "IDC": 0o044
         }
 
+def ascii7(string: str) -> list[int]:
+    result = []
+    char = 0
+    shamt = 29
+
+    for c in string:
+        char |= (ord(c) & 0x7F) << shamt
+        shamt -= 7
+        if shamt < 1:
+            shamt = 29
+            result.append(char)
+            char = 0
+    result.append(char)
+    print(result)
+    return result
+
 class AssembleData(AssemblerModule):
     def size(self, card: Card) -> int:
-        args = card.argument.strip().split(",")
-        return len(args)
+        if card.command == "ASCII":
+            return len(ascii7(card.argument.rstrip()))
+        else:
+            args = card.argument.strip().split(",")
+            return len(args)
     
     def assemble(
         self,
@@ -375,13 +394,16 @@ class AssembleData(AssemblerModule):
                 else:
                     raise ValueError("Bad USING register")
             return [result]
+        elif command == "ASCII":
+            return ascii7(card.argument.rstrip())
         else:
             raise ValueError("Syntax error")
         
     def __init__(self):
         self.opcodes = {
             "DW": 0,
-            "USING": 0
+            "USING": 0,
+            "ASCII": 0
         }
 
 class AssembleIO(AssemblerModule):

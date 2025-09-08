@@ -1949,8 +1949,8 @@ int main(int argc, char *argv[]) {
     init_cpu(&cpu, 65536, 512);
 
     init_ppt(&cpu, 012, 4);
-    init_lpt_ex(&cpu, 013, 5, "/dev/null");
-    init_pch(&cpu, 014, 6);
+    init_lpt(&cpu, 013, 5, stderr);
+    // init_pch(&cpu, 014, 6);
     
     cpu.memory[512] = 0670000370012;
     cpu.memory[513] = 0743170000000;

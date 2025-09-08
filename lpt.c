@@ -179,6 +179,11 @@ void init_lpt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
     pthread_create(&ctx->thread, NULL, lpt, ctx);
 }
 
+void init_lpt(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
+    init_lpt_any(cpu, id, irq, fd);
+    fprintf(stderr, "/DEV-I-UNIT %04o LPT IRQ %02o\n", id, irq);
+}
+
 void init_lpt_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
     FILE *fd = fopen(fname, "wb");
     if (fd == NULL) {
