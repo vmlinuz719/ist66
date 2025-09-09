@@ -15,7 +15,7 @@ LPT_LOOP SNB     11
          JMP     .LPT_LOOP
          
          ILC     0,3,7
-         MVA     0,0,NLA,SNR
+         SNA
          JMP     .END
          
          OUS     11,0,0
@@ -24,11 +24,10 @@ LPT_LOOP SNB     11
 END      SNB     11
          JMP     .END
          
-         LAD     0,012
+         LAD     012
          OUS     11,0,0
          
-         XOA     0,0
-         HLT     0,.START
+         HLT
 
 STRMI1   BSS     1
          ASCII   Hello, World!!!

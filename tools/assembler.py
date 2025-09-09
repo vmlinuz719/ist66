@@ -196,7 +196,7 @@ class AssembleAM(AssemblerModule):
             "IOR": 0o022,
             "XOR": 0o026,
 
-            "HLT": 0o600,
+            "WST": 0o600,
             "INT": 0o601,
             
             "LMK": 0o603,
@@ -324,6 +324,39 @@ class AssembleBX(AssemblerModule):
             "ICX": 0o042,
             "ILC": 0o043,
             "IDC": 0o044
+        }
+
+class AssembleHelper0(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 1
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> list[int]:
+        if card.argument is None:
+            opcode = self.opcodes[card.command.strip().upper()]
+            return [opcode]
+        else:
+            raise ValueError("Syntax error")
+
+        
+    def __init__(self):
+        self.opcodes = {
+            "HLT": 0o600002000001,
+            "NOP": 0o700010040000,
+            "CLC": 0o700011040000,
+            "STC": 0o700012040000,
+            "CMC": 0o700013040000,
+            "SKP": 0o700010140000,
+            "SZC": 0o700010240000,
+            "SNC": 0o700010340000,
+            "SZA": 0o700010440000,
+            "SNA": 0o700010540000,
+            "SEZ": 0o700010640000,
+            "SBN": 0o700010740000
         }
 
 def ascii7(string: str) -> list[int]:
@@ -497,6 +530,31 @@ class AssembleCommand(AssemblerModule):
             "ORIGIN": 0
         }
 
+helpers = {
+    "SZR": ("MVA", "{},0,NLA,SZR"),
+    "SNR": ("MVA", "{},0,NLA,SNR"),
+    "SER": ("MVA", "{},0,NLA,SEZ"),
+    "SBR": ("MVA", "{},0,NLA,SBN"),
+    "MSK": ("MVA", "0,0,MSK({})"),
+    "CMK": ("MVA", "0,0,CLC,MSK({})"),
+    "SMK": ("MVA", "0,0,STC,MSK({})"),
+    "RTA": ("MVA", "0,0,RTA({})"),
+    "RTC": ("MVA", "0,0,RTC({})"),
+    "TBZ": ("MVA", "0,0,CLC,MSK(35),RTA({}),NLA,SNR"),
+    "TBN": ("MVA", "0,0,CLC,MSK(35),RTA({}),NLA,SZR"),
+    "SEQ": ("SUA", "{},{},NLA,SZR"),
+    "SNE": ("SUA", "{},{},NLA,SNR"),
+    "SLE": ("SUA", "{},{},STC,NLA,SEZ"),
+    "SGT": ("SUA", "{},{},STC,NLA,SBN"),
+    "SGE": ("SUA", "{},{},CLC,NLA,SEZ"),
+    "SLT": ("SUA", "{},{},CLC,NLA,SBN"),
+    "MKA": ("MVA", "{0},{0},MSK({1})"),
+    "CMA": ("MVA", "{0},{0},CLC,MSK({1})"),
+    "SMA": ("MVA", "{0},{0},STC,MSK({1})"),
+    "RAA": ("MVA", "{0},{0},RTA({1})"),
+    "RCA": ("MVA", "{0},{0},RTC({1})")
+}
+
 class Assembler:
     symbols: dict[str, int]
     pc: int
@@ -517,6 +575,7 @@ class Assembler:
             AssembleAM(),
             AssembleAA(),
             AssembleBX(),
+            AssembleHelper0(),
             AssembleIO(),
             AssembleData()
         ]
@@ -526,7 +585,17 @@ class Assembler:
         with open(filename) as file:
             for line in file:
                 if line.rstrip() != "":
-                    self.cards.append(Card(line.rstrip()))
+                    card = Card(line.rstrip())
+                    
+                    command = (
+                        card.command.strip().upper() if card.command else None
+                    )
+                    if command in helpers:
+                        args = card.argument.strip().split(",")
+                        card.command = helpers[command][0]
+                        card.argument = helpers[command][1].format(*args)
+                    
+                    self.cards.append(card)
     
     def get_syms(self):
         for card in self.cards:

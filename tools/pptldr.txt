@@ -22,11 +22,11 @@ GET_ADDR SKD     10
          JMP     .GET_ADDR
          
          INS     10,0,0
-         MVA     0,0,NLA,SNR
+         SNA
          JMP     .GET_ADDR
 
-         MVA     0,0,CLC,MSK(33)
-         MVA     3,3,RTA(3)
+         CMK     33
+         RAA     3,3
          IOA     0,3
          ISE     2,.NINE
          JMP     .GET_ADDR
@@ -37,16 +37,16 @@ GET_DATA SKD     10
          JMP     .GET_DATA
          
          INS     10,3,0
-         MVA     3,3,NLA,SNR
+         SNR     3
          JMP     .GET_DATA
          
          LAD     2,-042(3)
          ISE     2,.PIPEMN1
-         JMP     .2
+         SKP
          JMP     .START
          ISE     2,.TILDE
-         JMP     .2
-         HLT     1,.PPT_INIT
+         SKP
+         HLT
          
          IDC     2,1,6
          JMP     .GET_DATA
