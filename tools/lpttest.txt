@@ -18,14 +18,14 @@ LPT_LOOP SNB     11
          SNA
          JMP     .END
          
-         OUS     11,0,0
+         WRS     11,0,0
          JMP     .LPT_LOOP
 
 END      SNB     11
          JMP     .END
          
          LAD     012
-         OUS     11,0,0
+         WRS     11,0,0
          
          HLT
 

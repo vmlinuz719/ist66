@@ -21,7 +21,7 @@ START    XOA     3,3
 GET_ADDR SKD     10
          JMP     .GET_ADDR
          
-         INS     10,0,0
+         RDS     10,0,0
          SNA
          JMP     .GET_ADDR
 
@@ -36,7 +36,7 @@ GET_ADDR SKD     10
 GET_DATA SKD     10
          JMP     .GET_DATA
          
-         INS     10,3,0
+         RDS     10,3,0
          SNR     3
          JMP     .GET_DATA
          
