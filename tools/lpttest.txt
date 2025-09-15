@@ -1,31 +1,31 @@
         ****************************************************************
-        * SYCOM SYSTEM-700 LINE PRINTER TEST PROGRAM
+        * ALCOM SYSTEM-700 LINE PRINTER TEST PROGRAM
         *
-        * FAMOUS "HELLO WORLD" EXAMPLE.
+        * FAMOUS "HELLO WORLD" EXAMPLE ILLUSTRATING NEW SYNTAX
         *
 
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
         
          ORIGIN  1024
 
-START    NTS     11
-         LAD     3,.STRMI1
+START    NIOS    11
+         LX      3,.STRMI1
 
-LPT_LOOP SNB     11
-         JMP     .LPT_LOOP
+LPT_LOOP TIOBZ   11
+         B       .LPT_LOOP
          
          ILC     0,3,7
-         SNA
-         JMP     .END
+         TACZ
+         B       .END
          
-         WRS     11,0,0
-         JMP     .LPT_LOOP
+         WIOS    11,0,0
+         B       .LPT_LOOP
 
-END      SNB     11
-         JMP     .END
+END      TIOBZ   11
+         B       .END
          
-         LAD     012
-         WRS     11,0,0
+         LX      012
+         WIOS    11,0,0
          
          HLT
 

@@ -123,25 +123,25 @@ class AssembleMR(AssemblerModule):
     
     def __init__(self):
         self.opcodes = {
-            "JMP": 0,
-            "JSR": 1,
-            "ISZ": 2,
-            "DSZ": 3,
-            "SZR": 4,
-            "SNZ": 5,
+            "B": 0,
+            "BAL": 1,
+            "ITNZ": 2,
+            "DTNZ": 3,
+            "TMNZ": 4,
+            "TMZ": 5,
             
-            "MPY": 0x180,
-            "MPA": 0x181,
+            "M": 0x180,
+            "MA": 0x181,
             "MNA": 0x182,
-            "DIV": 0x183,
+            "D": 0x183,
             
-            "CLM": 0x400,
-            "RTM": 0x401,
+            "BASM": 0x400,
+            "BRM": 0x401,
             
-            "XIN": 0x1820,
-            "RMS": 0x1821,
-            "LMS": 0x1822,
-            "DMS": 0x1823,
+            "RFI": 0x1820,
+            "RLMSK": 0x1821,
+            "LMSK": 0x1822,
+            "STMSK": 0x1823,
         }
 
 class AssembleAM(AssemblerModule):
@@ -173,37 +173,37 @@ class AssembleAM(AssemblerModule):
     
     def __init__(self):
         self.opcodes = {
-            "EDT": 0o001,
-            "ESK": 0o002,
+            "EDIT": 0o001,
+            "EDITS": 0o002,
             
-            "LAD": 0o003,
-            "AAD": 0o004,
+            "LX": 0o003,
+            "AX": 0o004,
             
-            "ISE": 0o005,
-            "DSE": 0o006,
+            "ITNE": 0o005,
+            "DTNE": 0o006,
             
-            "LAS": 0o007,
+            "LXH": 0o007,
             
-            "LCO": 0o010,
-            "LNG": 0o011,
-            "LAC": 0o012,
-            "DAC": 0o013,
+            "LCM": 0o010,
+            "LN": 0o011,
+            "L": 0o012,
+            "ST": 0o013,
             
-            "ADC": 0o014,
-            "SUB": 0o015,
-            "ADD": 0o016,
-            "AND": 0o017,
-            "IOR": 0o022,
-            "XOR": 0o026,
+            "AC": 0o014,
+            "S": 0o015,
+            "A": 0o016,
+            "AN": 0o017,
+            "O": 0o022,
+            "X": 0o026,
 
-            "WST": 0o600,
+            "WAIT": 0o600,
             "INT": 0o601,
             
-            "LMK": 0o603,
-            "DMK": 0o604,
+            "LSK": 0o603,
+            "STSK": 0o604,
             
-            "LCT": 0o605,
-            "DCT": 0o606,
+            "LCTL": 0o605,
+            "STCTL": 0o606,
         }
 
 def get_paren_arg(arg: str) -> str:
@@ -223,29 +223,30 @@ def assemble_aa_arg(arg: str) -> int:
         
     args_tbl = {
         #       fn                bits shl extra
-        "SDA": (get_paren_number, 4,   7,  0x2000    ),
+        "D": (get_paren_number, 4,   7,  0x2000    ),
         
-        "MSK": (get_paren_number, 7,   7,  0         ),
-        "RTA": (get_paren_number, 7,   0,  0         ),
-        "RTC": (get_paren_number, 7,   0,  0x80000000),
+        "M": (get_paren_number, 7,   7,  0         ),
+        "R": (get_paren_number, 7,   0,  0         ),
+        "RC": (get_paren_number, 7,   0,  0x80000000),
         
-        "NLA": (static(1),        1,   14, 0         ),
+        "NL": (static(1),        1,   14, 0         ),
         
-        "CLC": (static(1),        2,   18, 0         ),
-        "STC": (static(2),        2,   18, 0         ),
+        "CC": (static(1),        2,   18, 0         ),
+        "SC": (static(2),        2,   18, 0         ),
         "CMC": (static(3),        2,   18, 0         ),
         
-        "SKP": (static(1),        3,   15, 0         ),
-        "SZC": (static(2),        3,   15, 0         ),
-        "SNC": (static(3),        3,   15, 0         ),
-        "SZR": (static(4),        3,   15, 0         ),
-        "SNR": (static(5),        3,   15, 0         ),
-        "SEZ": (static(6),        3,   15, 0         ),
-        "SBN": (static(7),        3,   15, 0         ),
+        "TNV": (static(1),        3,   15, 0         ),
+        "TCNZ": (static(2),        3,   15, 0         ),
+        "TCZ": (static(3),        3,   15, 0         ),
+        "TRNZ": (static(4),        3,   15, 0         ),
+        "TRZ": (static(5),        3,   15, 0         ),
+        "TCRNZ": (static(6),        3,   15, 0         ),
+        "TCRZ": (static(7),        3,   15, 0         ),
     }
     
-    fn, bits, shl, extra = args_tbl[arg.strip()[0:3].upper()]
-    return ((fn(arg.strip()[3:]) & ((1 << bits) - 1)) << shl) | extra
+    argspl = arg.split("(")[0]
+    fn, bits, shl, extra = args_tbl[argspl.upper()]
+    return ((fn(arg.strip()[len(argspl):]) & ((1 << bits) - 1)) << shl) | extra
 
 class AssembleAA(AssemblerModule):
     def size(self, card: Card) -> int:
@@ -275,16 +276,16 @@ class AssembleAA(AssemblerModule):
         
     def __init__(self):
         self.opcodes = {
-            "OCA": 0xE0,
-            "NEA": 0xE1,
-            "MVA": 0xE2,
-            "ICA": 0xE3,
+            "CMA": 0xE0,
+            "NA": 0xE1,
+            "LA": 0xE2,
+            "IA": 0xE3,
             "ACA": 0xE4,
-            "SUA": 0xE5,
-            "ADA": 0xE6,
+            "SA": 0xE5,
+            "AA": 0xE6,
             "ANA": 0xE7,
-            "IOA": 0xF2,
-            "XOA": 0xF6,
+            "OA": 0xF2,
+            "XA": 0xF6,
         }
 
     def will_assemble(self, card: Card) -> bool:
@@ -319,11 +320,11 @@ class AssembleBX(AssemblerModule):
         
     def __init__(self):
         self.opcodes = {
-            "LCH": 0o040,
-            "DCH": 0o041,
+            "LC": 0o040,
+            "STC": 0o041,
             "ICX": 0o042,
             "ILC": 0o043,
-            "IDC": 0o044
+            "ISTC": 0o044
         }
 
 class AssembleHelper0(AssemblerModule):
@@ -347,16 +348,16 @@ class AssembleHelper0(AssemblerModule):
         self.opcodes = {
             "HLT": 0o600002000001,
             "NOP": 0o700010040000,
-            "CLC": 0o700011040000,
-            "STC": 0o700012040000,
+            "CC": 0o700011040000,
+            "SC": 0o700012040000,
             "CMC": 0o700013040000,
-            "SKP": 0o700010140000,
-            "SZC": 0o700010240000,
-            "SNC": 0o700010340000,
-            "SZA": 0o700010440000,
-            "SNA": 0o700010540000,
-            "SEZ": 0o700010640000,
-            "SBN": 0o700010740000
+            "TNV": 0o700010140000,
+            "TCNZ": 0o700010240000,
+            "TCZ": 0o700010340000,
+            "TACNZ": 0o700010440000,
+            "TACZ": 0o700010540000,
+            "TCACN": 0o700010640000,
+            "TCACZ": 0o700010740000
         }
 
 def ascii7(string: str) -> list[int]:
@@ -475,22 +476,22 @@ class AssembleIO(AssemblerModule):
         
     def __init__(self):
         self.opcodes = {
-            "NTR": 0x0F,
-            "NTS": 0x1F,
-            "NTC": 0x2F,
-            "NTP": 0x3F,
-            "RDR": 0x00,
-            "RDS": 0x10,
-            "RDC": 0x20,
-            "RDP": 0x30,
-            "WRT": 0x01,
-            "WRS": 0x11,
-            "WRC": 0x21,
-            "WRP": 0x31,
-            "SKB": 0x0E,
-            "SNB": 0x1E,
-            "SKD": 0x2E,
-            "SND": 0x3E,
+            "NIO": 0x0F,
+            "NIOS": 0x1F,
+            "NIOC": 0x2F,
+            "NIOP": 0x3F,
+            "RIO": 0x00,
+            "RIOS": 0x10,
+            "RIOC": 0x20,
+            "RIOP": 0x30,
+            "WIO": 0x01,
+            "WIOS": 0x11,
+            "WIOC": 0x21,
+            "WIOP": 0x31,
+            "TIONB": 0x0E,
+            "TIOBZ": 0x1E,
+            "TIOND": 0x2E,
+            "TIODN": 0x3E,
         }
 
 class AssembleCommand(AssemblerModule):
@@ -531,28 +532,29 @@ class AssembleCommand(AssemblerModule):
         }
 
 helpers = {
-    "SZR": ("MVA", "{},0,NLA,SZR"),
-    "SNR": ("MVA", "{},0,NLA,SNR"),
-    "SER": ("MVA", "{},0,NLA,SEZ"),
-    "SBR": ("MVA", "{},0,NLA,SBN"),
-    "MSK": ("MVA", "0,0,MSK({})"),
-    "CMK": ("MVA", "0,0,CLC,MSK({})"),
-    "SMK": ("MVA", "0,0,STC,MSK({})"),
-    "RTA": ("MVA", "0,0,RTA({})"),
-    "RTC": ("MVA", "0,0,RTC({})"),
-    "TBZ": ("MVA", "0,0,CLC,MSK(35),RTA({}),NLA,SNR"),
-    "TBN": ("MVA", "0,0,CLC,MSK(35),RTA({}),NLA,SZR"),
-    "SEQ": ("SUA", "{},{},NLA,SZR"),
-    "SNE": ("SUA", "{},{},NLA,SNR"),
-    "SLE": ("SUA", "{},{},STC,NLA,SEZ"),
-    "SGT": ("SUA", "{},{},STC,NLA,SBN"),
-    "SGE": ("SUA", "{},{},CLC,NLA,SEZ"),
-    "SLT": ("SUA", "{},{},CLC,NLA,SBN"),
-    "MKA": ("MVA", "{0},{0},MSK({1})"),
-    "CMA": ("MVA", "{0},{0},CLC,MSK({1})"),
-    "SMA": ("MVA", "{0},{0},STC,MSK({1})"),
-    "RAA": ("MVA", "{0},{0},RTA({1})"),
-    "RCA": ("MVA", "{0},{0},RTC({1})")
+    "TRNZ": ("LA", "{},0,NL,TRNZ"),
+    "TRZ": ("LA", "{},0,NL,TRZ"),
+    "TCRNZ": ("LA", "{},0,NL,TCRNZ"),
+    "TCRZ": ("LA", "{},0,NL,TCRZ"),
+    "MSAC": ("LA", "0,0,M({})"),
+    "CMAC": ("LA", "0,0,CC,M({})"),
+    "SMAC": ("LA", "0,0,SC,M({})"),
+    "RAC": ("LA", "0,0,R({})"),
+    "RCAC": ("LA", "0,0,RC({})"),
+    "TACBZ": ("LA", "0,0,CC,M(35),R({}),NL,TRZ"),
+    "TACBN": ("LA", "0,0,CC,M(35),R({}),NL,TRNZ"),
+    "TRNE": ("SA", "{},{},NL,TRNZ"),
+    "TREQ": ("SA", "{},{},NL,TRZ"),
+    "TRGT": ("SA", "{},{},SC,NL,TCRNZ"),
+    "TRLE": ("SA", "{},{},SC,NL,TCRZ"),
+    "TRLT": ("SA", "{},{},CC,NL,TCRNZ"),
+    "TRGE": ("SA", "{},{},CC,NL,TCRZ"),
+    "MSK": ("LA", "{0},{0},M({1})"),
+    "CMK": ("LA", "{0},{0},CC,M({1})"),
+    "SMK": ("LA", "{0},{0},SC,M({1})"),
+    "R": ("LA", "{0},{0},R({1})"),
+    "RC": ("LA", "{0},{0},RC({1})"),
+    "BRM": ("BRM", "0")
 }
 
 class Assembler:
@@ -591,7 +593,7 @@ class Assembler:
                         card.command.strip().upper() if card.command else None
                     )
                     if command in helpers:
-                        args = card.argument.strip().split(",")
+                        args = card.argument.strip().split(",") if card.argument else ""
                         card.command = helpers[command][0]
                         card.argument = helpers[command][1].format(*args)
                     

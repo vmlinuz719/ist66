@@ -1,5 +1,5 @@
         ****************************************************************
-        * SYCOM SYSTEM-700 PAPER TAPE BOOTSTRAP PROGRAM
+        * ALCOM SYSTEM-700 PAPER TAPE BOOTSTRAP PROGRAM
         *
         * READS A SERIES OF TAPE RECORDS STARTING WITH AN OCTAL ADDRESS
         * FOLLOWED BY A SEQUENCE OF PRINTABLE ASCII CHARACTERS 040-137
@@ -13,43 +13,43 @@
         
          ORIGIN  512
 
-PPT_INIT NTS     10
+PPT_INIT NIOS    10
 
-START    XOA     3,3
-         XOA     2,2
+START    XA      3,3
+         XA      2,2
          
-GET_ADDR SKD     10
-         JMP     .GET_ADDR
+GET_ADDR TIOND   10
+         B       .GET_ADDR
          
-         RDS     10,0,0
-         SNA
-         JMP     .GET_ADDR
+         RIOS    10,0,0
+         TACZ
+         B       .GET_ADDR
 
-         CMK     33
-         RAA     3,3
-         IOA     0,3
-         ISE     2,.NINE
-         JMP     .GET_ADDR
+         CMAC    33
+         R       3,3
+         OA      0,3
+         ITNE    2,.NINE
+         B       .GET_ADDR
          
-         LAD     1,-1(3)
+         LX      1,-1(3)
          
-GET_DATA SKD     10
-         JMP     .GET_DATA
+GET_DATA TIOND   10
+         B       .GET_DATA
          
-         RDS     10,3,0
-         SNR     3
-         JMP     .GET_DATA
+         RIOS    10,3,0
+         TRZ     3
+         B       .GET_DATA
          
-         LAD     2,-042(3)
-         ISE     2,.PIPEMN1
-         SKP
-         JMP     .START
-         ISE     2,.TILDE
-         SKP
+         LX      2,-042(3)
+         ITNE    2,.PIPEMN1
+         TNV
+         B       .START
+         ITNE    2,.TILDE
+         TNV
          HLT
          
-         IDC     2,1,6
-         JMP     .GET_DATA
+         ISTC    2,1,6
+         B       .GET_DATA
 
 NINE     DW      9
 PIPEMN1  DW      91
