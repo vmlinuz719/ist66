@@ -1256,8 +1256,9 @@ void exec_call(ist66_cu_t *cpu, uint64_t inst) {
             uint64_t temp_sp = cpu->a[13];
             
             for (int i = 0; i < 16; i++) {
-                if ((mask << i) & 1) {
+                if ((mask >> i) & 1) {
                     int reg = 15 - i;
+                    printf("Push reg %d\n", reg);
                     uint64_t w_res =
                         write_mem(
                             cpu, cpu->c[C_PSW] >> 28, --temp_sp, cpu->a[reg]
@@ -1314,8 +1315,9 @@ void exec_call(ist66_cu_t *cpu, uint64_t inst) {
             int restored_sp = 0;
             
             for (int i = 0; i < 16; i++) {
-                if ((mask << (15 - i)) & 1) {
+                if ((mask >> (15 - i)) & 1) {
                     int reg = i;
+                    printf("Pop reg %d\n", reg);
                     uint64_t r_res =
                         read_mem(
                             cpu, cpu->c[C_PSW] >> 28, temp_sp++
