@@ -1,0 +1,40 @@
+        *THIS PROGRAM SHOULD NOT BE RUN ON ITS OWN!!!
+        
+         ORIGIN  1024
+
+START    HLT
+
+        ****************************************************************
+        * LPTWRITE - PRINT 7-BIT ASCII TO LINE PRINTER
+        *
+        * AP + 00 -> PRINTER DEVICE ID
+        *    + 01 -> BASE OF STRING (NULL-TERMINATED BUFFER)
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+LPTWRITE USING   0,2,3
+
+         LX      3,-1                           GET ONE BEFORE STRING
+         A       3,1(11)                        TO INIT INDEX PROPERLY
+         
+         L       2,0(11)                        DEVICE ID
+         
+LPW_LOOP EDITS   2,.1                           OVERWRITE DEVICE ID
+         TIOBZ   0                              LOOP IF PRINTER BUSY
+         B       .LPW_LOOP
+         
+         ILC     0,3,7                          GET CHARACTER
+         TACZ                                   BREAK OUT ON NULL
+         B       .LPW_END
+         
+         EDITS   2,.1                           OVERWRITE DEVICE ID
+         WIOS    0,0,0                          SEND CHARACTER TO LPT
+         
+         B       .LPW_LOOP
+
+LPW_END  EDITS   2,.1                           OVERWRITE DEVICE ID
+         TIOBZ   0                              LOOP IF LPT STILL BUSY
+         B       .LPW_END
+         
+         BRM                                    DONE.
+
