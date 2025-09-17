@@ -1988,6 +1988,8 @@ int main(int argc, char *argv[]) {
     int running = 1;
     uint64_t ptr = 0;
     
+    printf("USE COMMAND /1000GW FOR PAPER TAPE LOADER\n");
+    
     while (running) {
         printf("> ");
         if (fgets(cmd, sizeof(cmd), stdin) == NULL) break;
