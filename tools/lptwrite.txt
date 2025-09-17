@@ -12,7 +12,7 @@ START    LX      13,STACK
 LPT_ARG  DW      11
          DW      STRING
 
-STRING   ASCII   Hello, World!!!\012
+STRING   ASCII   Hellorld!\012
 
         ****************************************************************
         * LPTWRITE - PRINT 7-BIT ASCII TO LINE PRINTER
