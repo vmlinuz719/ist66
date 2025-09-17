@@ -1,8 +1,18 @@
-        *THIS PROGRAM SHOULD NOT BE RUN ON ITS OWN!!!
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
         
          ORIGIN  1024
 
-START    HLT
+START    LX      13,STACK
+
+         LX      11,.LPT_ARG
+         BASM    .LPTWRITE
+         
+         HLT
+
+LPT_ARG  DW      11
+         DW      STRING
+
+STRING   ASCII   Hello, World!!!\012
 
         ****************************************************************
         * LPTWRITE - PRINT 7-BIT ASCII TO LINE PRINTER
@@ -38,3 +48,8 @@ LPW_END  EDITS   2,.1                           OVERWRITE DEVICE ID
          
          BRM                                    DONE.
 
+        ****************************************************************
+
+         ORIGIN  2048
+
+STACK    BSS     0

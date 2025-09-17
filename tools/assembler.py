@@ -365,8 +365,18 @@ def ascii7(string: str) -> list[int]:
     char = 0
     shamt = 29
 
-    for c in string:
-        char |= (ord(c) & 0x7F) << shamt
+    i = 0
+    while i < len(string):
+        if string[i] == "\\":
+            i += 1
+            octal = string[i:i+3]
+            i += 3
+            c = int(octal, 8)
+        else:
+            c = ord(string[i])
+            i += 1
+            
+        char |= (c & 0x7F) << shamt
         shamt -= 7
         if shamt < 1:
             shamt = 29

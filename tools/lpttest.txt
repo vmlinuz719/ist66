@@ -30,4 +30,4 @@ END      TIOBZ   11
          HLT
 
 STRMI1   BSS     1
-         ASCII   Hello, World!!!
+         ASCII   \110ello, World!!!
