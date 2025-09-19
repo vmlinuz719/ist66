@@ -20,7 +20,7 @@ START    LX      13,STACK
 
 LPT_ARG  DW      11,0
 
-O2A_ARG  DW      0123456701234,12,NUM_BUF
+O2A_ARG  DW      0123456701234,NUM_BUF
 
 STRING   ASCII   Hellorld!\012
 NUM_BUF  DW      0,0,0
@@ -63,19 +63,18 @@ LPW_END  EDITS   2,.1                           OVERWRITE DEVICE ID
         * OCT2ASCI - GENERATE OCTAL STRING FROM WORD
         *
         * AP + 00 -> NUMBER TO CONVERT
-        *    + 01 -> MAX. DIGITS
-        *    + 02 -> BASE OF STRING (NULL-TERMINATED BUFFER)
+        *    + 01 -> BASE OF STRING (NULL-TERMINATED BUFFER)
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
 OCT2ASCI USING   0,2,3,4
 
          LX      3,-1                           GET ONE BEFORE STRING
-         A       3,2(11)                        TO INIT INDEX PROPERLY
+         A       3,1(11)                        TO INIT INDEX PROPERLY
          
          L       2,0(11)                        ARGUMENT
          
-         LN      0,1(11)                        ITERATE -N DIGITS
+         LX      0,-12                          ITERATE -12 DIGITS
 
 O2A_LOOP R       2,3                            EXTRACT NEXT DIGIT
          LA      2,4,CC,M(33)
