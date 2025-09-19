@@ -79,7 +79,9 @@ OCT2ASCI USING   0,2,3,4
 O2A_LOOP R       2,3                            EXTRACT NEXT DIGIT
          LA      2,4,CC,M(33)
          LX      4,48(4)                        CONVERT TO ASCII
+         
          ISTC    4,3,7                          DEPOSIT CHARACTER
+         
          IA      0,0,TRNZ                       REPEAT UNTIL DONE
          B       .O2A_LOOP
          
