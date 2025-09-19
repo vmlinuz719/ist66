@@ -1021,6 +1021,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
                 return;
             }
             data &= MASK_36;
+            // fprintf(stderr, "Write char %ld -> %ld\n", cpu->a[ac], ea);
             
             uint64_t mask = ((1L << bs) - 1) << sh;
             uint64_t wr_data = (cpu->a[ac] << sh) & mask;

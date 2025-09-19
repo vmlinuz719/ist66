@@ -3,16 +3,27 @@
          ORIGIN  1024
 
 START    LX      13,STACK
-
+         
+         LX      11,.O2A_ARG
+         BASM    .OCT2ASCI
+         
+         LX      0,.NUM_BUF
          LX      11,.LPT_ARG
+         ST      0,1(11)
+         BASM    .LPTWRITE
+         
+         LX      0,.STRING
+         ST      0,1(11)
          BASM    .LPTWRITE
          
          HLT
 
-LPT_ARG  DW      11
-         DW      STRING
+LPT_ARG  DW      11,0
+
+O2A_ARG  DW      0123456701234,12,NUM_BUF
 
 STRING   ASCII   Hellorld!\012
+NUM_BUF  DW      0,0,0
 
         ****************************************************************
         * LPTWRITE - PRINT 7-BIT ASCII TO LINE PRINTER
@@ -45,6 +56,36 @@ LPW_LOOP EDITS   2,.1                           OVERWRITE DEVICE ID
 LPW_END  EDITS   2,.1                           OVERWRITE DEVICE ID
          TIOBZ   0                              LOOP IF LPT STILL BUSY
          B       .LPW_END
+         
+         BRM                                    DONE.
+
+        ****************************************************************
+        * OCT2ASCI - GENERATE OCTAL STRING FROM WORD
+        *
+        * AP + 00 -> NUMBER TO CONVERT
+        *    + 01 -> MAX. DIGITS
+        *    + 02 -> BASE OF STRING (NULL-TERMINATED BUFFER)
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+OCT2ASCI USING   0,2,3,4
+
+         LX      3,-1                           GET ONE BEFORE STRING
+         A       3,2(11)                        TO INIT INDEX PROPERLY
+         
+         L       2,0(11)                        ARGUMENT
+         
+         LN      0,1(11)                        ITERATE -N DIGITS
+
+O2A_LOOP R       2,3                            EXTRACT NEXT DIGIT
+         LA      2,4,CC,M(33)
+         LX      4,48(4)                        CONVERT TO ASCII
+         ISTC    4,3,7                          DEPOSIT CHARACTER
+         IA      0,0,TRNZ                       REPEAT UNTIL DONE
+         B       .O2A_LOOP
+         
+         XA      4,4                            NULL TERMINATOR
+         ISTC    4,3,7
          
          BRM                                    DONE.
 

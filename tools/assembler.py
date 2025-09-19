@@ -389,6 +389,8 @@ class AssembleData(AssemblerModule):
     def size(self, card: Card) -> int:
         if card.command == "ASCII":
             return len(ascii7(card.argument.rstrip()))
+        elif card.command == "USING":
+            return 1
         else:
             args = card.argument.strip().split(",")
             return len(args)
