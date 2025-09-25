@@ -5,16 +5,16 @@
 START    LX      13,STACK
          
          LX      11,.O2A_ARG
-         BASM    .OCT2ASCI
+         BSM     .OCT2ASCI
          
          LX      0,.NUM_BUF
          LX      11,.LPT_ARG
          ST      0,1(11)
-         BASM    .LPTWRITE
+         BSM     .LPTWRITE
          
          LX      0,.STRING
          ST      0,1(11)
-         BASM    .LPTWRITE
+         BSM     .LPTWRITE
          
          HLT
 

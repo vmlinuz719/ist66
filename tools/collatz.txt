@@ -7,7 +7,7 @@ START    LX      13,STACK
          LX      0,27
          ST      0,0-
          LA      13,11
-         BASM    .COLLATZ
+         BSM     .COLLATZ
          
          HLT
 
@@ -37,23 +37,23 @@ COL_EVEN LA      0,0,SC,RC(-1)                  N/2 IF EVEN
 COL_PRT  NA      0,2                            GET POSITIVE
          LX      11,.O2A_ARG                    SETUP OCTAL TO ASCII
          ST      2,0(11)                        SAVE NUMBER
-         BASM    .OCT2ASCI
+         BSM     .OCT2ASCI
          
          LX      2,.COL_NBUF                    PRINT NUMBER
          LX      11,.LPT_ARG
          ST      2,1(11)
-         BASM    .LPTWRITE
+         BSM     .LPTWRITE
          
          LX      2,.COL_CMMA                    PRINT COMMA
          ST      2,1(11)
-         BASM    .LPTWRITE
+         BSM     .LPTWRITE
          
          B       .COL_LOOP                      CONTINUE
 
 COL_END  LX      2,.COL_ENDL                    END LINE
          LX      11,.LPT_ARG
          ST      2,1(11)
-         BASM    .LPTWRITE
+         BSM     .LPTWRITE
          
          BRM                                    DONE.
 

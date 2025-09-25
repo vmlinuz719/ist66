@@ -124,7 +124,7 @@ class AssembleMR(AssemblerModule):
     def __init__(self):
         self.opcodes = {
             "B": 0,
-            "BAL": 1,
+            "BL": 1,
             "ITNZ": 2,
             "DTNZ": 3,
             "TMNZ": 4,
@@ -135,7 +135,7 @@ class AssembleMR(AssemblerModule):
             "MNA": 0x182,
             "D": 0x183,
             
-            "BASM": 0x400,
+            "BSM": 0x400,
             "BRM": 0x401,
             
             "RFI": 0x1820,
