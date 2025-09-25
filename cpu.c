@@ -1422,8 +1422,8 @@ uint64_t exec_aa(
     int nl = (int) ((inst >> 14) & 0x1);
     int rc = (int) ((inst >> 31) & 0x1);
     
-    uint64_t mk_u = ((inst >> 7) & 0x3F);
-    uint64_t rt_u = (inst & 0x3F);
+    uint64_t mk_u = ((inst >> 7) & 0x7F);
+    uint64_t rt_u = (inst & 0x7F);
     
     int mk = (int) (EXT7(mk_u));
     int rt = (int) (EXT7(rt_u));
