@@ -1899,7 +1899,7 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     cpu->io = calloc(sizeof(ist66_io_t), max_io);
     cpu->ioctx = calloc(sizeof(void *), max_io);
     cpu->max_io = max_io;
-    cpu->mask = 0xFFFF;
+    cpu->mask = 0;
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
