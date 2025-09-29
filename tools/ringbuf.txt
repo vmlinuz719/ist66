@@ -146,8 +146,6 @@ S9_TBL   DW      0033000000000,0022000000000
         *    +256 -> READ INDEX
         *    +257 -> WRITE INDEX
         *
-        * INITIALIZATION IS TRIVIAL
-        *
 
         ****************************************************************
         * RB_READ - GET BYTE FROM RING BUFFER
@@ -176,6 +174,38 @@ RB_READ  USING   2,3,4,5,12
          BRM                                    DONE.
 
 RR_EMPTY SMAC    36                             EMPTY; RETURN -1
+         BRM
+
+        ****************************************************************
+        * RB_WRITE - WRITE BYTE TO RING BUFFER
+        *
+        * AP + 00 -> BUFFER ADDRESS
+        *    + 01 -> BYTE VALUE
+        *  RETURN -> 0 OR -1 IF EMPTY
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+RB_WRITE USING   2,3,4,5,6,12
+
+         L       3,0(11)
+         
+         L       4,256(3)                       GET READ INDEX
+         L       5,257(3)                       GET WRITE INDEX
+         IA      5,6,CC,M(26)                   FULL IF W + 1 = R
+         TREQ    6,4
+         B       .RW_FULL
+         
+         LA      3,0,CC,R(2)                    MAKE BYTE INDEX
+         AA      5,0
+         L       2,1(11)                        SAVE BYTE
+         BL      .STORNINE
+         
+         ST      6,257(3)                       SAVE INCREMENTED INDEX
+         
+         XA      0,0
+         BRM                                    DONE; RETURN 0
+         
+RW_FULL  SMAC    36                             FULL; RETURN -1
          BRM
 
         ****************************************************************
