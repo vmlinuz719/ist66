@@ -116,8 +116,8 @@ STORNINE ST      3,1-                           SAVE X0
         ****************************************************************
         * SUBROUTINE LOADNINE - LOAD 9-BIT BYTE
         *
-        * AC (0)  -> ADDRESS OF BYTE (WORD INDEX << 2) | BYTE INDEX
-        * XY (2)  -> BYTE VALUE
+        *  AC (0) -> ADDRESS OF BYTE (WORD INDEX << 2) | BYTE INDEX
+        *  RETURN -> BYTE VALUE
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
@@ -129,7 +129,7 @@ LOADNINE ST      3,1-                           SAVE X0
          LA      0,3,CC,M(2),R(-2)
          A       3,0(4)
          
-         LC      2,3,9                          LOAD BYTE
+         LC      0,3,9                          LOAD BYTE
          
          L       4,1+                           RESTORE X1
          L       3,1+                           RESTORE X0
@@ -169,7 +169,6 @@ RB_READ  USING   2,3,4,5,12
          LA      3,0,CC,R(2)                    MAKE BYTE INDEX
          AA      4,0
          BL      .LOADNINE                      GET BYTE
-         LA      2,0
          
          IA      4,4,CC,M(26)                   INCREMENT READ INDEX
          ST      4,256(3)
