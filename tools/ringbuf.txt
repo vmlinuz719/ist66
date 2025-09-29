@@ -1,0 +1,186 @@
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+        
+         ORIGIN  1024
+
+START    LX      13,STACK
+         
+         LX      11,.O2A_ARG
+         BSM     .OCT2ASCI
+         
+         LX      0,.NUM_BUF
+         LX      11,.LPT_ARG
+         ST      0,1(11)
+         BSM     .LPTWRITE
+         
+         LX      0,.STRING
+         ST      0,1(11)
+         BSM     .LPTWRITE
+         
+         HLT
+
+LPT_ARG  DW      11,0
+
+O2A_ARG  DW      0123456701234,NUM_BUF
+
+STRING   ASCII   Hellorld!\012
+NUM_BUF  DW      0,0,0
+
+        ****************************************************************
+        * LPTWRITE - PRINT 7-BIT ASCII TO LINE PRINTER
+        *
+        * AP + 00 -> PRINTER DEVICE ID
+        *    + 01 -> BASE OF STRING (NULL-TERMINATED BUFFER)
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+LPTWRITE USING   0,2,3
+
+         LX      3,-1                           GET ONE BEFORE STRING
+         A       3,1(11)                        TO INIT INDEX PROPERLY
+         
+         L       2,0(11)                        DEVICE ID
+         
+LPW_LOOP EDITS   2,.1                           OVERWRITE DEVICE ID
+         TIOBZ   0                              LOOP IF PRINTER BUSY
+         B       .LPW_LOOP
+         
+         ILC     0,3,7                          GET CHARACTER
+         TACZ                                   BREAK OUT ON NULL
+         B       .LPW_END
+         
+         EDITS   2,.1                           OVERWRITE DEVICE ID
+         WIOS    0,0,0                          SEND CHARACTER TO LPT
+         
+         B       .LPW_LOOP
+
+LPW_END  EDITS   2,.1                           OVERWRITE DEVICE ID
+         TIOBZ   0                              LOOP IF LPT STILL BUSY
+         B       .LPW_END
+         
+         BRM                                    DONE.
+
+        ****************************************************************
+        * OCT2ASCI - GENERATE OCTAL STRING FROM WORD
+        *
+        * AP + 00 -> NUMBER TO CONVERT
+        *    + 01 -> BASE OF STRING (NULL-TERMINATED BUFFER)
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+OCT2ASCI USING   0,2,3,4
+
+         LX      3,-1                           GET ONE BEFORE STRING
+         A       3,1(11)                        TO INIT INDEX PROPERLY
+         
+         L       2,0(11)                        ARGUMENT
+         
+         LX      0,-12                          ITERATE -12 DIGITS
+
+O2A_LOOP R       2,3                            EXTRACT NEXT DIGIT
+         LA      2,4,CC,M(33)
+         LX      4,48(4)                        CONVERT TO ASCII
+         
+         ISTC    4,3,7                          DEPOSIT CHARACTER
+         
+         IA      0,0,TRNZ                       REPEAT UNTIL DONE
+         B       .O2A_LOOP
+         
+         XA      4,4                            NULL TERMINATOR
+         ISTC    4,3,7
+         
+         BRM                                    DONE.
+
+        ****************************************************************
+        * SUBROUTINE STORNINE - STORE 9-BIT BYTE
+        *
+        * AC (0)  -> ADDRESS OF BYTE (WORD INDEX << 2) | BYTE INDEX
+        * XY (2)  -> BYTE VALUE
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+STORNINE ST      3,1-                           SAVE X0
+         ST      4,1-                           SAVE X1
+
+         LA      0,4,CC,M(34)                   CALCULATE BYTE POINTER
+         AX      4,.S9_TBL
+         LA      0,3,CC,M(2),R(-2)
+         A       3,0(4)
+         
+         STC     2,3,9                          STORE BYTE
+         
+         L       4,1+                           RESTORE X1
+         L       3,1+                           RESTORE X0
+         
+         B       0(12)                          DONE.
+
+        ****************************************************************
+        * SUBROUTINE LOADNINE - LOAD 9-BIT BYTE
+        *
+        * AC (0)  -> ADDRESS OF BYTE (WORD INDEX << 2) | BYTE INDEX
+        * XY (2)  -> BYTE VALUE
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+LOADNINE ST      3,1-                           SAVE X0
+         ST      4,1-                           SAVE X1
+
+         LA      0,4,CC,M(34)                   CALCULATE BYTE POINTER
+         AX      4,.S9_TBL
+         LA      0,3,CC,M(2),R(-2)
+         A       3,0(4)
+         
+         LC      2,3,9                          LOAD BYTE
+         
+         L       4,1+                           RESTORE X1
+         L       3,1+                           RESTORE X0
+         
+         B       0(12)                          DONE.
+
+S9_TBL   DW      0033000000000,0022000000000
+         DW      0011000000000,0
+
+        ****************************************************************
+        * RING BUFFER STRUCTURE
+        *
+        *    + 00 -> 256-WORD (1024-BYTE) BUFFER
+        *    +256 -> READ INDEX
+        *    +257 -> WRITE INDEX
+        *
+        * INITIALIZATION IS TRIVIAL
+        *
+
+        ****************************************************************
+        * RB_READ - GET BYTE FROM RING BUFFER
+        *
+        * AP + 00 -> BUFFER ADDRESS
+        *  RETURN -> BYTE OR -1 IF EMPTY
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+RB_READ  USING   2,3,4,5,12
+
+         L       3,0(11)
+         
+         L       4,256(3)                       GET READ INDEX
+         L       5,257(3)                       GET WRITE INDEX
+         TREQ    4,5                            EMPTY IF EQUAL
+         B       .RR_EMPTY
+         
+         LA      3,0,CC,R(2)                    MAKE BYTE INDEX
+         AA      4,0
+         BL      .LOADNINE                      GET BYTE
+         LA      2,0
+         
+         IA      4,4,CC,M(26)                   INCREMENT READ INDEX
+         ST      4,256(3)
+         
+         BRM                                    DONE.
+
+RR_EMPTY SMAC    36                             EMPTY; RETURN -1
+         BRM
+
+        ****************************************************************
+
+         ORIGIN  2048
+
+STACK    BSS     0
