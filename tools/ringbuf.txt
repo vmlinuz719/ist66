@@ -16,7 +16,18 @@ START    LX      13,STACK
          ST      0,1(11)
          BSM     .LPTWRITE
          
-         HLT
+         LX      4,.STRING
+         LX      4,-1(4)
+         LX      11,.RB_ARG
+         
+BUF_LOOP ILC     0,4,7
+         TACZ
+         B       .END
+         ST      0,1(11)
+         BSM     .RB_WRITE
+         B       .BUF_LOOP
+         
+END      HLT
 
 LPT_ARG  DW      11,0
 
@@ -24,6 +35,8 @@ O2A_ARG  DW      0123456701234,NUM_BUF
 
 STRING   ASCII   Hellorld!\012
 NUM_BUF  DW      0,0,0
+
+RB_ARG   DW      BUFFER,0
 
         ****************************************************************
         * LPTWRITE - PRINT 7-BIT ASCII TO LINE PRINTER
@@ -213,3 +226,4 @@ RW_FULL  SMAC    36                             FULL; RETURN -1
          ORIGIN  2048
 
 STACK    BSS     0
+BUFFER   BSS     0
