@@ -226,4 +226,4 @@ RW_FULL  SMAC    36                             FULL; RETURN -1
          ORIGIN  2048
 
 STACK    BSS     0
-BUFFER   BSS     0
+BUFFER   BSS     258
