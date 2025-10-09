@@ -28,6 +28,8 @@ typedef void (*ist66_io_dtor_t) (
 );
 
 struct ist66_cu {
+    struct ist66_cu *host;
+    
     uint64_t a[16]; // accumulators
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
     extFloat80_t f[16];
