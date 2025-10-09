@@ -48,3 +48,56 @@ uint64_t io_read_mem(ist66_cu_t *iocpu, uint32_t address) {
     word &= MASK_18;
     return word;
 }
+
+uint64_t io_write_mem(ist66_cu_t *iocpu, uint32_t address, uint64_t data) {
+    address &= MASK_IO_ADDR;
+    data &= MASK_18;
+    uint64_t word = 0;
+    
+    if (address <= MASK_18) {
+        // local memory
+        uint32_t dword_addr = address >> 1;
+        if (dword_addr < iocpu->mem_size) {
+            word = iocpu->memory[dword_addr];
+        } else {
+            // nothing there
+            return 1;
+        }
+    } else {
+        // host memory
+        address -= (MASK_18 + 1);
+        uint32_t dword_addr = address >> 1;
+        word = read_mem(iocpu->host, 0, dword_addr);
+        if (word >> 36) {
+            // host bus error
+            return 1;
+        }
+    }
+    
+    uint64_t mask = (address & 1) ? MASK_18 << 18 : MASK_18;
+    if (!(address & 1)) data <<= 18;
+    word &= mask;
+    word |= data;
+    
+    if (address <= MASK_18) {
+        // local memory
+        uint32_t dword_addr = address >> 1;
+        if (dword_addr < iocpu->mem_size) {
+            iocpu->memory[dword_addr] = word;
+        } else {
+            // nothing there
+            return 1;
+        }
+    } else {
+        // host memory
+        address -= (MASK_18 + 1);
+        uint32_t dword_addr = address >> 1;
+        uint64_t result = write_mem(iocpu->host, 0, dword_addr, word);
+        if (result) {
+            // host bus error
+            return 1;
+        }
+    }
+    
+    return 0;
+}
