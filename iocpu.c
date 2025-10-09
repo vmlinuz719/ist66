@@ -101,3 +101,38 @@ uint64_t io_write_mem(ist66_cu_t *iocpu, uint32_t address, uint64_t data) {
     
     return 0;
 }
+
+uint64_t io_comp_mr(ist66_cu_t *iocpu, uint64_t inst) {
+    int indirect = (inst >> 14) & 1;
+    int index = (inst >> 13) & 1;
+    int zero_pg = (inst >> 12) & 1;
+    uint64_t disp_u = inst & 0xFFF;
+    uint64_t disp = EXT12(disp_u);
+    
+    uint64_t ea = disp;
+    if (!zero_pg) ea += iocpu->c[0];
+    if (!index) ea += iocpu->a[1] << 10;
+    ea &= MASK_IO_ADDR;
+    
+    if (!indirect) return ea;
+    
+    uint64_t ia = io_read_mem(iocpu, ea);
+    if ((ea & MASK_18) >= 8 && (ea & MASK_18) < 16) {
+        ia = (ia + 1) & MASK_18;
+        io_write_mem(iocpu, ea, ia);
+    }
+    
+    if (index) ia += iocpu->a[2] << 10;
+    
+    return ia & MASK_IO_ADDR;
+}
+
+void io_exec_mr(ist66_cu_t *iocpu, uint64_t inst) {
+    uint64_t ea = io_comp_mr(iocpu, inst);
+    
+    switch (inst >> 15) {
+        case 5: { // B
+            iocpu->c[0] = ea;
+        } break;
+    }
+}
