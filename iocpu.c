@@ -131,8 +131,76 @@ void io_exec_mr(ist66_cu_t *iocpu, uint64_t inst) {
     uint64_t ea = io_comp_mr(iocpu, inst);
     
     switch (inst >> 15) {
-        case 5: { // B
-            iocpu->c[0] = ea;
+        case 0: { // AN
+            uint64_t data = (io_read_mem(iocpu, ea)) & MASK_18;
+            iocpu->a[0] &= (iocpu->a[0] + data) | (1 << 18);
+            iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
         } break;
+        case 1: { // A
+            uint64_t data = (io_read_mem(iocpu, ea)) & MASK_18;
+            iocpu->a[0] = (iocpu->a[0] + data) & MASK_19;
+            iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+        } break;
+        case 2: { // ITN
+            uint64_t data = (io_read_mem(iocpu, ea) + 1) & MASK_18;
+            io_write_mem(iocpu, ea, data);
+            iocpu->c[0] = (iocpu->c[0] + (data ? 1 : 2)) & MASK_18;
+        } break;
+        case 3: { // SC
+            io_write_mem(iocpu, ea, iocpu->a[0]);
+            iocpu->a[0] &= 1 << 18;
+            iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+        } break;
+        case 4: { // BL
+            io_write_mem(iocpu, ea, iocpu->c[0] + 1);
+            iocpu->c[0] = (ea + 1) & MASK_18;
+        } break;
+        case 5: { // B
+            iocpu->c[0] = ea & MASK_18;
+        } break;
+    }
+}
+
+void io_exec_io(ist66_cu_t *iocpu, uint64_t inst) {
+    uint64_t device = inst & 0x1FF;
+    uint64_t ctl = (inst >> 13) & 0x3;
+    uint64_t transfer = (inst >> 9) & 0xF;
+    uint64_t data = iocpu->a[0] & MASK_18;
+    
+    if (device < iocpu->max_io && iocpu->io[device] != NULL) {
+        uint64_t result = iocpu->io[device](
+            iocpu->ioctx[device],
+            data,
+            ctl,
+            transfer
+        );
+        
+        if (transfer < 14 && !(transfer & 1)) {
+            iocpu->a[0] &= 1 << 18;
+            iocpu->a[0] |= result & MASK_18;
+        }
+        
+        else if (transfer == 14) { // last two bits of result Done, Busy
+            int cond = 0;
+            switch (ctl) {
+                case 0: // skip if busy
+                    cond = !!(result & 1);
+                    break;
+                case 1: // skip if not busy
+                    cond = !(result & 1);
+                    break;
+                case 2: // skip if done
+                    cond = !!(result & 2);
+                    break;
+                case 3: // skip if not done
+                    cond = !(result & 2);
+                    break;
+            }
+            if (cond) {
+                iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+            }
+        }
+        
+        iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
     }
 }
