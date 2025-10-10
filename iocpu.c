@@ -15,6 +15,7 @@
 #include "softfloat.h"
 
 #define MASK_IO_ADDR 0xFFFFFFFL
+#define MASK_17 0x1FFFFL
 #define MASK_18 0x3FFFFL
 #define MASK_19 0x7FFFFL
 
@@ -202,5 +203,117 @@ void io_exec_io(ist66_cu_t *iocpu, uint64_t inst) {
         }
         
         iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+    }
+}
+
+void io_exec_opr_0(ist66_cu_t *iocpu, uint64_t inst) {
+    if ((inst & (1 << 7))) {
+        iocpu->a[0] &= 1 << 18;
+    }
+    
+    if ((inst & (1 << 6))) {
+        iocpu->a[0] &= MASK_18;
+    }
+    
+    if ((inst & (1 << 5))) {
+        iocpu->a[0] ^= MASK_18;
+    }
+    
+    if ((inst & (1 << 4))) {
+        iocpu->a[0] ^= 1 << 18;
+    }
+    
+    if ((inst & 1)) {
+        iocpu->a[0] = (iocpu->a[0] + 1) & MASK_19;
+    }
+    
+    switch ((inst >> 1) & 7) {
+        case 1: // BSW
+            iocpu->a[0] = (
+                (iocpu->a[0] & (1 << 18))
+                | ((iocpu->a[0] & 0x1FF) << 9)
+                | ((iocpu->a[0] >> 9) & 0x1FF)
+            );
+            break;
+        case 2: // RAL
+            iocpu->a[0] = (
+                ((iocpu->a[0] & MASK_18) << 1)
+                | (iocpu->a[0] >> 18)
+            );
+            break;
+        case 3: // RTL
+            iocpu->a[0] = (
+                ((iocpu->a[0] & MASK_17) << 2)
+                | (iocpu->a[0] >> 17)
+            );
+            break;
+        case 4: // RAR
+            iocpu->a[0] = (
+                ((iocpu->a[0] & 1) << 18)
+                | (iocpu->a[0] >> 1)
+            );
+            break;
+        case 5: // RTR
+            iocpu->a[0] = (
+                ((iocpu->a[0] & 3) << 17)
+                | (iocpu->a[0] >> 2)
+            );
+            break;
+        case 6: // MSX
+            iocpu->a[1] = iocpu->a[0] & MASK_18;
+            break;
+        case 7: // MDX
+            iocpu->a[2] = iocpu->a[0] & MASK_18;
+            break;
+    }
+    
+    iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+}
+
+void io_exec_opr_1(ist66_cu_t *iocpu, uint64_t inst) {
+    int condition = 0;
+    
+    if ((inst & (1 << 6))) { // TGE
+        condition |= !!(iocpu->a[0] & (1 << 17));
+    }
+    
+    if ((inst & (1 << 5))) { // TNZ
+        condition |= !(iocpu->a[0] & MASK_18);
+    }
+    
+    if ((inst & (1 << 4))) { // TCZ
+        condition |= !(iocpu->a[0] & (1 << 18));
+    }
+    
+    if ((inst & (1 << 3))) { // And Group
+        condition ^= 1;
+    }
+    
+    if (condition) {
+        iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+    }
+    
+    if ((inst & (1 << 7))) {
+        iocpu->a[0] &= 1 << 18;
+    }
+    
+    if ((inst & (1 << 1))) {
+        pthread_mutex_lock(&(iocpu->lock));
+        pthread_mutex_unlock(&(iocpu->lock));
+    }
+    
+    iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+}
+
+void io_exec_all(ist66_cu_t *iocpu, uint64_t inst) {
+    switch (inst >> 15) {
+        case 6:
+            io_exec_io(iocpu, inst);
+            break;
+        case 7:
+            io_exec_io(iocpu, inst);
+            break;
+        default:
+            io_exec_mr(iocpu, inst);
     }
 }

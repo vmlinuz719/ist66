@@ -29,6 +29,7 @@
  * IRQ is not masked.
  *
  * DO NOT ATTEMPT TO ASSERT IRQ 0 OR >=15
+ * IOCPU's only have interrupt 1
  *
  * @param cpu Emulated CPU context
  * @param irq IRQ priority level (1-14, smaller number = higher priority)
@@ -1903,7 +1904,7 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
-    fprintf(stderr, "/CPU-I-INIT TYPE 66/10 %ldW %d MAXDEV\n", mem_size, max_io);
+    fprintf(stderr, "/CPU-I-INIT CL700 %ldW %d MAXDEV\n", mem_size, max_io);
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
