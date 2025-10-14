@@ -29,7 +29,7 @@
  * IRQ is not masked.
  *
  * DO NOT ATTEMPT TO ASSERT IRQ 0 OR >=15
- * IOCPU's only have interrupt 1
+ * IOCPU's only have interrupt 1, control register 1 nonzero to enable
  *
  * @param cpu Emulated CPU context
  * @param irq IRQ priority level (1-14, smaller number = higher priority)

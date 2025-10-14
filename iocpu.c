@@ -21,6 +21,11 @@
 
 #define EXT12(x) ((x) & (1L << 11) ? (x) | 0xFFFFFFFFFFFFF000 : (x))
 
+#define C_IOPC 0
+#define C_ION 1
+#define C_IRQ 2
+#define C_API 3
+
 uint64_t io_read_mem(ist66_cu_t *iocpu, uint32_t address) {
     address &= MASK_IO_ADDR;
     uint64_t word = 0;
@@ -111,7 +116,7 @@ uint64_t io_comp_mr(ist66_cu_t *iocpu, uint64_t inst) {
     uint64_t disp = EXT12(disp_u);
     
     uint64_t ea = disp;
-    if (!zero_pg) ea += iocpu->c[0];
+    if (!zero_pg) ea += iocpu->c[C_IOPC];
     if (!index) ea += iocpu->a[1] << 10;
     ea &= MASK_IO_ADDR;
     
@@ -135,38 +140,42 @@ void io_exec_mr(ist66_cu_t *iocpu, uint64_t inst) {
         case 0: { // AN
             uint64_t data = (io_read_mem(iocpu, ea)) & MASK_18;
             iocpu->a[0] &= (iocpu->a[0] + data) | (1 << 18);
-            iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+            iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
         } break;
         case 1: { // A
             uint64_t data = (io_read_mem(iocpu, ea)) & MASK_18;
             iocpu->a[0] = (iocpu->a[0] + data) & MASK_19;
-            iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+            iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
         } break;
         case 2: { // ITN
             uint64_t data = (io_read_mem(iocpu, ea) + 1) & MASK_18;
             io_write_mem(iocpu, ea, data);
-            iocpu->c[0] = (iocpu->c[0] + (data ? 1 : 2)) & MASK_18;
+            iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + (data ? 1 : 2)) & MASK_18;
         } break;
         case 3: { // SC
             io_write_mem(iocpu, ea, iocpu->a[0]);
             iocpu->a[0] &= 1 << 18;
-            iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+            iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
         } break;
         case 4: { // BL
-            io_write_mem(iocpu, ea, iocpu->c[0] + 1);
-            iocpu->c[0] = (ea + 1) & MASK_18;
+            io_write_mem(iocpu, ea, iocpu->c[C_IOPC] + 1);
+            iocpu->c[C_IOPC] = (ea + 1) & MASK_18;
         } break;
         case 5: { // B
-            iocpu->c[0] = ea & MASK_18;
+            iocpu->c[C_IOPC] = ea & MASK_18;
         } break;
     }
 }
 
 void io_exec_io(ist66_cu_t *iocpu, uint64_t inst) {
-    uint64_t device = inst & 0x1FF;
+    uint64_t device = inst & 0x7F;
+    uint64_t post_swap = (inst >> 8) & 1;
+    uint64_t pre_clear = (inst >> 7) & 1;
     uint64_t ctl = (inst >> 13) & 0x3;
     uint64_t transfer = (inst >> 9) & 0xF;
     uint64_t data = iocpu->a[0] & MASK_18;
+    
+    if (pre_clear) iocpu->a[0] &= 1 << 18;
     
     if (device < iocpu->max_io && iocpu->io[device] != NULL) {
         uint64_t result = iocpu->io[device](
@@ -177,7 +186,6 @@ void io_exec_io(ist66_cu_t *iocpu, uint64_t inst) {
         );
         
         if (transfer < 14 && !(transfer & 1)) {
-            iocpu->a[0] &= 1 << 18;
             iocpu->a[0] |= result & MASK_18;
         }
         
@@ -198,12 +206,18 @@ void io_exec_io(ist66_cu_t *iocpu, uint64_t inst) {
                     break;
             }
             if (cond) {
-                iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+                iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
             }
         }
         
-        iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+        iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
     }
+    
+    if (post_swap) iocpu->a[0] = (
+        (iocpu->a[0] & (1 << 18))
+        | ((iocpu->a[0] & 0x1FF) << 9)
+        | ((iocpu->a[0] >> 9) & 0x1FF)
+    );
 }
 
 void io_exec_opr_0(ist66_cu_t *iocpu, uint64_t inst) {
@@ -267,7 +281,7 @@ void io_exec_opr_0(ist66_cu_t *iocpu, uint64_t inst) {
             break;
     }
     
-    iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+    iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
 }
 
 void io_exec_opr_1(ist66_cu_t *iocpu, uint64_t inst) {
@@ -290,7 +304,7 @@ void io_exec_opr_1(ist66_cu_t *iocpu, uint64_t inst) {
     }
     
     if (condition) {
-        iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+        iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
     }
     
     if ((inst & (1 << 7))) {
@@ -299,10 +313,54 @@ void io_exec_opr_1(ist66_cu_t *iocpu, uint64_t inst) {
     
     if ((inst & (1 << 1))) {
         pthread_mutex_lock(&(iocpu->lock));
+        if (iocpu->min_pending > 1 || !iocpu->c[C_ION]) {
+            iocpu->running = 0;
+        }
         pthread_mutex_unlock(&(iocpu->lock));
     }
     
-    iocpu->c[0] = (iocpu->c[0] + 1) & MASK_18;
+    if ((inst & (1 << 2))) {
+        iocpu->a[0] |= iocpu->stop_code & MASK_18;
+    }
+    
+    iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
+}
+
+void io_exec_opr_3(ist66_cu_t *iocpu, uint64_t inst) {
+    if ((inst & (1 << 7))) { // CIE
+        iocpu->c[C_ION] = 0;
+    }
+    
+    if ((inst & (1 << 5))) { // CMI
+        iocpu->c[C_ION] ^= 1;
+    }
+    
+    if ((inst & (1 << 2))) { // SSR
+        iocpu->stop_code = iocpu->a[0];
+    }
+    
+    if ((inst & (1 << 3))) { // API
+        pthread_mutex_lock(&(iocpu->lock));
+        intr_assert(iocpu->host, iocpu->c[C_IRQ]);
+        iocpu->c[C_API] = 1;
+        pthread_mutex_unlock(&(iocpu->lock));
+    }
+    
+    if ((inst & (1 << 1))) { // HLT
+        pthread_mutex_lock(&(iocpu->lock));
+        if (iocpu->min_pending > 1 || !iocpu->c[C_ION]) {
+            iocpu->running = 0;
+        }
+        pthread_mutex_unlock(&(iocpu->lock));
+    }
+    
+    if ((inst & (1 << 4))) { // TIE
+        if (iocpu->c[C_ION]) {
+            iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
+        }
+    }
+    
+    iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
 }
 
 void io_exec_all(ist66_cu_t *iocpu, uint64_t inst) {
@@ -311,7 +369,9 @@ void io_exec_all(ist66_cu_t *iocpu, uint64_t inst) {
             io_exec_io(iocpu, inst);
             break;
         case 7:
-            io_exec_io(iocpu, inst);
+            if ((inst & 1)) io_exec_opr_3(iocpu, inst);
+            else if ((inst & (1 << 8))) io_exec_opr_1(iocpu, inst);
+            else io_exec_opr_0(iocpu, inst);
             break;
         default:
             io_exec_mr(iocpu, inst);
