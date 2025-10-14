@@ -389,3 +389,63 @@ void io_exec_all(ist66_cu_t *iocpu, uint64_t inst) {
             io_exec_mr(iocpu, inst);
     }
 }
+
+uint64_t iocpu_io(
+    void *vctx,
+    uint64_t data,
+    int ctl,
+    int transfer
+) {
+    ist66_cu_t *iocpu = (ist66_cu_t *) vctx;
+    uint64_t result = 0;
+    if (transfer >> 1 == 0) {
+        if ((transfer & 1)) iocpu->stop_code = data & MASK_18;
+        result = iocpu->stop_code;
+    }
+    
+    else if (transfer >> 1 == 1) {
+        if ((transfer & 1)) iocpu->c[C_IOPC] = data & MASK_18;
+        result = iocpu->c[C_IOPC];
+    }
+    
+    else if (transfer >> 1 == 2) {
+        if ((transfer & 1)) iocpu->a[1] = data & MASK_18;
+        result = iocpu->a[1];
+    }
+    
+    else if (transfer >> 1 == 3) {
+        if ((transfer & 1)) iocpu->a[2] = data & MASK_18;
+        result = iocpu->a[2];
+    }
+    
+    if (transfer != 14) {
+        switch (ctl) {
+            case 1: {
+                pthread_mutex_lock(&iocpu->lock);
+                iocpu->running = 1;
+                if (iocpu->c[C_API]) {
+                    iocpu->c[C_API] = 0;
+                    intr_release(iocpu->host, iocpu->c[C_IRQ]);
+                }
+                pthread_cond_signal(&iocpu->intr_cond);
+                pthread_mutex_unlock(&iocpu->lock);
+            } break;
+            case 2: {
+                pthread_mutex_lock(&iocpu->lock);
+                if (iocpu->c[C_API]) {
+                    iocpu->c[C_API] = 0;
+                    intr_release(iocpu->host, iocpu->c[C_IRQ]);
+                }
+                pthread_mutex_unlock(&iocpu->lock);
+            } break;
+            // TODO: pulse
+        }
+    }
+    
+    if (transfer == 14) {
+        int status = (iocpu->c[C_API] << 1) | (iocpu->running & 1);
+        return (uint64_t) status;
+    }
+    
+    else return result;
+}
