@@ -511,5 +511,52 @@ void init_iocpu_internal(
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
-    fprintf(stderr, "/CPU-I-INIT RDS-20/A %ldW %d MAXDEV\n", mem_size, max_io);
+    fprintf(stderr, "/DEV-I-INIT RDS-20/A %ldW %d MAXDEV\n", mem_size, max_io);
+}
+
+void stop_iocpu(ist66_cu_t *cpu) {
+    cpu->running = 1;
+    cpu->exit = 1;
+    pthread_cond_signal(&cpu->intr_cond);
+    pthread_join(cpu->thread, NULL);
+    cpu->running = 0;
+}
+
+void destroy_iocpu(ist66_cu_t *host, int id) {
+    ist66_cu_t *cpu = (ist66_cu_t *) host->ioctx[id];
+    
+    if (!cpu->exit) stop_iocpu(cpu);
+    
+    for (int i = 0; i < cpu->max_io; i++) {
+        if (cpu->io_destroy[i] != NULL) {
+            cpu->io_destroy[i](cpu, i);
+        }
+    }
+    
+    free(cpu->memory);
+    free(cpu->io_destroy);
+    free(cpu->io);
+    free(cpu->ioctx);
+    pthread_mutex_destroy(&cpu->lock);
+    pthread_cond_destroy(&cpu->intr_cond);
+    
+    fprintf(stderr, "/DEV-I-UNIT %04o IOCPU CLOSED\n", id);
+}
+
+void init_iocpu(
+    ist66_cu_t *cpu,
+    int id,
+    int irq,
+    uint64_t mem_size,
+    int max_io
+) {
+    ist66_cu_t *ctx = calloc(sizeof(ist66_cu_t), 1);
+    init_iocpu_internal(ctx, cpu, mem_size, max_io);
+    ctx->c[C_IRQ] = irq;
+    ctx->c[C_ION] = 1;
+    cpu->ioctx[id] = ctx;
+    cpu->io[id] = iocpu_io;
+    cpu->io_destroy[id] = destroy_iocpu;
+    
+    pthread_create(&ctx->thread, NULL, iocpu, ctx);
 }

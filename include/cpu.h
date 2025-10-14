@@ -135,4 +135,12 @@ uint64_t write_mem(
     uint64_t data
 );
 
+void init_iocpu(
+    ist66_cu_t *cpu,
+    int id,
+    int irq,
+    uint64_t mem_size,
+    int max_io
+);
+
 #endif
