@@ -354,10 +354,22 @@ void io_exec_opr_3(ist66_cu_t *iocpu, uint64_t inst) {
         pthread_mutex_unlock(&(iocpu->lock));
     }
     
+    int condition = 0;
+    
     if ((inst & (1 << 4))) { // TIE
-        if (iocpu->c[C_ION]) {
-            iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
-        }
+        if (iocpu->c[C_ION]) condition = 1;
+    }
+    
+    if ((inst & (1 << 6))) { // TNP
+        if (iocpu->pending[1] == 0) condition = 1;
+    }
+    
+    if ((inst & (1 << 8))) { // And Group (TNE/TIP)
+        condition ^= 1;
+    }
+    
+    if (condition) {
+        iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
     }
     
     iocpu->c[C_IOPC] = (iocpu->c[C_IOPC] + 1) & MASK_18;
