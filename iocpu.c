@@ -313,7 +313,7 @@ void io_exec_opr_1(ist66_cu_t *iocpu, uint64_t inst) {
     
     if ((inst & (1 << 1))) {
         pthread_mutex_lock(&(iocpu->lock));
-        if (iocpu->min_pending > 1 || !iocpu->c[C_ION]) {
+        if (!(iocpu->pending[1]) || !(iocpu->c[C_ION] & 1)) {
             iocpu->running = 0;
         }
         pthread_mutex_unlock(&(iocpu->lock));
@@ -333,6 +333,7 @@ void io_exec_opr_3(ist66_cu_t *iocpu, uint64_t inst) {
     
     if ((inst & (1 << 5))) { // CMI
         iocpu->c[C_ION] ^= 1;
+        iocpu->c[C_ION] <<= 1;
     }
     
     if ((inst & (1 << 2))) { // SSR
@@ -348,7 +349,7 @@ void io_exec_opr_3(ist66_cu_t *iocpu, uint64_t inst) {
     
     if ((inst & (1 << 1))) { // HLT
         pthread_mutex_lock(&(iocpu->lock));
-        if (iocpu->min_pending > 1 || !iocpu->c[C_ION]) {
+        if (!(iocpu->pending[1]) || !(iocpu->c[C_ION] & 1)) {
             iocpu->running = 0;
         }
         pthread_mutex_unlock(&(iocpu->lock));
@@ -357,7 +358,7 @@ void io_exec_opr_3(ist66_cu_t *iocpu, uint64_t inst) {
     int condition = 0;
     
     if ((inst & (1 << 4))) { // TIE
-        if (iocpu->c[C_ION]) condition = 1;
+        if ((iocpu->c[C_ION] & 1)) condition = 1;
     }
     
     if ((inst & (1 << 6))) { // TNP
@@ -388,6 +389,46 @@ void io_exec_all(ist66_cu_t *iocpu, uint64_t inst) {
         default:
             io_exec_mr(iocpu, inst);
     }
+}
+
+void *iocpu(void *vctx) {
+    ist66_cu_t *iocpu = (ist66_cu_t *) vctx;
+    
+    fprintf(stderr, "/CPU-I-STARTING IOCPU\n");
+    
+    int enable_ints_next_cycle = 0;
+    
+    do {
+        if ((iocpu->c[C_ION] & 2)) enable_ints_next_cycle = 1;
+        
+        if ((iocpu->c[C_ION] & 1) && iocpu->pending[1]) {
+            iocpu->c[C_ION] = 0;
+            io_write_mem(iocpu, 0, iocpu->c[C_IOPC]);
+            iocpu->c[C_IOPC] = 1;
+        }
+        
+        if (iocpu->running)
+            io_exec_all(iocpu, io_read_mem(iocpu, iocpu->c[C_IOPC]));
+        else {
+            pthread_mutex_lock(&iocpu->lock);
+            if (iocpu->c[C_ION] == 0) {
+                iocpu->exit = 1;
+            } else if (!iocpu->exit) {
+                while (!iocpu->running) {
+                    pthread_cond_wait(&iocpu->intr_cond, &iocpu->lock);
+                }
+            }
+            pthread_mutex_unlock(&iocpu->lock);
+        }
+        
+        if (enable_ints_next_cycle) {
+            iocpu->c[C_ION] = 1;
+            enable_ints_next_cycle = 0;
+        }
+    } while (!iocpu->exit);
+    
+    fprintf(stderr, "/CPU-I-IOCPU STOP CODE %06lo\n", iocpu->stop_code);
+    return NULL;
 }
 
 uint64_t iocpu_io(
@@ -448,4 +489,27 @@ uint64_t iocpu_io(
     }
     
     else return result;
+}
+
+void init_iocpu_internal(
+    ist66_cu_t *cpu,
+    ist66_cu_t *host,
+    uint64_t mem_size,
+    int max_io
+) {
+    memset(cpu, 0, sizeof(ist66_cu_t));
+    
+    cpu->memory = calloc(sizeof(uint64_t), mem_size);
+    cpu->mem_size = mem_size;
+    cpu->host = host;
+    
+    cpu->io_destroy = calloc(sizeof(ist66_io_dtor_t), max_io);
+    cpu->io = calloc(sizeof(ist66_io_t), max_io);
+    cpu->ioctx = calloc(sizeof(void *), max_io);
+    cpu->max_io = max_io;
+    cpu->mask = 0x2;
+    
+    pthread_mutex_init(&cpu->lock, NULL);
+    pthread_cond_init(&cpu->intr_cond, NULL);
+    fprintf(stderr, "/CPU-I-INIT RDS-20/A %ldW %d MAXDEV\n", mem_size, max_io);
 }

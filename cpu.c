@@ -1904,7 +1904,7 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
-    fprintf(stderr, "/CPU-I-INIT CL700 %ldW %d MAXDEV\n", mem_size, max_io);
+    fprintf(stderr, "/CPU-I-INIT RDS-700 %ldW %d MAXDEV\n", mem_size, max_io);
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
