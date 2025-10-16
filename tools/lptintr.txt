@@ -103,7 +103,7 @@ O2A_LOOP R       2,3                            EXTRACT NEXT DIGIT
          
          ISTC    4,3,7                          DEPOSIT CHARACTER
          
-         IA      0,0,TRNZ                       REPEAT UNTIL DONE
+         IA      0,0,TRN                        REPEAT UNTIL DONE
          B       .O2A_LOOP
          
          XA      4,4                            NULL TERMINATOR

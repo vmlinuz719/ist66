@@ -125,9 +125,9 @@ class AssembleMR(AssemblerModule):
         self.opcodes = {
             "B": 0,
             "BL": 1,
-            "ITNZ": 2,
-            "DTNZ": 3,
-            "TMNZ": 4,
+            "ITN": 2,
+            "DTN": 3,
+            "TMN": 4,
             "TMZ": 5,
             
             "M": 0x180,
@@ -236,11 +236,11 @@ def assemble_aa_arg(arg: str) -> int:
         "CMC": (static(3),        2,   18, 0         ),
         
         "TNV": (static(1),        3,   15, 0         ),
-        "TCNZ": (static(2),        3,   15, 0         ),
+        "TCN": (static(2),        3,   15, 0         ),
         "TCZ": (static(3),        3,   15, 0         ),
-        "TRNZ": (static(4),        3,   15, 0         ),
+        "TRN": (static(4),        3,   15, 0         ),
         "TRZ": (static(5),        3,   15, 0         ),
-        "TCRNZ": (static(6),        3,   15, 0         ),
+        "TCRN": (static(6),        3,   15, 0         ),
         "TCRZ": (static(7),        3,   15, 0         ),
     }
     
@@ -352,9 +352,9 @@ class AssembleHelper0(AssemblerModule):
             "SC": 0o700012040000,
             "CMC": 0o700013040000,
             "TNV": 0o700010140000,
-            "TCNZ": 0o700010240000,
+            "TCN": 0o700010240000,
             "TCZ": 0o700010340000,
-            "TACNZ": 0o700010440000,
+            "TACN": 0o700010440000,
             "TACZ": 0o700010540000,
             "TCACN": 0o700010640000,
             "TCACZ": 0o700010740000
@@ -544,9 +544,9 @@ class AssembleCommand(AssemblerModule):
         }
 
 helpers = {
-    "TRNZ": ("LA", "{},0,NL,TRNZ"),
+    "TRN": ("LA", "{},0,NL,TRN"),
     "TRZ": ("LA", "{},0,NL,TRZ"),
-    "TCRNZ": ("LA", "{},0,NL,TCRNZ"),
+    "TCRN": ("LA", "{},0,NL,TCRN"),
     "TCRZ": ("LA", "{},0,NL,TCRZ"),
     "MSAC": ("LA", "0,0,M({})"),
     "CMAC": ("LA", "0,0,CC,M({})"),
@@ -554,12 +554,12 @@ helpers = {
     "RAC": ("LA", "0,0,R({})"),
     "RCAC": ("LA", "0,0,RC({})"),
     "TACBZ": ("LA", "0,0,CC,M(35),R({}),NL,TRZ"),
-    "TACBN": ("LA", "0,0,CC,M(35),R({}),NL,TRNZ"),
-    "TRNE": ("SA", "{},{},NL,TRNZ"),
+    "TACBN": ("LA", "0,0,CC,M(35),R({}),NL,TRN"),
+    "TRNE": ("SA", "{},{},NL,TRN"),
     "TREQ": ("SA", "{},{},NL,TRZ"),
-    "TRGT": ("SA", "{},{},SC,NL,TCRNZ"),
+    "TRGT": ("SA", "{},{},SC,NL,TCRN"),
     "TRLE": ("SA", "{},{},SC,NL,TCRZ"),
-    "TRLT": ("SA", "{},{},CC,NL,TCRNZ"),
+    "TRLT": ("SA", "{},{},CC,NL,TCRN"),
     "TRGE": ("SA", "{},{},CC,NL,TCRZ"),
     "MSK": ("LA", "{0},{0},M({1})"),
     "CMK": ("LA", "{0},{0},CC,M({1})"),
