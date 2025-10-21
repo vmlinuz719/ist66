@@ -1081,7 +1081,6 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
                 sh = (36 - bs) & 0x3F;
                 ea = (ea + 1) & MASK_ADDR;
             }
-            cpu->a[ix] = ea | (sh << 27);
             
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
@@ -1091,6 +1090,9 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
                 do_except(cpu, X_PPFR);
                 return;
             }
+            
+            cpu->a[ix] = ea | (sh << 27);
+            
             data &= MASK_36;
             
             data >>= sh;
@@ -1105,7 +1107,6 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
                 sh = (36 - bs) & 0x3F;
                 ea = (ea + 1) & MASK_ADDR;
             }
-            cpu->a[ix] = ea | (sh << 27);
             
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
@@ -1115,6 +1116,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
                 do_except(cpu, X_PPFR);
                 return;
             }
+            
             data &= MASK_36;
             // fprintf(stderr, "Write char %ld -> %ld\n", cpu->a[ac], ea);
             
@@ -1132,6 +1134,8 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
                 do_except(cpu, X_PPFW);
                 return;
             }
+            
+            cpu->a[ix] = ea | (sh << 27);
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
