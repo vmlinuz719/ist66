@@ -135,8 +135,8 @@ class AssembleMR(AssemblerModule):
             "MNA": 0x182,
             "D": 0x183,
             
-            "BSM": 0x400,
-            "BRM": 0x401,
+            "BSM": 0xE,
+            "BRM": 0xF,
             
             "RFI": 0x1820,
             "RLMSK": 0x1821,
