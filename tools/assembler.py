@@ -662,10 +662,22 @@ class Assembler:
                 print("~")
             else:
                 print("|", end = "")
+    
+    def print_c(self):
+        keys = list(self.output.keys())
+        for k in range(0, len(keys)):
+            blk = keys[k]
+            pc = blk
+            for i in self.output[blk]:
+                print(f"    cpu.memory[{pc}] = 0{i:0{12}o};")
+                pc += 1
 
 if __name__ == "__main__":
     assembler = Assembler(sys.argv[1])
     assembler.get_syms()
     assembler.assemble()
-    assembler.print_ppt()
+    if "-c" in sys.argv:
+        assembler.print_c()
+    else:
+        assembler.print_ppt()
     
