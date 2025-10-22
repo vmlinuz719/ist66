@@ -227,9 +227,9 @@ def assemble_aa_arg(arg: str) -> int:
         
         "M": (get_paren_number, 7,   7,  0         ),
         "R": (get_paren_number, 7,   0,  0         ),
-        "RC": (get_paren_number, 7,   0,  0x80000000),
+        "RC": (get_paren_number, 7,   0,  0x4000),
         
-        "NL": (static(1),        1,   14, 0         ),
+        "NL": (static(1),        1,   31, 0         ),
         
         "CC": (static(1),        2,   18, 0         ),
         "SC": (static(2),        2,   18, 0         ),

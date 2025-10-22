@@ -1383,8 +1383,8 @@ uint64_t exec_aa(
     op |= (int) ((inst >> 29) & 0x8);
     int ci = (int) ((inst >> 18) & 0x3);
     int cond = (int) ((inst >> 15) & 0x7);
-    int nl = (int) ((inst >> 14) & 0x1);
-    int rc = (int) ((inst >> 31) & 0x1);
+    int nl = (int) ((inst >> 31) & 0x1);
+    int rc = (int) ((inst >> 14) & 0x1);
     
     uint64_t mk_u = ((inst >> 7) & 0x7F);
     uint64_t rt_u = (inst & 0x7F);
@@ -1932,7 +1932,7 @@ int main(int argc, char *argv[]) {
     cpu.memory[526] = 0670000560012;
     cpu.memory[527] = 0000002777777;
     cpu.memory[528] = 0670140200012;
-    cpu.memory[529] = 0703010540000;
+    cpu.memory[529] = 0723010500000;
     cpu.memory[530] = 0000002777774;
     cpu.memory[531] = 0003103777736;
     cpu.memory[532] = 0005102000011;
