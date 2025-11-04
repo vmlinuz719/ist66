@@ -1146,6 +1146,31 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+void exec_local_trap(ist66_cu_t *cpu, uint64_t inst) {
+    uint64_t opcode = ((inst >> 27) & 0x1FF);
+
+    if (opcode == 0277) { // SLR
+        uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
+        if (!key) {
+            cpu->c[C_PSW] = cpu->a[15];
+        } else {
+            // Privilege
+            do_except(cpu, X_PPFS);
+        }
+    } else {
+        set_pc(cpu, get_pc(cpu) + 1);
+        if (opcode >= 0200) { // SLT, set key to 0 and save full PSW
+            cpu->a[15] = cpu->c[C_PSW];
+            cpu->c[C_PSW] &= (1 << 27);
+            set_pc(cpu, cpu->c[C_SLT]);
+        } else { // PLT, preserve key and save only program counter
+            cpu->a[15] = get_pc(cpu);
+            set_pc(cpu, cpu->c[C_PLT]);
+        }
+        cpu->a[14] = inst;
+    }
+}
+
 void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
     if (!key) {
@@ -1772,6 +1797,11 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     else if (inst >> 27 == 034) {
         exec_fp1(cpu, inst);
     }
+    
+    else if (inst >> 27 >= 0100 && inst >> 27 < 0300) {
+        exec_local_trap(cpu, inst);
+    }
+    
     else if (inst >> 27 == 0670) {
         exec_io1(cpu, inst);
     }

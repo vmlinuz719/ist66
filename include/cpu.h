@@ -10,6 +10,8 @@
 #define C_PSW 0
 #define C_CW 1
 #define C_FCW 2
+#define C_PLT 3
+#define C_SLT 4
 #define MEM_FAULT (1L << 36)
 #define KEY_FAULT (1L << 37)
 
