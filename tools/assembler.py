@@ -138,6 +138,8 @@ class AssembleMR(AssemblerModule):
             "BSM": 0xE,
             "BRM": 0xF,
             
+            "SLR": 0xBF0,
+            
             "RFI": 0x1820,
             "RLMSK": 0x1821,
             "LMSK": 0x1822,
@@ -566,7 +568,8 @@ helpers = {
     "SMK": ("LA", "{0},{0},SC,M({1})"),
     "R": ("LA", "{0},{0},R({1})"),
     "RC": ("LA", "{0},{0},RC({1})"),
-    "BRM": ("BRM", "0")
+    "BRM": ("BRM", "0"),
+    "SLR": ("SLR", "0")
 }
 
 class Assembler:
