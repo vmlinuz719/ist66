@@ -2,6 +2,7 @@
  * nbt: work with 9-bit files
  */
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -151,9 +152,19 @@ int main(int argc, char *argv[]) {
     nbt_ctx_t *ctx = calloc(1, sizeof(nbt_ctx_t));
     ctx->fd = fd;
     
-    char data[] = "Hello World\n";
+    char data[] = "hello world\n";
     for (int i = 0; i < sizeof(data); i++) {
         nbt_putc(((int) data[i]) | ((i & 1) << 8), ctx);
+    }
+    
+    nbt_seek(ctx, 0, SEEK_SET);
+    
+    int read_data = 0;
+    while ((read_data = nbt_getc(ctx))) {
+        char c = (read_data & (1 << 8))
+            ? toupper(read_data & 0xFF)
+            : tolower(read_data & 0xFF);
+        printf("%c", c);
     }
     
     nbt_flush(ctx);
