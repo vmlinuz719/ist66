@@ -159,6 +159,8 @@ int main(int argc, char *argv[]) {
     
     nbt_seek(ctx, 0, SEEK_SET);
     
+    // spongebob case demo
+    
     int read_data = 0;
     while ((read_data = nbt_getc(ctx))) {
         char c = (read_data & (1 << 8))
