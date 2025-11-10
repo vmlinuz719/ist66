@@ -91,7 +91,7 @@ int nbt_buffer(nbt_ctx_t *ctx) {
  */
 
 int nbt_iseof(nbt_ctx_t *ctx) {
-    return ctx->eof && (ctx->position % 7 == 6);
+    return ctx->eof;
 }
 
 /*
@@ -108,7 +108,7 @@ int nbt_getc(nbt_ctx_t *ctx) {
     int result = ctx->current_bytes[byte_index];
     result |= ((int) ((ctx->extra_bits >> byte_index) & 1)) << 8;
     
-    if (!nbt_iseof(ctx)) nbt_seek(ctx, 1, SEEK_CUR);
+    nbt_seek(ctx, 1, SEEK_CUR);
     
     return result;
 }
