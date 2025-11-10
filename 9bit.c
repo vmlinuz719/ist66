@@ -162,7 +162,7 @@ int main(int argc, char *argv[]) {
     // spongebob case demo
     
     int read_data = 0;
-    while (((read_data = nbt_getc(ctx)) & 0xFF) == 0) {
+    while (((read_data = nbt_getc(ctx)) & 0xFF) != 0) {
         char c = (read_data & (1 << 8))
             ? toupper(read_data & 0xFF)
             : tolower(read_data & 0xFF);
