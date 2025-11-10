@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -81,5 +82,82 @@ int nbt_buffer(nbt_ctx_t *ctx) {
     ctx->extra_bits = temp_buf[7];
     ctx->data_valid = 1;
     ctx->data_changed = 0;
+    return 0;
+}
+
+/*
+ * nbt_iseof: EOF status
+ */
+
+int nbt_iseof(nbt_ctx_t *ctx) {
+    return ctx->eof && (ctx->position % 7 == 6);
+}
+
+/*
+ * nbt_getc: get single 9-bit character
+ */
+
+int nbt_getc(nbt_ctx_t *ctx) {
+    if (!ctx->data_valid) {
+        int buffer_status = nbt_buffer(ctx);
+        if (buffer_status) return EOF;
+    }
+    
+    int byte_index = ctx->position % 7;
+    int result = ctx->current_bytes[byte_index];
+    result |= ((int) ((ctx->extra_bits >> byte_index) & 1)) << 8;
+    
+    if (!nbt_iseof(ctx)) nbt_seek(ctx, 1, SEEK_CUR);
+    
+    return result;
+}
+
+/*
+ * nbt_putc: write single 9-bit character
+ */
+
+int nbt_putc(int c, nbt_ctx_t *ctx) {
+    if (!ctx->data_valid) {
+        int buffer_status = nbt_buffer(ctx);
+        if (buffer_status) return EOF;
+    }
+    
+    int byte_index = ctx->position % 7;
+    uint8_t mask = ~(1 << byte_index);
+    uint8_t extra_bit = (c >> 8) << byte_index;
+    
+    ctx->current_bytes[byte_index] = (c & 0xFF);
+    ctx->extra_bits &= mask;
+    ctx->extra_bits |= extra_bit;
+    ctx->data_changed = 1;
+    
+    nbt_seek(ctx, 1, SEEK_CUR);
+    
+    return c;
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <file>\n", argv[0]);
+        return -1;
+    }
+    
+    FILE *fd;
+    if ((fd = fopen(argv[1], "wb+")) == NULL) {
+        fprintf(stderr, "Error opening file %s\n", argv[1]);
+        return -1;
+    }
+    
+    nbt_ctx_t *ctx = calloc(1, sizeof(nbt_ctx_t));
+    ctx->fd = fd;
+    
+    char data[] = "Hello World\n";
+    for (int i = 0; i < sizeof(data); i++) {
+        nbt_putc(((int) data[i]) | ((i & 1) << 8), ctx);
+    }
+    
+    nbt_flush(ctx);
+    fclose(ctx->fd);
+    free(ctx);
     return 0;
 }
