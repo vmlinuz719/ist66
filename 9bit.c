@@ -10,7 +10,7 @@
 
 typedef struct {
     FILE *fd;
-    int position, data_valid, data_changed, eof;
+    int position, data_valid, data_changed, eof, writable;
     uint8_t current_bytes[7], extra_bits;
 } nbt_ctx_t;
 
@@ -20,6 +20,8 @@ typedef struct {
  */
 
 int nbt_flush(nbt_ctx_t *ctx) {
+    if (!(ctx->writable)) return -1;
+    
     if (ctx->data_changed) {
         int seek_status = fseek(ctx->fd, (ctx->position / 7) * 8, SEEK_SET);
         if (seek_status) return seek_status;
@@ -32,6 +34,7 @@ int nbt_flush(nbt_ctx_t *ctx) {
     }
     
     ctx->data_changed = 0;
+    ctx->eof = 0;
     
     return 0;
 }
@@ -87,11 +90,27 @@ int nbt_buffer(nbt_ctx_t *ctx) {
 }
 
 /*
- * nbt_iseof: EOF status
+ * nbt_eof: EOF status
  */
 
-int nbt_iseof(nbt_ctx_t *ctx) {
+int nbt_eof(nbt_ctx_t *ctx) {
     return ctx->eof;
+}
+
+/*
+ * nbt_tell: File position
+ */
+
+int nbt_tell(nbt_ctx_t *ctx) {
+    return ctx->position;
+}
+
+/*
+ * nbt_can_write: Is file writable
+ */
+
+int nbt_can_write(nbt_ctx_t *ctx) {
+    return ctx->writable;
 }
 
 /*
@@ -118,6 +137,8 @@ int nbt_getc(nbt_ctx_t *ctx) {
  */
 
 int nbt_putc(int c, nbt_ctx_t *ctx) {
+    if (!(ctx->writable)) return EOF;
+    
     if (!ctx->data_valid) {
         int buffer_status = nbt_buffer(ctx);
         if (buffer_status) return EOF;
@@ -151,6 +172,7 @@ int main(int argc, char *argv[]) {
     
     nbt_ctx_t *ctx = calloc(1, sizeof(nbt_ctx_t));
     ctx->fd = fd;
+    ctx->writable = 1;
     
     char data[] = "hello world\n";
     for (int i = 0; i < sizeof(data); i++) {
