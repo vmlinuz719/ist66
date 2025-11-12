@@ -41,17 +41,17 @@ int nbt_flush(nbt_ctx_t *ctx) {
 
 int nbt_seek(nbt_ctx_t *ctx, int offset, int whence) {
     int new_position =
-        whence == SEEK_CUR
-            ? ctx->position + offset
+        (whence == SEEK_CUR)
+            ? (ctx->position + offset)
             : offset;
     
     if (new_position < 0) new_position = 0;
     
-    if (new_position / 7 != ctx->position / 7 && ctx->data_valid) {
+    if ((new_position / 7 != ctx->position / 7) && ctx->data_valid) {
         // in this case we are seeking to another block of 7 bytes
         // flush and invalidate buffer
         int flush_status = nbt_flush(ctx);
-        if (flush_status) return flush_status;
+        if (flush_status && ctx->writable) return flush_status;
         ctx->data_valid = 0;
     }
     
@@ -286,7 +286,8 @@ int nbt_read_reverse(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
     }
     
     if (nbt_tell(ctx) != 0) {
-        if (nbt_rgetc(ctx) == 0x1E) ctx->eor = 1;
+        int final = nbt_rgetc(ctx);
+        if (final == 0x1E || final == 0x1C) ctx->eor = 1;
         nbt_seek(ctx, 1, SEEK_CUR);
     }
     
