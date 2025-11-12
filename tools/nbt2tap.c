@@ -9,6 +9,8 @@
 
 #include <9ball.h>
 
+#define BUF_SIZE 64
+
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <src> <dst>\n", argv[0]);
@@ -32,11 +34,11 @@ int main(int argc, char *argv[]) {
     ctx->fd = sfd;
     ctx->writable = 0;
 
-    uint8_t buf[65536];
+    uint8_t buf[BUF_SIZE];
     int rc = 0;
     
     while (1) {
-        int read_data = nbt_read(ctx, 65536, buf);
+        int read_data = nbt_read(ctx, BUF_SIZE, buf);
         
         if (read_data == NBT_BAD_TAPE) {
             fprintf(stderr, "Error while reading file %s\n", argv[1]);
@@ -65,7 +67,7 @@ int main(int argc, char *argv[]) {
             }
             
             while (!nbt_eor(ctx)) {
-                read_data = nbt_read(ctx, 65536, buf);
+                read_data = nbt_read(ctx, BUF_SIZE, buf);
                 if (read_data < 0 && read_data != NBT_READ_MARK) {
                     fprintf(stderr, "Error while reading file %s\n", argv[1]);
                     rc = -1;
