@@ -98,6 +98,14 @@ int nbt_eof(nbt_ctx_t *ctx) {
 }
 
 /*
+ * nbt_eor: EOR status
+ */
+
+int nbt_eor(nbt_ctx_t *ctx) {
+    return ctx->eor;
+}
+
+/*
  * nbt_tell: File position
  */
 
@@ -178,6 +186,7 @@ int nbt_putc(int c, nbt_ctx_t *ctx) {
 }
 
 int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
+    ctx->eor = 0;
     if (nbt_eof(ctx)) return NBT_READ_EOM;
     
     int first_read;
@@ -205,6 +214,7 @@ int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
         }
         else if (data == 0x1E || data == 0x1C) {
             // EOR or unexpected tape mark
+            ctx->eor = 1;
             break;
         }
         else if (data == 0x7F) {
@@ -221,10 +231,15 @@ int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
         read_bytes++;
     }
     
+    while (nbt_getc(ctx) == 0x1E) ctx->eor = 1;
+    nbt_seek(ctx, -1, SEEK_CUR);
+    
     return read_bytes;
 }
 
 int nbt_read_reverse(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
+    ctx->eor = 0;
+    
     if (nbt_tell(ctx) == 0) return NBT_READ_BOT;
     
     int first_read;
@@ -251,7 +266,9 @@ int nbt_read_reverse(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
         }
         else if (data == 0x1E || data == 0x1C) {
             // EOR or expected tape mark
-            break;
+            ctx->eor = 1;
+            nbt_seek(ctx, 1, SEEK_CUR);
+            return read_bytes;
         }
         else if (data == 0x7F) {
             // erase gap
@@ -266,6 +283,11 @@ int nbt_read_reverse(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
         if (out != NULL) out[read_bytes] = data & 0xFF;
         read_bytes++;
         if (nbt_tell(ctx) == 0) break;
+    }
+    
+    if (nbt_tell(ctx) != 0) {
+        if (nbt_rgetc(ctx) == 0x1E) ctx->eor = 1;
+        nbt_seek(ctx, 1, SEEK_CUR);
     }
     
     return read_bytes;

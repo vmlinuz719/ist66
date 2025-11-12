@@ -10,7 +10,7 @@
 
 typedef struct {
     FILE *fd;
-    int position, data_valid, data_changed, eof, writable;
+    int position, data_valid, data_changed, eof, eor, writable;
     uint8_t current_bytes[7], extra_bits;
 } nbt_ctx_t;
 
@@ -43,6 +43,12 @@ int nbt_buffer(nbt_ctx_t *ctx);
  */
 
 int nbt_eof(nbt_ctx_t *ctx);
+
+/*
+ * nbt_eor: EOR status
+ */
+
+int nbt_eor(nbt_ctx_t *ctx);
 
 /*
  * nbt_tell: File position

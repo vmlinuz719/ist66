@@ -1,5 +1,5 @@
 /*
- * tap2nbt: convert SimH tape image to "Nineball" format
+ * tap2nbt: convert SimH .tap image to "Nineball" format
  */
 
 #include <stdio.h>
