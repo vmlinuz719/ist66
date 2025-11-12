@@ -68,7 +68,9 @@ int nbt_buffer(nbt_ctx_t *ctx) {
     uint8_t temp_buf[8];
     
     int seek_status = fseek(ctx->fd, (ctx->position / 7) * 8, SEEK_SET);
-    if (seek_status) return seek_status;
+    if (seek_status) {
+        return seek_status;
+    }
     
     size_t result = fread(temp_buf, 8, 1, ctx->fd);
     if (result != 1) {
@@ -271,26 +273,29 @@ int nbt_read_reverse(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
 
 int nbt_write(nbt_ctx_t *ctx, int len, uint8_t *in) {
     for (int i = 0; i < len; i++) {
-        int result = nbt_putc(((int) (in[i])) | 0x100, ctx);
-        if (result) return NBT_BAD_TAPE;
+        int ch = ((int) (in[i])) | 0x100;
+        int result = nbt_putc(ch, ctx);
+        if (result != ch) {
+            return NBT_BAD_TAPE;
+        }
     }
     
     int result = nbt_putc(0x1E, ctx);
-    if (result) return NBT_BAD_TAPE;
+    if (result != 0x1E) return NBT_BAD_TAPE;
     
     return 0;
 }
 
 int nbt_write_mark(nbt_ctx_t *ctx) {
     int result = nbt_putc(0x1C, ctx);
-    if (result) return NBT_BAD_TAPE;
+    if (result != 0x1C) return NBT_BAD_TAPE;
     
     return 0;
 }
 
 int nbt_write_security(nbt_ctx_t *ctx) {
     int result = nbt_putc(0x00, ctx);
-    if (result) return NBT_BAD_TAPE;
+    if (result != 0x00) return NBT_BAD_TAPE;
     
     return 0;
 }
@@ -298,7 +303,7 @@ int nbt_write_security(nbt_ctx_t *ctx) {
 int nbt_write_erase(nbt_ctx_t *ctx, int len) {
     for (int i = 0; i < len; i++) {
         int result = nbt_putc(0x7F, ctx);
-        if (result) return NBT_BAD_TAPE;
+        if (result != 0x7F) return NBT_BAD_TAPE;
     }
     
     return 0;
