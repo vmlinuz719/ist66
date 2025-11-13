@@ -11,7 +11,7 @@
 typedef struct {
     FILE *fd;
     int position, data_valid, data_changed, eof, eor, writable;
-    uint8_t current_bytes[7], extra_bits;
+    uint8_t current_bytes[8], extra_bits;
 } nbt_ctx_t;
 
 #define NBT_READ_MARK -1

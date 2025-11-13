@@ -19,10 +19,10 @@ int nbt_flush(nbt_ctx_t *ctx) {
     if (!(ctx->writable)) return -1;
     
     if (ctx->data_changed) {
-        int seek_status = fseek(ctx->fd, (ctx->position / 7) * 8, SEEK_SET);
+        int seek_status = fseek(ctx->fd, (ctx->position / 8) * 9, SEEK_SET);
         if (seek_status) return seek_status;
         
-        size_t write_status = fwrite(ctx->current_bytes, 7, 1, ctx->fd);
+        size_t write_status = fwrite(ctx->current_bytes, 8, 1, ctx->fd);
         if (write_status != 1) return -1;
         
         write_status = fwrite(&(ctx->extra_bits), 1, 1, ctx->fd);
@@ -47,8 +47,8 @@ int nbt_seek(nbt_ctx_t *ctx, int offset, int whence) {
     
     if (new_position < 0) new_position = 0;
     
-    if ((new_position / 7 != ctx->position / 7) && ctx->data_valid) {
-        // in this case we are seeking to another block of 7 bytes
+    if ((new_position / 8 != ctx->position / 8) && ctx->data_valid) {
+        // in this case we are seeking to another block of 8 bytes
         // flush and invalidate buffer
         int flush_status = nbt_flush(ctx);
         if (flush_status && ctx->writable) return flush_status;
@@ -65,25 +65,25 @@ int nbt_seek(nbt_ctx_t *ctx, int offset, int whence) {
  */
 
 int nbt_buffer(nbt_ctx_t *ctx) {
-    uint8_t temp_buf[8];
+    uint8_t temp_buf[9];
     
     int seek_status = fseek(ctx->fd, (ctx->position / 7) * 8, SEEK_SET);
     if (seek_status) {
         return seek_status;
     }
     
-    size_t result = fread(temp_buf, 8, 1, ctx->fd);
+    size_t result = fread(temp_buf, 9, 1, ctx->fd);
     if (result != 1) {
         if (feof(ctx->fd)) {
-            memset(temp_buf, 0, 8);
+            memset(temp_buf, 0, 9);
             ctx->eof = 1;
         } else if (ferror(ctx->fd)) {
             return -1;
         }
     }
     
-    memcpy(ctx->current_bytes, temp_buf, 7);
-    ctx->extra_bits = temp_buf[7];
+    memcpy(ctx->current_bytes, temp_buf, 8);
+    ctx->extra_bits = temp_buf[8];
     ctx->data_valid = 1;
     ctx->data_changed = 0;
     return 0;
@@ -131,7 +131,7 @@ int nbt_getc(nbt_ctx_t *ctx) {
         if (buffer_status) return EOF;
     }
     
-    int byte_index = ctx->position % 7;
+    int byte_index = ctx->position % 8;
     int result = ctx->current_bytes[byte_index];
     result |= ((int) ((ctx->extra_bits >> byte_index) & 1)) << 8;
     
@@ -152,7 +152,7 @@ int nbt_rgetc(nbt_ctx_t *ctx) {
     
     nbt_seek(ctx, -1, SEEK_CUR);
     
-    int byte_index = ctx->position % 7;
+    int byte_index = ctx->position % 8;
     int result = ctx->current_bytes[byte_index];
     result |= ((int) ((ctx->extra_bits >> byte_index) & 1)) << 8;
     
@@ -171,7 +171,7 @@ int nbt_putc(int c, nbt_ctx_t *ctx) {
         if (buffer_status) return EOF;
     }
     
-    int byte_index = ctx->position % 7;
+    int byte_index = ctx->position % 8;
     uint8_t mask = ~(1 << byte_index);
     uint8_t extra_bit = (c >> 8) << byte_index;
     
