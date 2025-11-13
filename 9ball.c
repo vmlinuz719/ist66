@@ -67,7 +67,7 @@ int nbt_seek(nbt_ctx_t *ctx, int offset, int whence) {
 int nbt_buffer(nbt_ctx_t *ctx) {
     uint8_t temp_buf[9];
     
-    int seek_status = fseek(ctx->fd, (ctx->position / 7) * 8, SEEK_SET);
+    int seek_status = fseek(ctx->fd, (ctx->position / 8) * 9, SEEK_SET);
     if (seek_status) {
         return seek_status;
     }
@@ -224,6 +224,7 @@ int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
         else if (data < 0x100) {
             // bad mark
             nbt_seek(ctx, -1, SEEK_CUR);
+            printf("%ld (%d, %x)\n", ftell(ctx->fd), nbt_tell(ctx), data);
             return NBT_BAD_TAPE;
         }
         
