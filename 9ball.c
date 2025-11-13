@@ -106,6 +106,14 @@ int nbt_eor(nbt_ctx_t *ctx) {
 }
 
 /*
+ * nbt_error: data error status
+ */
+
+int nbt_error(nbt_ctx_t *ctx) {
+    return ctx->data_error;
+}
+
+/*
  * nbt_tell: File position
  */
 
@@ -187,6 +195,8 @@ int nbt_putc(int c, nbt_ctx_t *ctx) {
 
 int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
     ctx->eor = 0;
+    ctx->data_error = 0;
+    
     if (nbt_eof(ctx)) return NBT_READ_EOM;
     
     int first_read;
@@ -202,6 +212,7 @@ int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
     }
     
     nbt_seek(ctx, -1, SEEK_CUR);
+    int old_pos = nbt_tell(ctx);
     
     int read_bytes = 0;
     while (read_bytes < max_len) {
@@ -209,8 +220,8 @@ int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
         
         if (data == 0) {
             // unexpected EOM
-            nbt_seek(ctx, -1, SEEK_CUR);
-            return NBT_READ_EOM;
+            nbt_seek(ctx, old_pos, SEEK_SET);
+            return NBT_BAD_TAPE;
         }
         else if (data == 0x1E || data == 0x1C) {
             // EOR or unexpected tape mark
@@ -223,9 +234,8 @@ int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
         }
         else if (data < 0x100) {
             // bad mark
-            nbt_seek(ctx, -1, SEEK_CUR);
-            printf("%ld (%d, %x)\n", ftell(ctx->fd), nbt_tell(ctx), data);
-            return NBT_BAD_TAPE;
+            ctx->data_error = 1;
+            break;
         }
         
         if (out != NULL) out[read_bytes] = data & 0xFF;
@@ -240,6 +250,7 @@ int nbt_read(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
 
 int nbt_read_reverse(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
     ctx->eor = 0;
+    ctx->data_error = 0;
     
     if (nbt_tell(ctx) == 0) return NBT_READ_BOT;
     
@@ -277,8 +288,9 @@ int nbt_read_reverse(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
         }
         else if (data < 0x100) {
             // bad mark
+            ctx->data_error = 1;
             nbt_seek(ctx, 1, SEEK_CUR);
-            return NBT_BAD_TAPE;
+            return read_bytes;
         }
         
         if (out != NULL) out[read_bytes] = data & 0xFF;
@@ -296,38 +308,56 @@ int nbt_read_reverse(nbt_ctx_t *ctx, int max_len, uint8_t *out) {
 }
 
 int nbt_write(nbt_ctx_t *ctx, int len, uint8_t *in) {
+    ctx->data_error = 0;
+    
     for (int i = 0; i < len; i++) {
         int ch = ((int) (in[i])) | 0x100;
         int result = nbt_putc(ch, ctx);
         if (result != ch) {
-            return NBT_BAD_TAPE;
+            ctx->data_error = 1;
+            return NBT_BAD_DATA;
         }
     }
     
     int result = nbt_putc(0x1E, ctx);
-    if (result != 0x1E) return NBT_BAD_TAPE;
+    if (result != 0x1E) {
+        ctx->data_error = 1;
+        return NBT_BAD_DATA;
+    }
     
     return 0;
 }
 
 int nbt_write_mark(nbt_ctx_t *ctx) {
+    ctx->data_error = 0;
     int result = nbt_putc(0x1C, ctx);
-    if (result != 0x1C) return NBT_BAD_TAPE;
+    if (result != 0x1C) {
+        ctx->data_error = 1;
+        return NBT_BAD_DATA;
+    }
     
     return 0;
 }
 
 int nbt_write_security(nbt_ctx_t *ctx) {
+    ctx->data_error = 0;
     int result = nbt_putc(0x00, ctx);
-    if (result != 0x00) return NBT_BAD_TAPE;
+    if (result != 0x00) {
+        ctx->data_error = 1;
+        return NBT_BAD_DATA;
+    }
     
     return 0;
 }
 
 int nbt_write_erase(nbt_ctx_t *ctx, int len) {
+    ctx->data_error = 0;
     for (int i = 0; i < len; i++) {
         int result = nbt_putc(0x7F, ctx);
-        if (result != 0x7F) return NBT_BAD_TAPE;
+        if (result != 0x7F) {
+            ctx->data_error = 1;
+            return NBT_BAD_DATA;
+        }
     }
     
     return 0;

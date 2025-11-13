@@ -10,7 +10,7 @@
 
 typedef struct {
     FILE *fd;
-    int position, data_valid, data_changed, eof, eor, writable;
+    int position, data_valid, data_changed, eof, eor, data_error, writable;
     uint8_t current_bytes[8], extra_bits;
 } nbt_ctx_t;
 
@@ -18,6 +18,7 @@ typedef struct {
 #define NBT_READ_BOT -2
 #define NBT_READ_EOM -3
 #define NBT_BAD_TAPE -4
+#define NBT_BAD_DATA -5
 
 /*
  * nbt_flush: write out the buffer to file; use when seeking, reading or
