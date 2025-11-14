@@ -27,11 +27,11 @@ STRL0    ILC     2,3,7                          Get character
 
         ****************************************************************
         * STRMOVN - Copy up to n characters of zero-terminated string
-        *           Will NOT copy terminator
+        *           Will always write terminating zero
         *
         * AP + 00 -> Byte pointer one before start of source
         *    + 01 -> Byte pointer one before start of destination
-        *    + 02 -> Maximum length to copy
+        *    + 02 -> Maximum length to copy (not including zero)
         *  Return -> Index of last written character
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
@@ -51,5 +51,7 @@ STRL1    ILC     0,3,7                          Get character
          B       .STRL1                         Continue
 
 STRL2    LA      4,0                            Return destination index
+         XA      2,2
+         ISTC    4,2,7                          Deposit zero
          BRM
 
