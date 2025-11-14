@@ -32,7 +32,8 @@ STRL0    ILC     2,3,7                          Get character
         * AP + 00 -> Byte pointer one before start of source
         *    + 01 -> Byte pointer one before start of destination
         *    + 02 -> Maximum length to copy (not including zero)
-        *  Return -> Index of last written character
+        *  Return -> Remaining characters
+        *  Update -> Source and destination indices
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
@@ -50,7 +51,9 @@ STRL1    ILC     0,3,7                          Get character
          ISTC    0,4,7                          Write copied character
          B       .STRL1                         Continue
 
-STRL2    LA      4,0                            Return destination index
+STRL2    ST      3,0(11)                        Update source index
+         ST      4,1(11)                        Update destination index
+         CMA     2,0                            Return remaining chars
          XA      2,2
          ISTC    4,2,7                          Deposit zero
          BRM
