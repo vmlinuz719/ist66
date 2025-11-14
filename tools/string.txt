@@ -9,7 +9,7 @@
         * STRLEN - Length of zero-terminated string
         *
         * AP + 00 -> Byte pointer one before start of string
-        *  Return -> Length of 7-bit zero-terminated string
+        *  Return -> Length of 7-bit zero-terminated string including 0
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
@@ -18,9 +18,38 @@ STRLEN   USING   2,3
          SMAC    36                             A0: counter
          L       3,0(11)                        A3: byte pointer
 
-STRLEN_L ILC     2,3,7                          Get character
+STRL0    ILC     2,3,7                          Get character
          IA      0,0                            Count up starting at -1
          TRN     2                              Stop if zero
-         B       .STRLEN_L
+         B       .STRL0
 
          BRM
+
+        ****************************************************************
+        * STRMOVN - Copy up to n characters of zero-terminated string
+        *           Will NOT copy terminator
+        *
+        * AP + 00 -> Byte pointer one before start of source
+        *    + 01 -> Byte pointer one before start of destination
+        *    + 02 -> Maximum length to copy
+        *  Return -> Index of last written character
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+STRMOVN  USING   2,3,4
+
+         LCM     2,2(11)                        A2: loop counter
+         L       3,0(11)                        A3: source index
+         L       4,1(11)                        A4: destination index
+         
+STRL1    ILC     0,3,7                          Get character
+         TRN     0                              Break if ch = 0
+         IA      2,2,TRZ                        or if count exhausted
+         B       .STRL2
+         
+         ISTC    0,4,7                          Write copied character
+         B       .STRL1                         Continue
+
+STRL2    LA      4,0                            Return destination index
+         BRM
+
