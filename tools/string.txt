@@ -1,0 +1,26 @@
+        ****************************************************************
+        * String functions for 7-bit ASCII processing
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+        
+         ORIGIN  1024
+
+        ****************************************************************
+        * STRLEN - Length of zero-terminated string
+        *
+        * AP + 00 -> One-before-buffer address
+        *  Return -> Length of 7-bit zero-terminated string
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+STRLEN   USING   2,3
+
+         SMAC    36                             A0: counter
+         L       3,0(11)                        A3: byte pointer
+
+STRLEN_L ILC     2,3,7                          Get character
+         IA      0,0                            Count up starting at -1
+         TRN     2                              Stop if zero
+         B       .STRLEN_L
+
+         BRM
