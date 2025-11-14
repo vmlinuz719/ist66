@@ -8,7 +8,7 @@
         ****************************************************************
         * STRLEN - Length of zero-terminated string
         *
-        * AP + 00 -> One-before-buffer address
+        * AP + 00 -> Byte pointer one before start of string
         *  Return -> Length of 7-bit zero-terminated string
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
