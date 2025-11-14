@@ -326,7 +326,9 @@ class AssembleBX(AssemblerModule):
             "STC": 0o041,
             "ICX": 0o042,
             "ILC": 0o043,
-            "ISTC": 0o044
+            "ISTC": 0o044,
+            "LCI": 0o045,
+            "STCI": 0o046
         }
 
 class AssembleHelper0(AssemblerModule):
