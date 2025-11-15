@@ -29,8 +29,8 @@ STRL0    ILC     2,3,7                          Get character
         * STRMOVN - Copy up to n characters of zero-terminated string
         *           Will always write terminating zero
         *
-        * AP + 00 -> Address of byte pointer one before start of source
-        *    + 01 -> Address of byte pointer one before start of dest.
+        * AP + 00 -> Byte pointer one before start of source
+        *    + 01 -> Byte pointer one before start of destination
         *    + 02 -> Maximum length to copy (not including zero)
         *  Return -> Remaining characters
         *  Update -> Source and destination indices
@@ -40,8 +40,8 @@ STRL0    ILC     2,3,7                          Get character
 STRMOVN  USING   2,3,4
 
          LCM     2,2(11)                        A2: loop counter
-         L       3,@0(11)                       A3: source index
-         L       4,@1(11)                       A4: destination index
+         L       3,0(11)                        A3: source index
+         L       4,1(11)                        A4: destination index
          
 STRL1    ILC     0,3,7                          Get character
          TRN     0                              Break if ch = 0
@@ -51,8 +51,8 @@ STRL1    ILC     0,3,7                          Get character
          ISTC    0,4,7                          Write copied character
          B       .STRL1                         Continue
 
-STRL2    ST      3,@0(11)                       Update source index
-         ST      4,@1(11)                       Update destination index
+STRL2    ST      3,0(11)                        Update source index
+         ST      4,1(11)                        Update destination index
          CMA     2,0                            Return remaining chars
          XA      2,2
          ISTC    4,2,7                          Deposit zero
