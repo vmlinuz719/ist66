@@ -58,3 +58,26 @@ STRL2    ST      3,0(11)                        Update source index
          ISTC    4,2,7                          Deposit zero
          BRM
 
+        ****************************************************************
+        * STRSETN - Repeat a character n times
+        *
+        * AP + 00 -> Byte pointer one before start of destination
+        *    + 01 -> Length to write
+        *    + 02 -> Character to write
+        *  Return -> Updated index
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+STRSETN  USING   2,3
+
+         LCM     2,1(11)                        A2: loop counter
+         L       3,0(11)                        A3: destination index
+         L       0,2(11)                        A0: character to write
+         
+STRL3    IA      2,2,TRZ                        Break if count exhausted
+         B       .STRL4
+         ISTC    0,3,7
+         B       .STRL3
+
+STRL4    LA      3,0
+         BRM
