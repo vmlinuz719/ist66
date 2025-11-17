@@ -131,10 +131,11 @@ STRLEN   USING   2,3,4
 
 STRL7    ILC     2,3,7                          Get character
          IA      0,0                            Count up starting at -1
-         TRNE    2,4                            Stop if equal to target
-         TRN     2                              Or if character is zero
+         TRN     2                              Stop if character is zero
+         TREQ    2,4                            Or if equal to target
+         B       .STRL8
          B       .STRL7
 
-         TACZ
+STRL8    TACZ
          SMAC    36                             Return -1 if not found
          BRM
