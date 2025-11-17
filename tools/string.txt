@@ -113,3 +113,28 @@ STRL6    XA      0,0                            Success
          ST      3,0(11)                        Update A index
          ST      4,1(11)                        Update B index
          BRM
+
+        ****************************************************************
+        * STRINDC - Index of character in string
+        *
+        * AP + 00 -> Byte pointer one before start of string
+        *    + 01 -> Character to seek
+        *  Return -> Index of character (-1 if not found)
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+STRLEN   USING   2,3,4
+
+         SMAC    36                             A0: counter
+         L       3,0(11)                        A3: byte pointer
+         L       4,1(11)                        A4: target
+
+STRL7    ILC     2,3,7                          Get character
+         IA      0,0                            Count up starting at -1
+         TRNE    2,4                            Stop if equal to target
+         TRN     2                              Or if character is zero
+         B       .STRL7
+
+         TACZ
+         SMAC    36                             Return -1 if not found
+         BRM
