@@ -136,6 +136,6 @@ STRL7    ILC     2,3,7                          Get character
          B       .STRL8
          B       .STRL7
 
-STRL8    TACZ
+STRL8    TRZ     2
          SMAC    36                             Return -1 if not found
          BRM
