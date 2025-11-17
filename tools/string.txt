@@ -81,3 +81,35 @@ STRL3    IA      2,2,TRZ                        Break if count exhausted
 
 STRL4    BRM
 
+        ****************************************************************
+        * STRCMPN - Compare up to n characters of zero-terminated string
+        *
+        * AP + 00 -> Byte pointer one before start of A string
+        *    + 01 -> Byte pointer one before start of B string
+        *    + 02 -> Maximum length to compare
+        *  Return -> 0 if equal, -1 otherwise
+        *  Update -> Source and destination indices
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+STRCMPN  USING   2,3,4,5
+
+         LCM     2,2(11)                        A2: loop counter
+         L       3,0(11)                        A3: A index
+         L       4,1(11)                        A4: B index
+         
+STRL5    ILC     0,3,7                          Get character A
+         ILC     5,4,7                          Get character B
+         OA      0,5,NL,TRN                     Succeed if A and B are 0
+         IA      2,2,TRZ                        or if count exhausted
+         B       .STRL6
+         
+         TREQ    5,0                            Keep going if A = B
+         B       .STRL5
+         
+         LA      0,0,SC,M(36),TNV               Fail
+
+STRL6    XA      0,0                            Success
+         ST      3,0(11)                        Update A index
+         ST      4,1(11)                        Update B index
+         BRM
