@@ -1139,66 +1139,6 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 045: { // LCI
-            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
-            if (data == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (data == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-                return;
-            }
-            data &= MASK_36;
-            
-            data >>= sh;
-            data &= (1L << bs) - 1;
-            
-            cpu->a[ac] = data;
-            
-            sh -= bs;
-            if (sh > 36) {
-                sh = (36 - bs) & 0x3F;
-                ea = (ea + 1) & MASK_ADDR;
-            }
-            cpu->a[ac] = ea | (sh << 27);
-            
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 046: { // STCI
-            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
-            if (data == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (data == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-                return;
-            }
-            data &= MASK_36;
-            
-            uint64_t mask = ((1L << bs) - 1) << sh;
-            uint64_t wr_data = (cpu->a[ac] << sh) & mask;
-            data &= ~mask;
-            data |= wr_data;
-            
-            uint64_t w_res =
-                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
-            if (w_res == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (w_res == KEY_FAULT) {
-                do_except(cpu, X_PPFW);
-                return;
-            }
-            
-            sh -= bs;
-            if (sh > 36) {
-                sh = (36 - bs) & 0x3F;
-                ea = (ea + 1) & MASK_ADDR;
-            }
-            cpu->a[ac] = ea | (sh << 27);
-            
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
         default: {
             // Illegal
             do_except(cpu, X_INST);
