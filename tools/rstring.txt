@@ -1,0 +1,32 @@
+        ****************************************************************
+        * Functions for string manipulation
+        * Fastcall: X0-X3 for first args, caller saved
+        *
+        * bufspec: 2 bits unused, 6 bits byte size, 27 bits max byte
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+        ****************************************************************
+        * SNCRTBUF - Create a string buffer 
+        *
+        *      X0 -> Bufspec
+        *      X1 -> Start address of string
+        *      X2 -> Character to initialize with
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+SNCRTBUF USING   2
+
+         ST      3,0(4)                         Save bufspec
+
+         LA      3,2,CC,R(8),M(29)              Get byte size
+         CMA     3,3,SC,M(8)                    Init countdown
+
+SNL0     IA      3,3,TRZ
+         BRM                                    Done if count exhausted
+         
+         EDITS   2,.1
+         ISTC    5,4,0                          Write out that many bits
+         
+         B       .SNL0                          Continue
+
