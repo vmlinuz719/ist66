@@ -1,8 +1,10 @@
         ****************************************************************
         * Functions for string manipulation
         * Fastcall: X0-X3 for first args, caller saved
+        * Big return: @0(AP)
         *
         * bufspec: 2 bits unused, 6 bits byte size, 27 bits max byte
+        * slice: bufspec; byte index one before first character
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
