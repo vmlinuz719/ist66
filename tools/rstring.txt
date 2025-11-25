@@ -1,7 +1,7 @@
         ****************************************************************
         * Functions for string manipulation
         * Fastcall: X0-X3 for first args, caller saved
-        * Big return: @0(AP)
+        * 2-word values returned in AC,XY
         *
         * bufspec: 2 bits unused, 6 bits byte size, 27 bits max byte
         * slice: bufspec; byte index one before first character
@@ -31,4 +31,36 @@ SNL0     IA      3,3,TRZ
          ISTC    5,4,0                          Write out that many bits
          
          B       .SNL0                          Continue
+
+        ****************************************************************
+        * SNSLCTOC - Slice to first instance of character
+        *
+        *(X0, X1) -> Initial slice
+        *         X0 -> Bufspec
+        *         X1 -> Start address of string
+        *      X2 -> Character to stop at
+        *  Return -> Slice (AC, XY)
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+SNSLCTOC USING   2,7
+
+         LA      3,2,CC,R(8),M(29)              Get byte size
+         LA      3,3,CC,M(8)                    Init limit
+         CMK     6,36                           Init countup
+         LA      4,0                            Save start pointer
+
+SNL1     TREQ    6,3                            Done if limit exhausted
+         B       .SNL2
+         IA      6,6                            Count up loop
+         
+         EDITS   2,.1
+         ILC     7,4,0                          Check character
+         TRNE    7,5                            Continue if not equal
+         B       .SNL1
+
+SNL2     LA      6,0,R(8)                       Generate bufspec
+         OA      2,0,R(27)
+         LA      4,2
+         BRM
 
