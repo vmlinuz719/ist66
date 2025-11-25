@@ -46,7 +46,7 @@ SNL0     IA      3,3,TRZ
 SNSLCTOC USING   2,7
 
          LA      3,2,CC,R(8),M(29)              Get byte size
-         LA      3,3,CC,M(8)                    Init limit
+         CMK     3,8                            Init limit
          CMK     6,36                           Init countup
          LA      4,0                            Save start pointer
 
