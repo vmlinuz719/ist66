@@ -64,3 +64,15 @@ SNL2     LA      6,0,R(8)                       Generate bufspec
          LA      4,2
          BRM
 
+        ****************************************************************
+        * SNSLFRMC - Slice from first instance of character
+        *
+        *(X0, X1) -> Initial slice
+        *         X0 -> Bufspec
+        *         X1 -> Start address of string
+        *      X2 -> Character to start at
+        *  Return -> Slice (AC, XY)
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+SNSLFRMC USING   2,7
