@@ -43,7 +43,7 @@ SNL0     IA      3,3,TRZ
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-SNSLCTOC USING   2,7
+SNSLCTOC USING   7
 
          LA      3,2,CC,R(8),M(29)              Get byte size
          CMK     3,8                            Init limit
