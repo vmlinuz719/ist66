@@ -75,4 +75,21 @@ SNL2     LA      6,0,R(8)                       Generate bufspec
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-SNSLFRMC USING   2,7
+SNSLFRMC USING   7
+
+         LA      3,0,CC,R(8),M(29)              Get byte size
+         CMK     3,8                            Init countdown
+         LA      4,2                            Save start pointer
+
+SNL3     TRZ     3                              Done if string exhausted
+         B       .SNL4
+         AX      3,-1                           Count down limit
+         
+         EDITS   0,.1
+         ILC     7,2,0                          Check character
+         TRNE    7,5                            Continue if not equal
+         B       .SNL3
+
+SNL4     LA      0,0,R(27)                       Generate bufspec
+         OA      3,0
+         BRM
