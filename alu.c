@@ -135,9 +135,11 @@ uint64_t compute(
     int mk,                         // mask
     int rt                          // rotate
 ) {
+    /*
     if ((mk & 0x70) == 0x40) {
         mk = -rt;
     }
+    */
     
     switch (ci) {
         case 1: c = 0; break;
