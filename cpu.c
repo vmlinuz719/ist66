@@ -1885,10 +1885,12 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
         uint64_t acs = (inst >> 27) & 0xF;
         uint64_t acd = (inst >> 23) & 0xF;
         uint64_t result = exec_aa(inst, cpu->a[acs], cpu->a[acd], get_cf(cpu));
+        /*
         if (((inst >> 11) & 0x7) == 0x4) {
             // ADR encoding; save to alternate register
             acd = (inst >> 7) & 0xF;
         }
+        */
         cpu->a[acd] = result & MASK_36;
         set_cf(cpu, (result >> 36) & 1);
         if (SKIP(result)) {

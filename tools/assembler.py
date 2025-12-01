@@ -225,7 +225,6 @@ def assemble_aa_arg(arg: str) -> int:
         
     args_tbl = {
         #       fn                bits shl extra
-        "D": (get_paren_number, 4,   7,  0x2000    ),
         
         "M": (get_paren_number, 7,   7,  0         ),
         "R": (get_paren_number, 7,   0,  0         ),
