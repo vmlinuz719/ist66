@@ -12,8 +12,15 @@
 #define C_FCW 2
 #define C_PLT 3
 #define C_SLT 4
+#define C_SDR 5
+#define C_SF 6
 #define MEM_FAULT (1L << 36)
 #define KEY_FAULT (1L << 37)
+#define SEG_FAULT_PRESENT 0
+#define SEG_FAULT_KEY (1 << 27)
+#define SEG_FAULT_BOUNDS (2 << 27)
+#define SEG_FAULT_RIGHTS (3 << 27)
+#define SEG_FAULT_WRITE (1 << 29)
 
 typedef struct ist66_cu ist66_cu_t;
 
@@ -29,12 +36,19 @@ typedef void (*ist66_io_dtor_t) (
     int /* id */
 );
 
+typedef struct {
+    uint64_t base;
+    uint64_t tag;
+    uint8_t key;
+} seg_cache_t;
+
 struct ist66_cu {
     struct ist66_cu *host;
     
     uint64_t a[16]; // accumulators
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
     extFloat80_t f[16];
+    seg_cache_t seg_cache[32];
     uint64_t stop_code;
     
     uint64_t xeq_inst, inc_addr, inc_data;

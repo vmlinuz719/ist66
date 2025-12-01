@@ -18,6 +18,43 @@
 
 #include "softfloat.h"
 
+seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
+    uint8_t cache_row = selector & 0x1F;
+    uint8_t cache_key = selector >> 5;
+    
+    if (
+        (cpu->seg_cache[cache_row].key != cache_key) || // not cached
+        (!(cpu->seg_cache[cache_row].tag & (1 << 27))) // not present
+    ) { // go fish
+        if (selector > cpu->c[C_SDR] >> 27) return NULL; // no such segment
+        
+        uint64_t descriptor_addr = (cpu->c[C_SDR] & MASK_ADDR)
+            + (selector << 1);
+        
+        uint64_t tag = cpu->memory[descriptor_addr + 1] & MASK_36;
+        if (!(tag & (1 << 27))) return NULL; // still not present
+        
+        cpu->seg_cache[cache_row].base =
+            cpu->memory[descriptor_addr] & MASK_36;
+        cpu->seg_cache[cache_row].tag = tag;
+        cpu->seg_cache[cache_row].key = cache_key;
+    }
+    
+    return &(cpu->seg_cache[cache_row]);
+}
+
+void seg_invalidate(ist66_cu_t *cpu, int selector) {
+    cpu->seg_cache[selector & 0x1F].tag = 0;
+}
+
+void seg_invalidate_all(ist66_cu_t *cpu) {
+    for (int i = 0; i < 32; i++) {
+        if (!(cpu->seg_cache[i].tag & (1 << 25))) {
+            cpu->seg_cache[i].tag = 0;
+        }
+    }
+}
+
 /**
  * @brief Assert a priority interrupt signal
  *
@@ -94,6 +131,38 @@ void intr_set_mask(ist66_cu_t *cpu, uint16_t mask) {
     pthread_mutex_unlock(&(cpu->lock));
 }
 
+uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
+    vaddress &= MASK_ADDR;
+    
+    seg_cache_t *seg = seg_lookup(cpu, vaddress >> 18);
+    if (seg == NULL) {
+        cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT;
+        return KEY_FAULT;
+    }
+    
+    uint8_t seg_key = seg->tag >> 28;
+    
+    if (
+        seg_key != 0xFE &&
+        seg_key != 0xFF &&
+        seg_key != key
+    ) {
+        cpu->c[C_SF] = vaddress | SEG_FAULT_KEY;
+        return KEY_FAULT;
+    }
+    
+    uint64_t offset = vaddress & 0x3FFFF;
+    if (offset > (seg->tag & 0x3FFFF)) {
+        cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS;
+        return KEY_FAULT;
+    }
+    
+    uint64_t address = (seg->base + offset) & MASK_36;
+    if (address >= cpu->mem_size) return MEM_FAULT;
+    
+    return cpu->memory[address] & MASK_36;
+}
+
 /**
  * @brief Read a 36-bit word from CPU memory or return an error value
  *
@@ -114,6 +183,8 @@ void intr_set_mask(ist66_cu_t *cpu, uint16_t mask) {
  * @return Contents of memory, MEM_FAULT or KEY_FAULT
  */
 uint64_t read_mem(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
+    if (cpu->c[C_SDR] != 0) return read_vmem(cpu, key, address);
+    
     address &= MASK_ADDR;
     
     if (address >= cpu->mem_size) {
@@ -129,6 +200,44 @@ uint64_t read_mem(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
         return KEY_FAULT;
     }
     else return cpu->memory[address] & MASK_36;
+}
+
+uint64_t write_vmem(
+    ist66_cu_t *cpu,
+    uint8_t key,
+    uint32_t vaddress,
+    uint64_t data
+) {
+    vaddress &= MASK_ADDR;
+    
+    seg_cache_t *seg = seg_lookup(cpu, vaddress >> 18);
+    if (seg == NULL) {
+        cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_WRITE;
+        return KEY_FAULT;
+    }
+    
+    uint8_t seg_key = seg->tag >> 28;
+    
+    if (
+        seg_key != 0xFF &&
+        seg_key != key
+    ) {
+        cpu->c[C_SF] = vaddress | SEG_FAULT_KEY | SEG_FAULT_WRITE;
+        return KEY_FAULT;
+    }
+    
+    uint64_t offset = vaddress & 0x3FFFF;
+    if (offset > (seg->tag & 0x3FFFF)) {
+        cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS | SEG_FAULT_WRITE;
+        return KEY_FAULT;
+    }
+    
+    uint64_t address = (seg->base + offset) & MASK_36;
+    if (address >= cpu->mem_size) return MEM_FAULT;
+    
+    uint64_t old_tag = cpu->memory[address] & ~(MASK_36);
+    cpu->memory[address] = old_tag | (data & MASK_36);
+    return 0;
 }
 
 /**
@@ -154,6 +263,8 @@ uint64_t write_mem(
     uint32_t address,
     uint64_t data
 ) {
+    if (cpu->c[C_SDR] != 0) return write_vmem(cpu, key, address, data);
+    
     address &= MASK_ADDR;
     
     if (address >= cpu->mem_size) {
@@ -1258,6 +1369,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 data &= MASK_36;
             
                 cpu->c[ac] = data & MASK_36;
+                if (ac == C_SDR) seg_invalidate_all(cpu);
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
             case 0606: { // STCTL
