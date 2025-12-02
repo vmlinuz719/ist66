@@ -1337,6 +1337,14 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                         }
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
+                    case 4: { // INVSM
+                        seg_invalidate(cpu, ea >> 18);
+                        set_pc(cpu, get_pc(cpu) + 1);
+                    } break;
+                    case 5: { // INVPG
+                        
+                        set_pc(cpu, get_pc(cpu) + 1);
+                    } break;
                     default: {
                         // Illegal
                         do_except(cpu, X_INST);
