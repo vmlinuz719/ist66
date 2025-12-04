@@ -208,6 +208,7 @@ class AssembleAM(AssemblerModule):
             
             "LCTL": 0o605,
             "STCTL": 0o606,
+            "LXRT": 0o607,
         }
 
 def get_paren_arg(arg: str) -> str:

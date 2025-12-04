@@ -1457,6 +1457,36 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
+            case 0607: { // LXRT
+                uint64_t vaddress = ea & MASK_ADDR;
+        
+                seg_cache_t *seg = seg_lookup(cpu, vaddress >> 18);
+                if (seg == NULL) {
+                    cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT;
+                    set_pc(cpu, get_pc(cpu) + 1);
+                    return;
+                }
+                
+                uint64_t offset = vaddress & 0x3FFFF;
+                if (offset > (seg->tag & 0x3FFFF)) {
+                    cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS;
+                    set_pc(cpu, get_pc(cpu) + 1);
+                    return;
+                }
+                
+                if (((seg->tag >> 27) & 1)) {
+                    seg = tlb_lookup(cpu, (vaddress >> 9) & 0x1F, seg);
+                    if (seg == NULL) {
+                        cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
+                        set_pc(cpu, get_pc(cpu) + 1);
+                        return;
+                    }
+                }
+                
+                uint64_t address = (seg->base + offset) & MASK_36;
+                cpu->c[ac] = address;
+                set_pc(cpu, get_pc(cpu) + 2);
+            } break;
             default: {
                 // Illegal
                 do_except(cpu, X_INST);
