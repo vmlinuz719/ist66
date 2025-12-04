@@ -31,6 +31,8 @@ seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
         uint64_t descriptor_addr = (cpu->c[C_SDR] & MASK_ADDR)
             + (selector << 1);
         
+        if (descriptor_addr >= cpu->mem_size - 1) return NULL;
+        
         uint64_t tag = cpu->memory[descriptor_addr + 1] & MASK_36;
         if (!(tag & (1 << 27))) return NULL; // still not present
         
@@ -51,6 +53,45 @@ void seg_invalidate_all(ist66_cu_t *cpu) {
     for (int i = 0; i < 32; i++) {
         if (!(cpu->seg_cache[i].tag & (1 << 25))) {
             cpu->seg_cache[i].tag = 0;
+        }
+    }
+}
+
+seg_cache_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pts) {
+    uint8_t cache_row = selector & 0x1F;
+    uint8_t cache_key = selector >> 5;
+    
+    if (
+        (cpu->tlb[cache_row].key != cache_key) || // not cached
+        (!(cpu->tlb[cache_row].tag & (1 << 27))) // not present
+    ) { // go fish
+        if (selector > 511) return NULL; // no such page
+        
+        uint64_t descriptor_addr = pts->base + selector;
+        
+        if (descriptor_addr >= cpu->mem_size) return NULL;
+        
+        uint64_t tag = (cpu->memory[descriptor_addr] & 0x1E0) << 19;
+        tag |= (pts->tag & 0776000000000) | 0777;
+        if (!(tag & (1 << 27))) return NULL; // still not present
+        
+        cpu->tlb[cache_row].base =
+            cpu->memory[descriptor_addr] & 0777777777000;
+        cpu->tlb[cache_row].tag = tag;
+        cpu->tlb[cache_row].key = cache_key;
+    }
+    
+    return &(cpu->tlb[cache_row]);
+}
+
+void tlb_invalidate(ist66_cu_t *cpu, int selector) {
+    cpu->tlb[selector & 0x1F].tag = 0;
+}
+
+void tlb_invalidate_all(ist66_cu_t *cpu) {
+    for (int i = 0; i < 32; i++) {
+        if (!(cpu->tlb[i].tag & (1 << 25))) {
+            cpu->tlb[i].tag = 0;
         }
     }
 }
@@ -157,6 +198,14 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
         return KEY_FAULT;
     }
     
+    if (((seg->tag >> 27) & 1)) {
+        seg = tlb_lookup(cpu, (vaddress >> 9) & 0x1F, seg);
+        if (seg == NULL) {
+            cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
+            return KEY_FAULT;
+        }
+    }
+    
     uint64_t address = (seg->base + offset) & MASK_36;
     if (address >= cpu->mem_size) return MEM_FAULT;
     
@@ -226,10 +275,27 @@ uint64_t write_vmem(
         return KEY_FAULT;
     }
     
+    if (!((seg->tag >> 26) & 1)) {
+        cpu->c[C_SF] = vaddress | SEG_FAULT_RIGHTS | SEG_FAULT_WRITE;
+        return KEY_FAULT;
+    }
+    
     uint64_t offset = vaddress & 0x3FFFF;
     if (offset > (seg->tag & 0x3FFFF)) {
         cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS | SEG_FAULT_WRITE;
         return KEY_FAULT;
+    }
+    
+    if (((seg->tag >> 27) & 1)) {
+        seg = tlb_lookup(cpu, (vaddress >> 9) & 0x1F, seg);
+        if (seg == NULL) {
+            cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE | SEG_FAULT_WRITE;
+            return KEY_FAULT;
+        }
+        if (!((seg->tag >> 26) & 1)) {
+            cpu->c[C_SF] = vaddress | SEG_FAULT_RIGHTS | SEG_FAULT_WRITE | SEG_FAULT_PAGE;
+            return KEY_FAULT;
+        }
     }
     
     uint64_t address = (seg->base + offset) & MASK_36;
@@ -1342,7 +1408,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
                     case 5: { // INVPG
-                        
+                        tlb_invalidate(cpu, (ea >> 9) & 0x1F);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
                     default: {
@@ -1377,7 +1443,10 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 data &= MASK_36;
             
                 cpu->c[ac] = data & MASK_36;
-                if (ac == C_SDR) seg_invalidate_all(cpu);
+                if (ac == C_SDR) {
+                    seg_invalidate_all(cpu);
+                    tlb_invalidate_all(cpu);
+                }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
             case 0606: { // STCTL

@@ -21,6 +21,7 @@
 #define SEG_FAULT_BOUNDS (2 << 27)
 #define SEG_FAULT_RIGHTS (3 << 27)
 #define SEG_FAULT_WRITE (1 << 29)
+#define SEG_FAULT_PAGE (1 << 30)
 
 typedef struct ist66_cu ist66_cu_t;
 
@@ -48,7 +49,7 @@ struct ist66_cu {
     uint64_t a[16]; // accumulators
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
     extFloat80_t f[16];
-    seg_cache_t seg_cache[32];
+    seg_cache_t seg_cache[32], tlb[32];
     uint64_t stop_code;
     
     uint64_t xeq_inst, inc_addr, inc_data;
