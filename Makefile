@@ -5,7 +5,7 @@ CC = gcc
 CFLAGS = -O3 -Wall -Iinclude
 
 # Source files
-SRCS = alu.c fpu_helpers.c cpu.c lpt.c pch.c ppt.c iocpu.c
+SRCS = alu.c fpu_helpers.c cpu.c lpt.c pch.c ppt.c iocpu.c tty.c
 
 # Object files
 OBJS = $(SRCS:.c=.o)
