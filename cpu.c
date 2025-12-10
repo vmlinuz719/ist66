@@ -15,6 +15,7 @@
 #include "ppt.h"
 #include "pch.h"
 #include "lpt.h"
+#include "tty.h"
 
 #include "softfloat.h"
 
@@ -2163,8 +2164,9 @@ int main(int argc, char *argv[]) {
 
     init_ppt(&cpu, 012, 4);
     init_lpt(&cpu, 013, 5, stdout);
-    init_iocpu(&cpu, 020, 8, 1024, 512);
+    // init_iocpu(&cpu, 020, 8, 1024, 512);
     // init_pch(&cpu, 014, 6);
+    init_tty(&cpu, 060, 3, 8080);
     
     cpu.memory[512] = 0670000370012;
     cpu.memory[513] = 0743170000000;

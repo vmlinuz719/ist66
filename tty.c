@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <errno.h>
 
 #include "cpu.h"
 
@@ -35,7 +36,7 @@ typedef struct {
     
     pthread_t listener, reader, writer;
     
-    int running, command, done;
+    int listening, running, command, done;
 } ist66_tty_t;
 
 void push_char(void *vctx, uint8_t ch) {
@@ -118,4 +119,112 @@ void *tty_reader(void *vctx) {
     }
     
     return NULL;
+}
+
+void *tty_listener(void *vctx) {
+    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    
+    listen(ctx->sock_listener, 1);
+    
+    while (1) {
+        struct sockaddr_in client;
+        socklen_t c = sizeof(client);
+        
+        int new_connection =
+            accept(ctx->sock_listener, (struct sockaddr *) &client, &c);
+        
+        if (new_connection < 0) {
+            // connection failed
+            ctx->listening = 0;
+            return NULL;
+        }
+        
+        if (!(ctx->running)) {
+            ctx->sock_console = new_connection;
+            ctx->running = 1;
+            pthread_create
+                (&ctx->reader, NULL, tty_reader, ctx);
+            // create writer too
+            fprintf(stderr, "/DEV-I-UNIT %04o TTY CONNECT\n", ctx->id);
+        } else {
+            static char *msg = "/TTY-E-BUSY\n";
+            send(new_connection, msg, sizeof(msg), 0);
+            close(new_connection);
+        }
+    }
+    
+    return NULL;
+}
+
+uint64_t tty_io(
+    void *vctx,
+    uint64_t data,
+    int ctl,
+    int transfer
+) {
+    // ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    // ist66_cu_t *cpu = ctx->cpu;
+    
+    // stub
+    
+    return 0;
+}
+
+void destroy_tty(ist66_cu_t *cpu, int id) {
+    ist66_tty_t *ctx = (ist66_tty_t *) cpu->ioctx[id];
+    
+    if (ctx->running) {
+        pthread_cancel(ctx->reader);
+        // pthread_cancel(ctx->writer);
+        close(ctx->sock_console);
+    }
+    
+    if (ctx->listening) {
+        pthread_cancel(ctx->listener);
+    }
+    
+    close(ctx->sock_listener);
+    
+    pthread_mutex_destroy(&ctx->status_lock);
+    pthread_cond_destroy(&ctx->status_empty_cond);
+    free(ctx);
+    
+    fprintf(stderr, "/DEV-I-UNIT %04o TTY CLOSED\n", id);
+}
+
+void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
+    int server_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_sock == -1) {
+        fprintf(stderr, "/DEV-E-UNIT %04o TTY CREATE FAIL\n", id);
+        return;
+    }
+    
+    struct sockaddr_in server_in;
+    server_in.sin_family = AF_INET;
+    server_in.sin_addr.s_addr = INADDR_ANY;
+    server_in.sin_port = htons(port);
+
+    if (bind(server_sock, (struct sockaddr *)&server_in, sizeof(server_in)) < 0) {
+        fprintf(stderr, "/DEV-E-UNIT %04o TTY BIND FAIL\n", id);
+        close(server_sock);
+        return;
+    }
+    
+    ist66_tty_t *ctx = calloc(sizeof(ist66_tty_t), 1);
+    cpu->ioctx[id] = ctx;
+    cpu->io_destroy[id] = destroy_tty;
+    cpu->io[id] = tty_io;
+    
+    ctx->cpu = cpu;
+    ctx->id = id;
+    ctx->irq = irq;
+    ctx->sock_listener = server_sock;
+    
+    pthread_mutex_init(&ctx->status_lock, NULL);
+    pthread_cond_init(&ctx->status_empty_cond, NULL);
+    
+    ctx->listening = 1;
+    
+    pthread_create(&ctx->listener, NULL, tty_listener, ctx);
+    fprintf(stderr, "/DEV-I-UNIT %04o TTY IRQ %02o %d\n", id, irq, port);
 }
