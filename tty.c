@@ -97,12 +97,13 @@ void *tty_reader(void *vctx) {
                     break;
                 
                 case TN_COMMAND:
+                    fprintf(stderr, "%hhu\n", buf[i]);
                     if (buf[i] == 0xFF) {
                         push_char(ctx, buf[i]);
                         telnet_state = TN_NORMAL;
                     } else if (buf[i] == TELNET_SB) {
                         telnet_state = TN_SUBNEG;
-                    } else {
+                    } else if (buf[i] < 250) {
                         telnet_state = TN_NORMAL;
                     }
                     break;
@@ -140,6 +141,16 @@ void *tty_listener(void *vctx) {
         }
         
         if (!(ctx->running)) {
+            uint8_t mode[] = {
+                255, 251, 1, 255, 251, 3
+            };
+            send(
+                new_connection,
+                mode,
+                sizeof(mode),
+                0
+            );
+            
             ctx->sock_console = new_connection;
             ctx->running = 1;
             pthread_create
