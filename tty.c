@@ -44,12 +44,19 @@ void push_char(void *vctx, uint8_t ch) {
     
     pthread_mutex_lock(&ctx->status_lock);
     
+    /*
     while (ctx->len == 255) {
         pthread_cond_wait(&ctx->status_empty_cond, &ctx->status_lock);
     }
+    */
     
-    ctx->buffer[ctx->wr++] = ch;
-    ctx->len++;
+    if (ctx->len < 255) {
+        ctx->buffer[ctx->wr++] = ch;
+        ctx->len++;
+        // echo
+    } else {
+        // ring bell if echo enabled
+    }
     
     pthread_mutex_unlock(&ctx->status_lock);
 }
