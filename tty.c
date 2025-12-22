@@ -260,7 +260,7 @@ uint64_t tty_io(
             } break;
             case 2: {
                 pthread_mutex_lock(&ctx->intr_lock);
-                ctx->command = 0;
+                // ctx->command = 0;
                 if (ctx->done) {
                     ctx->done = 0;
                     intr_release(cpu, ctx->irq);
