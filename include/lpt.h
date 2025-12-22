@@ -1,6 +1,8 @@
 #ifndef _LPT_
 #define _LPT_
 
+#include <stdio.h>
+
 #include "cpu.h"
 
 void init_lpt(ist66_cu_t *cpu, int id, int irq, FILE *fd);

@@ -1,10 +1,8 @@
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "alu.h"
 
-#include "softfloat.h"
+#include "softfloat_types.h"
 
 uint64_t exp8_to_i36(uint8_t exp) {
     int64_t result = (int64_t) exp;
@@ -45,7 +43,7 @@ void ist66f_to_extF80M(uint64_t x, uint64_t y, extFloat80_t *z) {
     
     uint8_t exp = (uint8_t) ((x >> 27) & 0xFF);
     uint16_t new_exp = i36_to_exp15(exp8_to_i36(exp));
-    if (new_exp) z->signif |= 1L << 63;
+    if (new_exp) z->signif |= ((uint64_t) 1L) << 63;
     if ((x & (1L << 35))) new_exp |= 1 << 15;
     z->signExp = new_exp;
 }

@@ -14,7 +14,6 @@
 #define EXT36(x) ((x) & (1L << 35) ? (x) | 0xFFFFFFF000000000 : (x))
 
 #include <stdint.h>
-#include <stdio.h>
 
 uint64_t compute(
     uint64_t a, uint64_t b, int c,  // a, b, carry

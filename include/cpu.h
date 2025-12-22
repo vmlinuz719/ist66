@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#include "softfloat.h"
+#include "softfloat_types.h"
 
 #define MASK_ADDR 0x7FFFFFFL
 #define C_PSW 0
