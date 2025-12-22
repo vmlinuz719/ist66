@@ -14,6 +14,18 @@
 #define TELNET_SB 0xFA
 #define TELNET_IAC 0xFF
 
+#define ENABLED     1
+#define INTR_ANY    2
+#define INTR_ESC    4
+#define INTR_RET    8
+#define DESTRUCT    16
+#define BSNOECHO    32
+#define ECHO_RET    64
+#define ECHO_TAB    128
+#define ECHO_ALL    256
+
+#define DEFAULTS    (ECHO_ALL | ECHO_TAB | ECHO_RET | INTR_RET)
+
 enum telnet_telnet_state {
     TN_NORMAL,
     TN_COMMAND,
@@ -27,12 +39,14 @@ typedef struct {
     int sock_listener, sock_console;
     
     uint8_t buffer[256];
-    uint8_t rd, wr, len;
+    uint8_t rd, wr, len, threshold;
     int was_full;
-    pthread_mutex_t status_lock;
+    pthread_mutex_t status_lock, intr_lock;
     pthread_cond_t status_empty_cond;
     
     pthread_t listener, reader, writer;
+    
+    uint16_t control;
     
     int listening, running, command, done;
 } ist66_tty_t;
@@ -48,12 +62,38 @@ void push_char(void *vctx, uint8_t ch) {
     }
     */
     
-    if (ctx->len < 255) {
+    // fprintf(stderr, "Debug: %02hhX\n", ch);
+    
+    if (ctx->len < 255 && (ctx->control & ENABLED)) {
         ctx->buffer[ctx->wr++] = ch;
         ctx->len++;
-        // echo
+        
+        if (
+            (ctx->control & ECHO_ALL) // TODO: check printable
+            || ((ctx->control & ECHO_TAB) && (ch == '\t'))
+            || ((ctx->control & ECHO_RET) && (ch == 0x0A || ch == 0x0D))
+        ) {
+            send(ctx->sock_console, &ch, 1, 0);
+        }
+        
+        if (
+            (ctx->control & INTR_ANY)
+            || ((ctx->control & INTR_ESC) && (ch == 0x1B))
+            || ((ctx->control & INTR_RET) && (ch == 0x0A))
+            || ((ctx->threshold) && (ctx->len >= ctx->threshold))
+        ) {
+            pthread_mutex_lock(&ctx->intr_lock);
+            
+            if (!ctx->done) {
+                ctx->done = 1;
+                intr_assert(ctx->cpu, ctx->irq);
+            }
+            
+            pthread_mutex_unlock(&ctx->intr_lock);
+        }
     } else {
-        // ring bell if echo enabled
+        static char bell = '\a';
+        send(ctx->sock_console, &bell, 1, 0);
     }
     
     pthread_mutex_unlock(&ctx->status_lock);
@@ -102,7 +142,7 @@ void *tty_reader(void *vctx) {
                     break;
                 
                 case TN_COMMAND:
-                    fprintf(stderr, "%hhu\n", buf[i]);
+                    // fprintf(stderr, "%hhu\n", buf[i]);
                     if (buf[i] == 0xFF) {
                         push_char(ctx, buf[i]);
                         telnet_state = TN_NORMAL;
@@ -202,6 +242,7 @@ void destroy_tty(ist66_cu_t *cpu, int id) {
     close(ctx->sock_listener);
     
     pthread_mutex_destroy(&ctx->status_lock);
+    pthread_mutex_destroy(&ctx->intr_lock);
     pthread_cond_destroy(&ctx->status_empty_cond);
     free(ctx);
     
@@ -237,9 +278,11 @@ void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
     ctx->sock_listener = server_sock;
     
     pthread_mutex_init(&ctx->status_lock, NULL);
+    pthread_mutex_init(&ctx->intr_lock, NULL);
     pthread_cond_init(&ctx->status_empty_cond, NULL);
     
     ctx->listening = 1;
+    ctx->control = DEFAULTS;
     
     pthread_create(&ctx->listener, NULL, tty_listener, ctx);
     fprintf(stderr, "/DEV-I-UNIT %04o TTY IRQ %02o %d\n", id, irq, port);
