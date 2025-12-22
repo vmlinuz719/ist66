@@ -1245,10 +1245,10 @@ void exec_local_trap(ist66_cu_t *cpu, uint64_t inst) {
         if (opcode >= 0200) { // SLT, set key to 0 and save full PSW
             cpu->a[15] = cpu->c[C_PSW];
             cpu->c[C_PSW] &= (1 << 27);
-            set_pc(cpu, cpu->c[C_SLT]);
+            set_pc(cpu, cpu->c[C_SLT] + (opcode & 077));
         } else { // PLT, preserve key and save only program counter
             cpu->a[15] = get_pc(cpu);
-            set_pc(cpu, cpu->c[C_PLT]);
+            set_pc(cpu, cpu->c[C_PLT] + (opcode & 077));
         }
         cpu->a[14] = inst;
     }
