@@ -1,0 +1,21 @@
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+        
+         ORIGIN  1024
+
+START    LX      0,.STRING
+         AX      0,-1
+         
+TTY_LOOP TIOBZ   48
+         B       .TTY_LOOP
+
+         ILC     2,0,7
+         TRZ     2
+         B       .TTY_END
+         
+         WIOS    48,2,0
+         
+         B       .TTY_LOOP
+
+TTY_END  HLT
+
+STRING   ASCII   Hellorld!\015\012

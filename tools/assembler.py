@@ -477,7 +477,7 @@ class AssembleIO(AssemblerModule):
         
         result |= (0o670 << 27) | (opcode << 12)
         
-        if command[0:2] == "IN" or command[0:2] == "OU":
+        if command[0:2] == "WI" or command[0:2] == "RI":
             register = int(args[1])
             if register < 0 or register > 15:
                 raise ValueError("No such register")
