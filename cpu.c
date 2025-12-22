@@ -1,8 +1,3 @@
-/**
- * @file cpu.c
- * Implements core CPU functionality
- */
-
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -487,23 +482,6 @@ uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
     else return ea_l;
 }
 
-/**
- * @brief Execute an instruction with a memory reference
- *
- * These are the basic type "MR" instructions from opcode 000; the 9-bit opcode
- * is followed by a 4-bit function selector
- *    - 0: @c JMP - set program counter to effective address
- *    - 1: @c JSR - save PC to AC12/LR, set program counter to effective address
- *    - 2: @c ISZ - increment contents of memory, skip next instruction if zero
- *    - 3: @c DSZ - decrement contents of memory, skip next instruction if zero
- *    - 4: @c SZR - skip if contents of memory equal zero
- *    - 5: @c SNZ - skip if contents of memory not equal to zero
- *
- * Any other function selector will raise an unimplemented instruction trap.
- *
- * @param cpu Emulated CPU context
- * @param inst Instruction
- */
 void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
@@ -712,25 +690,6 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-/**
- * @brief Execute a multiplication or division
- *
- * These are the multiply/divide instructions from opcode 030; the 9-bit opcode
- * is followed by a 4-bit function selector
- *    - 0: @c MPY - multiply AC1/MQ by contents of memory for a 72-bit result in
- *      AC2:AC0 (XY:AC, most significant bits in AC2/XY)
- *    - 1: @c MPA - multiply AC1/MQ by contents of memory and add 72-bit result
- *      to AC2:AC0 (XY:AC) (complement carry flag on carry out of XY)
- *    - 1: @c MNA - multiply AC1/MQ by contents of memory and subtract 72-bit
- *      result from AC2:AC0 (XY:AC) (complement carry flag on carry out of XY)
- *    - 3: @c DIV - divide AC by contents of memory for a 36-bit result in MQ;
- *      store remainder (modulo) in XY
- *
- * Any other function selector will raise an unimplemented instruction trap.
- *
- * @param cpu Emulated CPU context
- * @param inst Instruction
- */
 void exec_md(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
@@ -850,47 +809,6 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-/**
- * @brief Execute an instruction with a memory reference and accumulator
- *
- * These are the type "AM" instructions from opcode 000-026; the 9-bit opcode is
- * followed by a 4-bit accumulator selector \a n
- *    - 001: @c EDT - bitwise OR AC\a n with contents of memory and execute
- *      the resulting value as an instruction
- *    - 002: @c ESK - bitwise OR AC\a n with contents of memory and execute
- *      the resulting value as an instruction; skip the next instruction in
- *      series
- *       - Note: the program counter remains unchanged. Any PC-relative
- *         operations effected by @c EDT/ESK will occur relative to the
- *         location of the @c EDT/ESK instruction rather than the called
- *         instruction. The behavior of calling @c EDT/ESK with @c EDT/ESK is
- *         not well-defined but will not violate protection.
- *    - 003: @c LAD - load effective address to AC\a n
- *    - 004: @c AAD - add effective address to AC\a n, complement carry flag on
- *      carry out
- *    - 005: @c ISE - increment AC\a n, complement carry flag on carry out, skip
- *      next instruction if AC\a n = contents of memory
- *    - 006: @c DSE - decrement AC\a n, complement carry flag on carry out, skip
- *      next instruction if AC\a n = contents of memory
- *    - 007: @c LAS - load effective address << 17 to AC\a n
- *    - 010: @c LCO - load one's complement of contents of memory to AC\a n
- *    - 011: @c LNG - load two's complement of contents of memory to AC\a n
- *    - 012: @c LAC - load contents of memory to AC\a n
- *    - 013: @c DAC - store contents of AC\a n to memory
- *    - 014: @c ADC - add one's complement of contents of memory to AC\a n,
- *      complement carry flag on carry out
- *    - 015: @c SUB - add two's complement of contents of memory to AC\a n,
- *      complement carry flag on carry out
- *    - 016: @c ADD - add contents of memory to AC\a n, complement carry flag on
- *      carry out
- *    - 017: @c AND - bitwise AND contents of memory to AC\a n
- *    - 022: @c IOR - bitwise OR contents of memory to AC\a n
- *    - 026: @c XOR - bitwise XOR contents of memory to AC\a n
- *
- *
- * @param cpu Emulated CPU context
- * @param inst Instruction
- */
 void exec_am(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     uint64_t ac = (inst >> 23) & 0xF;
@@ -1177,19 +1095,6 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-/**
- * @brief Execute a byte instruction
- *
- * These are the type "BX" instructions from opcode 040-045; the 9-bit opcode is
- * followed by a 4-bit accumulator selector \a n
- *
- * A byte pointer is 3 unused bits, a 6-bit bit offset and a 27-bit word
- * address. See the PDP-10 for how byte extraction and index incrementation
- * work.
- *
- * @param cpu Emulated CPU context
- * @param inst Instruction
- */
 void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ac = (inst >> 23) & 0xF;
     uint64_t ix = (inst >> 18) & 0xF;
@@ -1553,73 +1458,6 @@ void exec_io1(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-/**
- * @brief Execute an instruction with two (three) accumulator(s)
- *
- * These are the type "AA" instructions from opcode 700+; the format is as
- * follows:
- *    - Opcode: 4 bits
- *    - Rotate through carry: 1 bit
- *       - If this bit is set, the implicit rotate operation will include the
- *         carry flag for a 37-bit rotate
- *    - Source accumulator select \a m: 4 bits
- *    - Target accumulator select \a n: 4 bits
- *    - Function: 3 bits
- *       - Opcode 14, fn 0: @c OCA - result is one's complement of AC\a m
- *       - Opcode 14, fn 1: @c NEA - result is two's complement of AC\a m
- *       - Opcode 14, fn 2: @c DAA - result is AC\a m
- *       - Opcode 14, fn 3: @c ICA - result is AC\a m + 1, complement carry flag
- *         on carry out
- *       - Opcode 14, fn 4: @c ACA - result is AC\a m + one's complement of
- *         AC\a n, complement carry flag on carry out
- *       - Opcode 14, fn 5: @c SUA - result is AC\a m + two's complement of
- *         AC\a n, complement carry flag on carry out
- *       - Opcode 14, fn 6: @c ADA - result is AC\a m + AC\a n, complement carry
- *         flag on carry out
- *       - Opcode 14, fn 7: @c OCA - result is AC\a m bitwise AND AC\a n
- *       - Opcode 15, fn 2: @c IOA - result is AC\a m bitwise OR AC\a n
- *       - Opcode 15, fn 6: @c XOA - result is AC\a m bitwise OR AC\a n
- *       - Any other combination: result is 0
- *    - Carry flag mode: 2 bits; do this BEFORE arithmetic operation
- *       - 0: Preserve carry flag
- *       - 1: Clear carry flag
- *       - 2: Set carry flag
- *       - 3: Complement carry flag
- *    - Skip mode: 3 bits; do this AFTER instruction is complete
- *       - 0: Do not skip next instruction
- *       - 1: Always skip next instruction
- *       - 2: Skip if carry flag unset
- *       - 3: Skip if carry flag set
- *       - 4: Skip if result is zero
- *       - 5: Skip if result is nonzero
- *       - 6: Skip if carry flag and/or result is zero
- *       - 7: Skip if carry flag and result are nonzero
- *    - No load: 1 bit, do not save result if set
- *    - Bit mask: Signed 7 bits; AFTER rotate
- *       - After the implicit rotate operation, the carry flag will replace this
- *         many bits from the left (most significant) if the value of this field
- *         is positive, otherwise it will replace that many bits from the right
- *       - The result of using a bit mask width \a x such that \a |x| > 36 is
- *         not well defined UNLESS the first three bits are equal to 4 (1, 0, 0)
- *       - In that case, the remaining four bits are used to encode a third
- *         accumulator select \a d, the final result of the operation is stored
- *         in that accumulator and the bit mask width is set equal to the rotate
- *         field (i.e. a non-zero rotate value will effect a bit shift rather
- *         than rotate); otherwise the result is stored in AC\a n
- *    - Rotate: Signed 7 bits; AFTER arithmetic operation but BEFORE mask
- *       - The initial result of the arithmetic operation is rotated (including
- *         the new carry flag if the rotate-through-carry bit is set) this many
- *         bits to the left (right if value is negative)
- *       - The result of a rotation \a x such that \a |x| > 36 (37 if rotating
- *         through carry) is not well defined
- *       
- *
- * @param cpu Emulated CPU context
- * @param inst Instruction
- * @param a First operand
- * @param b Second operand
- * @param c Current carry flag
- */
 uint64_t exec_aa(
     uint64_t inst,
     uint64_t a, uint64_t b, int c
@@ -1641,16 +1479,6 @@ uint64_t exec_aa(
     return result;
 }
 
-/**
- * @brief Logically OR the FPU status into XY and clear it
- *
- * As we can't be sure which bits Berkeley SoftFloat has chosen to represent the
- * IEEE exceptions - but only of their names - this function will test each one
- * individually, logically OR it into register XY and then clear the thread-
- * local value of @c softfloat_exceptionFlags .
- *
- * @param cpu Emulated CPU context
- */
 void update_fpu_status(ist66_cu_t *cpu) {
     int flags[5] = {
         softfloat_flag_inexact,
@@ -1667,12 +1495,6 @@ void update_fpu_status(ist66_cu_t *cpu) {
     softfloat_exceptionFlags = 0;
 }
 
-/**
- * @brief Execute a floating-point instruction with three FPAC registers
- *
- * @param cpu Emulated CPU context
- * @param inst Instruction
- */
 void exec_fp2(ist66_cu_t *cpu, uint64_t inst) {
     int rmod = !!(cpu->c[C_FCW] & 4);
     uint64_t rmod_override = (inst >> 15) & 3;
@@ -1750,17 +1572,7 @@ void exec_fp2(ist66_cu_t *cpu, uint64_t inst) {
     update_fpu_status(cpu);
     set_pc(cpu, get_pc(cpu) + 1);
 }
-/**
- * @brief Execute a floating-point instruction with a memory reference
- *
- * These are the basic type "FP" instructions from opcode 034; the 7-bit opcode
- * and 2-bit FPU accumulator selector are followed by a 4-bit function selector
- *
- * Any other function selector will raise an unimplemented instruction trap.
- *
- * @param cpu Emulated CPU context
- * @param inst Instruction
- */
+
 void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
     if (!!(cpu->c[C_FCW] & 8)) {
         do_except(cpu, X_NFPU);
