@@ -39,28 +39,22 @@ typedef struct {
     int sock_listener, sock_console;
     
     uint8_t buffer[256];
-    uint8_t rd, wr, len, threshold;
+    uint8_t rd, wr, len, threshold, send;
     int was_full;
     pthread_mutex_t status_lock, intr_lock;
-    pthread_cond_t status_empty_cond;
+    pthread_cond_t write_cond;
     
     pthread_t listener, reader, writer;
     
     uint16_t control;
     
-    int listening, running, command, done;
+    int listening, running, writing, command, done;
 } ist66_tty_t;
 
 void push_char(void *vctx, uint8_t ch) {
     ist66_tty_t *ctx = (ist66_tty_t *) vctx;
     
     pthread_mutex_lock(&ctx->status_lock);
-    
-    /*
-    while (ctx->len == 255) {
-        pthread_cond_wait(&ctx->status_empty_cond, &ctx->status_lock);
-    }
-    */
     
     // fprintf(stderr, "Debug: %02hhX\n", ch);
     
@@ -69,7 +63,7 @@ void push_char(void *vctx, uint8_t ch) {
         ctx->len++;
         
         if (
-            (ctx->control & ECHO_ALL) // TODO: check printable
+            (ctx->control & ECHO_ALL) // TODO: check printable?
             || ((ctx->control & ECHO_TAB) && (ch == '\t'))
             || ((ctx->control & ECHO_RET) && (ch == 0x0A || ch == 0x0D))
         ) {
@@ -109,9 +103,7 @@ int pop_char(void *vctx) {
     pthread_mutex_lock(&ctx->status_lock);
     
     result = ctx->buffer[ctx->rd++];
-    if (ctx->len-- == 255) {
-        pthread_cond_signal(&ctx->status_empty_cond);
-    }
+    ctx->len--;
     
     pthread_mutex_unlock(&ctx->status_lock);
     return result;
@@ -164,6 +156,29 @@ void *tty_reader(void *vctx) {
         }
     }
     
+    if (ctx->writing) {
+        ctx->writing = 0;
+        pthread_cancel(ctx->writer);
+    }
+    return NULL;
+}
+
+void *tty_writer(void *vctx) {
+    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    ctx->writing = 1;
+    
+    while (ctx->running) {
+        pthread_mutex_lock(&ctx->intr_lock);
+        while (!ctx->command) {
+            pthread_cond_wait(&ctx->write_cond, &ctx->intr_lock);
+            
+        }
+        
+        send(ctx->sock_console, &ctx->send, 1, 0);
+        ctx->command = 0;
+        pthread_mutex_unlock(&ctx->intr_lock);
+    }
+    
     return NULL;
 }
 
@@ -200,7 +215,8 @@ void *tty_listener(void *vctx) {
             ctx->running = 1;
             pthread_create
                 (&ctx->reader, NULL, tty_reader, ctx);
-            // create writer too
+            pthread_create
+                (&ctx->writer, NULL, tty_writer, ctx);
             fprintf(stderr, "/DEV-I-UNIT %04o TTY CONNECT\n", ctx->id);
         } else {
             static char *msg = "/TTY-E-BUSY\n";
@@ -218,12 +234,52 @@ uint64_t tty_io(
     int ctl,
     int transfer
 ) {
-    // ist66_tty_t *ctx = (ist66_tty_t *) vctx;
-    // ist66_cu_t *cpu = ctx->cpu;
+    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    ist66_cu_t *cpu = ctx->cpu;
     
-    // stub
+    if (transfer == 1) {
+        ctx->send = (uint8_t) data;
+    }
     
-    return 0;
+    else if (transfer == 3) {
+        ctx->control = data >> 8;
+        ctx->threshold = data & 0xFF;
+    }
+    
+    if (transfer != 14) {
+        switch (ctl) {
+            case 1: {
+                pthread_mutex_lock(&ctx->intr_lock);
+                ctx->command = 1;
+                if (ctx->done) {
+                    ctx->done = 0;
+                    intr_release(cpu, ctx->irq);
+                }
+                pthread_cond_signal(&ctx->write_cond);
+                pthread_mutex_unlock(&ctx->intr_lock);
+            } break;
+            case 2: {
+                pthread_mutex_lock(&ctx->intr_lock);
+                ctx->command = 0;
+                if (ctx->done) {
+                    ctx->done = 0;
+                    intr_release(cpu, ctx->irq);
+                }
+                pthread_mutex_unlock(&ctx->intr_lock);
+            } break;
+        }
+    }
+    
+    if (transfer == 14) {
+        int status = (ctx->done << 1) | (ctx->command & 1);
+        return (uint64_t) status;
+    }
+    
+    else if (transfer == 0) {
+        return pop_char(ctx);
+    }
+    
+    else return 0;
 }
 
 void destroy_tty(ist66_cu_t *cpu, int id) {
@@ -231,8 +287,11 @@ void destroy_tty(ist66_cu_t *cpu, int id) {
     
     if (ctx->running) {
         pthread_cancel(ctx->reader);
-        // pthread_cancel(ctx->writer);
         close(ctx->sock_console);
+    }
+    
+    if (ctx->writing) {
+        pthread_cancel(ctx->writer);
     }
     
     if (ctx->listening) {
@@ -243,7 +302,7 @@ void destroy_tty(ist66_cu_t *cpu, int id) {
     
     pthread_mutex_destroy(&ctx->status_lock);
     pthread_mutex_destroy(&ctx->intr_lock);
-    pthread_cond_destroy(&ctx->status_empty_cond);
+    pthread_cond_destroy(&ctx->write_cond);
     free(ctx);
     
     fprintf(stderr, "/DEV-I-UNIT %04o TTY CLOSED\n", id);
@@ -279,7 +338,7 @@ void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
     
     pthread_mutex_init(&ctx->status_lock, NULL);
     pthread_mutex_init(&ctx->intr_lock, NULL);
-    pthread_cond_init(&ctx->status_empty_cond, NULL);
+    pthread_cond_init(&ctx->write_cond, NULL);
     
     ctx->listening = 1;
     ctx->control = DEFAULTS;
