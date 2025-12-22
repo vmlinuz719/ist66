@@ -3,6 +3,8 @@
  * Implements core IOCPU functionality
  */
 
+//TODO: redo this whole thing, be more creative
+
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
