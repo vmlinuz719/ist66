@@ -1301,7 +1301,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                         intr_set_mask(cpu, data);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 3: { // WAIT
+                    case 3: { // MWAIT
                         uint64_t data = read_mem(cpu, 0, ea);
                         if (data == MEM_FAULT) {
                             do_except(cpu, X_MEMX);
