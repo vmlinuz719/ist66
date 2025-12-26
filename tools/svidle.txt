@@ -1,0 +1,26 @@
+        ****************************************************************
+        * Fastcall: X0-X3 for first args, caller saved
+        *
+
+        ****************************************************************
+        * IDLE - wait until we have something to do
+        *
+        *      X0 -> address of idle variable
+        *      X1 -> Start address of string
+        *      X2 -> Character to initialize with
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+IDLE     DW      0                              No registers used ;)
+
+         STMSK   1-                             Save interrupt mask
+DOIDLE   LMSK    .IDLE                          Mask all interrupts
+
+         TMN     0(3)                           Exit idle if not idle
+         B       .DONTIDLE
+
+         MWAIT   0(13)                          Wait for interrupts
+         B       .DOIDLE
+
+DONTIDLE LMSK    1+                             Restore mask
+         BRM
