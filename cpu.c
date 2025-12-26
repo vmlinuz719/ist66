@@ -1301,7 +1301,19 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                         intr_set_mask(cpu, data);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 3: { // STMSK
+                    case 3: { // WAIT
+                        uint64_t data = read_mem(cpu, 0, ea);
+                        if (data == MEM_FAULT) {
+                            do_except(cpu, X_MEMX);
+                            return;
+                        }
+                        data &= MASK_36;
+
+                        intr_set_mask(cpu, data);
+                        halt(cpu);
+                        set_pc(cpu, get_pc(cpu) + 1);
+                    } break;
+                    case 4: { // STMSK
                         uint64_t w_res = write_mem(cpu, 0, ea, cpu->mask);
                         if (w_res == MEM_FAULT) {
                             do_except(cpu, X_MEMX);
@@ -1309,11 +1321,11 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                         }
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 4: { // INVSM
+                    case 5: { // INVSM
                         seg_invalidate(cpu, ea >> 18);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 5: { // INVPG
+                    case 6: { // INVPG
                         tlb_invalidate(cpu, (ea >> 9) & 0x1F);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;

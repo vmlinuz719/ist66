@@ -143,9 +143,10 @@ class AssembleMR(AssemblerModule):
             "RFI": 0x1820,
             "RLMSK": 0x1821,
             "LMSK": 0x1822,
-            "STMSK": 0x1823,
-            "INVSM": 0x1824,
-            "INVPG": 0x1825,
+            "WAIT": 0x1823,
+            "STMSK": 0x1824,
+            "INVSM": 0x1825,
+            "INVPG": 0x1826,
         }
 
 class AssembleAM(AssemblerModule):
