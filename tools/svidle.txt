@@ -6,8 +6,6 @@
         * IDLE - wait until we have something to do
         *
         *      X0 -> address of idle variable
-        *      X1 -> Start address of string
-        *      X2 -> Character to initialize with
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
