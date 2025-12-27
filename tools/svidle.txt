@@ -6,6 +6,9 @@
         * IDLE - wait until we have something to do
         *
         *      X0 -> test subroutine
+        *      X1, X2, X3 -> arguments to subroutine (optional, will not
+        *                    be modified by IDLE)
+        *      Return -> whatever the subroutine puts in AC
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
@@ -25,3 +28,19 @@ DONTIDLE LMSK    1+                             Restore mask
          BRM
 
 MASKALL  DW      0
+
+        ****************************************************************
+        * TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+TEST_RST L       0,0(4)
+         TACZ
+         B       .DONT_RST
+
+         ST      2,1-
+         XA      2,2
+         ST      2,0(4)
+         L       2,1+
+
+DONT_RST B       0(12)
