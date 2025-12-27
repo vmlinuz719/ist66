@@ -5,16 +5,17 @@
         ****************************************************************
         * IDLE - wait until we have something to do
         *
-        *      X0 -> address of idle variable
+        *      X0 -> test subroutine
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-IDLE     DW      0                              No registers used ;)
+IDLE     USING   12
 
          STMSK   1-                             Save interrupt mask
-DOIDLE   LMSK    .IDLE                          Mask all interrupts
+DOIDLE   LMSK    .MASKALL                       Mask all interrupts
 
-         TMN     0(3)                           Exit idle if not idle
+         BL      0(3)                           Idle test callback
+         TACN
          B       .DONTIDLE
 
          MWAIT   0(13)                          Wait for interrupts
@@ -22,3 +23,5 @@ DOIDLE   LMSK    .IDLE                          Mask all interrupts
 
 DONTIDLE LMSK    1+                             Restore mask
          BRM
+
+MASKALL  DW      0
