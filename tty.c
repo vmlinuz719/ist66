@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -19,12 +20,13 @@
 #define INTR_ESC    4
 #define INTR_RET    8
 #define DESTRUCT    16
-#define BSNOECHO    32
+// #define BSNOECHO    32
 #define ECHO_RET    64
 #define ECHO_TAB    128
 #define ECHO_ALL    256
 
-#define DEFAULTS    (ECHO_ALL | ECHO_TAB | ECHO_RET | INTR_RET)
+#define DEFAULTS    (ECHO_ALL | ECHO_TAB | ECHO_RET | DESTRUCT | INTR_RET)
+#define DFLTLINE    160
 
 enum telnet_telnet_state {
     TN_NORMAL,
@@ -52,6 +54,8 @@ typedef struct {
 } ist66_tty_t;
 
 void push_char(void *vctx, uint8_t ch) {
+    static char bell = '\a';
+
     ist66_tty_t *ctx = (ist66_tty_t *) vctx;
     
     pthread_mutex_lock(&ctx->status_lock);
@@ -59,15 +63,24 @@ void push_char(void *vctx, uint8_t ch) {
     // fprintf(stderr, "Debug: %02hhX\n", ch);
     
     if (ctx->len < 255 && (ctx->control & ENABLED)) {
-        ctx->buffer[ctx->wr++] = ch;
-        ctx->len++;
-        
-        if (
-            (ctx->control & ECHO_ALL) // TODO: check printable?
-            || ((ctx->control & ECHO_TAB) && (ch == '\t'))
-            || ((ctx->control & ECHO_RET) && (ch == 0x0A || ch == 0x0D))
-        ) {
-            send(ctx->sock_console, &ch, 1, 0);
+        if ((ch == 0x7F || ch == 0x08) && (ctx->control & DESTRUCT)) {
+            if (ctx->len > 0) {
+                ctx->len--;
+                ctx->wr--;
+                send(ctx->sock_console, &ch, 1, 0);
+            } else {
+                send(ctx->sock_console, &bell, 1, 0);
+            }
+        } else {
+            ctx->buffer[ctx->wr++] = ch;
+            ctx->len++;
+            if (
+                (ctx->control & ECHO_ALL) // TODO: check printable?
+                || ((ctx->control & ECHO_TAB) && (ch == '\t'))
+                || ((ctx->control & ECHO_RET) && (ch == 0x0A || ch == 0x0D))
+            ) {
+                send(ctx->sock_console, &ch, 1, 0);
+            }
         }
         
         if (
@@ -86,7 +99,6 @@ void push_char(void *vctx, uint8_t ch) {
             pthread_mutex_unlock(&ctx->intr_lock);
         }
     } else {
-        static char bell = '\a';
         send(ctx->sock_console, &bell, 1, 0);
     }
     
@@ -96,11 +108,14 @@ void push_char(void *vctx, uint8_t ch) {
 int pop_char(void *vctx) {
     ist66_tty_t *ctx = (ist66_tty_t *) vctx;
     
-    if (ctx->len == 0) return -1;
+    pthread_mutex_lock(&ctx->status_lock);
+
+    if (ctx->len == 0) {
+        pthread_mutex_unlock(&ctx->status_lock);
+        return -1;
+    }
     
     int result;
-    
-    pthread_mutex_lock(&ctx->status_lock);
     
     result = ctx->buffer[ctx->rd++];
     ctx->len--;
@@ -220,7 +235,7 @@ void *tty_listener(void *vctx) {
             fprintf(stderr, "/DEV-I-UNIT %04o TTY CONNECT\n", ctx->id);
         } else {
             static char *msg = "/TTY-E-BUSY\n";
-            send(new_connection, msg, sizeof(msg), 0);
+            send(new_connection, msg, strlen(msg), 0);
             close(new_connection);
         }
     }
@@ -342,6 +357,7 @@ void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
     
     ctx->listening = 1;
     ctx->control = DEFAULTS;
+    ctx->threshold = DFLTLINE;
     
     pthread_create(&ctx->listener, NULL, tty_listener, ctx);
     fprintf(stderr, "/DEV-I-UNIT %04o TTY IRQ %02o %d\n", id, irq, port);
