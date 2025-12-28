@@ -293,6 +293,14 @@ uint64_t tty_io(
     else if (transfer == 0) {
         return pop_char(ctx);
     }
+
+    else if (transfer == 2) {
+        return (ctx->control << 8) | ctx->threshold;
+    }
+
+    else if (transfer == 4) {
+        return ctx->len;
+    }
     
     else return 0;
 }

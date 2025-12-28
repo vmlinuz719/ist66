@@ -1,0 +1,45 @@
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+         ORIGIN  24                             TTY HANDLER
+
+TTY_VEC  DW      TTY_INTR,0
+
+         ORIGIN  62                             USER SAVE
+
+USR_SAVE DW      START,0740000000000
+
+         ORIGIN  1024
+
+IPL      LCTL    1,.CW
+         RLMSK   .MASK
+
+CW       DW      0036000000000                  RETURN TO IRQL 15
+MASK     DW      02000                          ENABLE CONSOLE IRQ
+TTY_STAT DW      0
+
+TTY_INTR NIOC    48                             CLEAR INTR
+         ST      0,.TTY_ACSV
+         LX      0,1                            CONSOLE HAS DATA
+         ST      0,.TTY_STAT
+         L       0,.TTY_ACSV
+         RFI     0
+
+TTY_ACSV DW      0
+
+START    LX      13,STACK
+         
+         RIO     48,0,1                         Enable keyboard
+         AX      0,256
+         WIO     48,0,1
+         
+         LCTL    1,.HALT
+         LMSK    .HALT
+         HLT
+
+HALT     DW      0
+
+        ****************************************************************
+
+         ORIGIN  2048
+
+STACK    BSS     0
