@@ -159,7 +159,7 @@ void destroy_lpt(ist66_cu_t *cpu, int id) {
     fclose(ctx->file);
     free(ctx);
     
-    fprintf(stderr, "/DEV-I-UNIT %04o LPT CLOSED\n", id);
+    fprintf(stderr, "LPT: %04o deinitialized\n", id);
 }
 
 void init_lpt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
@@ -181,16 +181,16 @@ void init_lpt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
 
 void init_lpt(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
     init_lpt_any(cpu, id, irq, fd);
-    fprintf(stderr, "/DEV-I-UNIT %04o LPT IRQ %02o\n", id, irq);
+    fprintf(stderr, "LPT: %04o IRQ %02o\n", id, irq);
 }
 
 void init_lpt_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
     FILE *fd = fopen(fname, "wb");
     if (fd == NULL) {
-        fprintf(stderr, "/DEV-E-UNIT %04o LPT FILE ERROR\n", id);
+        fprintf(stderr, "LPT: %04o file error\n", id);
         return;
     }
     
     init_lpt_any(cpu, id, irq, fd);
-    fprintf(stderr, "/DEV-I-UNIT %04o LPT IRQ %02o %s\n", id, irq, fname);
+    fprintf(stderr, "LPT: %04o IRQ %02o, file %s\n", id, irq, fname);
 }

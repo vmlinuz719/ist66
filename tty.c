@@ -232,9 +232,9 @@ void *tty_listener(void *vctx) {
                 (&ctx->reader, NULL, tty_reader, ctx);
             pthread_create
                 (&ctx->writer, NULL, tty_writer, ctx);
-            fprintf(stderr, "/DEV-I-UNIT %04o TTY CONNECT\n", ctx->id);
+            fprintf(stderr, "TTY: %04o connected\n", ctx->id);
         } else {
-            static char *msg = "/TTY-E-BUSY\n";
+            static char *msg = "Line busy\n";
             send(new_connection, msg, strlen(msg), 0);
             close(new_connection);
         }
@@ -320,13 +320,13 @@ void destroy_tty(ist66_cu_t *cpu, int id) {
     pthread_cond_destroy(&ctx->write_cond);
     free(ctx);
     
-    fprintf(stderr, "/DEV-I-UNIT %04o TTY CLOSED\n", id);
+    fprintf(stderr, "TTY: %04o deinitialized\n", id);
 }
 
 void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (server_sock == -1) {
-        fprintf(stderr, "/DEV-E-UNIT %04o TTY CREATE FAIL\n", id);
+        fprintf(stderr, "TTY: %04o init failed\n", id);
         return;
     }
     
@@ -336,7 +336,7 @@ void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
     server_in.sin_port = htons(port);
 
     if (bind(server_sock, (struct sockaddr *)&server_in, sizeof(server_in)) < 0) {
-        fprintf(stderr, "/DEV-E-UNIT %04o TTY BIND FAIL\n", id);
+        fprintf(stderr, "TTY: %04o bind failed\n", id);
         close(server_sock);
         return;
     }
@@ -360,5 +360,5 @@ void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
     ctx->threshold = DFLTLINE;
     
     pthread_create(&ctx->listener, NULL, tty_listener, ctx);
-    fprintf(stderr, "/DEV-I-UNIT %04o TTY IRQ %02o %d\n", id, irq, port);
+    fprintf(stderr, "TTY: %04o IRQ %02o, remote port %d\n", id, irq, port);
 }

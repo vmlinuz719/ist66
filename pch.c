@@ -135,7 +135,7 @@ void destroy_pch(ist66_cu_t *cpu, int id) {
     fclose(ctx->file);
     free(ctx);
     
-    fprintf(stderr, "/DEV-I-UNIT %04o PCH CLOSED\n", id);
+    fprintf(stderr, "PCH: %04o deinitialized\n", id);
 }
 
 void init_pch_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
@@ -157,16 +157,16 @@ void init_pch_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
 
 void init_pch(ist66_cu_t *cpu, int id, int irq) {
     init_pch_any(cpu, id, irq, stdout);
-    fprintf(stderr, "/DEV-I-UNIT %04o PCH IRQ %02o STDOUT\n", id, irq);
+    fprintf(stderr, "PCH: %04o IRQ %02o, file STDOUT\n", id, irq);
 }
 
 void init_pch_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
     FILE *fd = fopen(fname, "wb");
     if (fd == NULL) {
-        fprintf(stderr, "/DEV-E-UNIT %04o PCH FILE ERROR\n", id);
+        fprintf(stderr, "PCH: %04o file error\n", id);
         return;
     }
     
     init_pch_any(cpu, id, irq, fd);
-    fprintf(stderr, "/DEV-I-UNIT %04o PCH IRQ %02o %s\n", id, irq, fname);
+    fprintf(stderr, "PCH: %04o IRQ %02o, file %s\n", id, irq, fname);
 }

@@ -70,7 +70,7 @@ void *ppt(void *vctx) {
                 ctx->buf = 0;
                 fprintf(
                     stderr,
-                    "/DEV-I-UNIT %04o PPT END OF TAPE\n", ctx->id
+                    "PPT: %04o End of tape\n", ctx->id
                 );
             } else {
                 ctx->buf = (uint8_t) ch;
@@ -146,7 +146,7 @@ void destroy_ppt(ist66_cu_t *cpu, int id) {
     fclose(ctx->file);
     free(ctx);
     
-    fprintf(stderr, "/DEV-I-UNIT %04o PPT CLOSED\n", id);
+    fprintf(stderr, "PPT: %04o deinitialized\n", id);
 }
 
 void init_ppt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
@@ -168,16 +168,16 @@ void init_ppt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
 
 void init_ppt(ist66_cu_t *cpu, int id, int irq) {
     init_ppt_any(cpu, id, irq, stdin);
-    fprintf(stderr, "/DEV-I-UNIT %04o PPT IRQ %02o STDIN\n", id, irq);
+    fprintf(stderr, "PPT: %04o IRQ %02o, file STDIN\n", id, irq);
 }
 
 void init_ppt_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
     FILE *fd = fopen(fname, "rb");
     if (fd == NULL) {
-        fprintf(stderr, "/DEV-E-UNIT %04o PPT FILE ERROR\n", id);
+        fprintf(stderr, "PPT: %04o file error\n", id);
         return;
     }
     
     init_ppt_any(cpu, id, irq, fd);
-    fprintf(stderr, "/DEV-I-UNIT %04o PPT IRQ %02o %s\n", id, irq, fname);
+    fprintf(stderr, "PPT: %04o IRQ %02o, file %s\n", id, irq, fname);
 }

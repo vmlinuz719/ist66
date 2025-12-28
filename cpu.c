@@ -1866,7 +1866,7 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
 void *run(void *vctx) {
     ist66_cu_t *cpu = (ist66_cu_t *) vctx;
     
-    fprintf(stderr, "/CPU-I-STARTING\n");
+    fprintf(stderr, "CPU: starting\n");
     
     do {
         int done_edit = 0;
@@ -1922,7 +1922,7 @@ void *run(void *vctx) {
         }
     } while (!cpu->exit || cpu->do_edit);
     
-    fprintf(stderr, "/CPU-I-STOP CODE %012lo\n", cpu->stop_code);
+    fprintf(stderr, "CPU: halted, code %012lo\n", cpu->stop_code);
     return NULL;
 }
 
@@ -1940,7 +1940,7 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
-    fprintf(stderr, "/CPU-I-INIT RDS-700 %ldW %d MAXDEV\n", mem_size, max_io);
+    fprintf(stderr, "CPU: RDS-700 %ldW memory, %d devices\n", mem_size, max_io);
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
@@ -1978,7 +1978,7 @@ void destroy_cpu(ist66_cu_t *cpu) {
     pthread_mutex_destroy(&cpu->lock);
     pthread_cond_destroy(&cpu->intr_cond);
     
-    fprintf(stderr, "/CPU-I-CLOSED\n");
+    fprintf(stderr, "CPU: deinitialized\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -1986,8 +1986,8 @@ int main(int argc, char *argv[]) {
     
     init_cpu(&cpu, 65536, 512);
 
-    init_ppt(&cpu, 012, 4);
-    init_lpt(&cpu, 013, 5, stdout);
+    init_ppt(&cpu, 012, 9);
+    init_lpt(&cpu, 013, 8, stdout);
     // init_iocpu(&cpu, 020, 8, 1024, 512);
     // init_pch(&cpu, 014, 6);
     init_tty(&cpu, 060, 10, 8080);
@@ -2028,7 +2028,7 @@ int main(int argc, char *argv[]) {
     int running = 1;
     uint64_t ptr = 0;
     
-    printf("USE COMMAND /1000GW FOR PAPER TAPE LOADER\n");
+    printf("Ready. Note: use command /1000GW for PPT loader\n");
     
     while (running) {
         printf("> ");
