@@ -11,6 +11,7 @@
 #define EXT6(x) ((x) & (1L << 5) ? (x) | 0xFFFFFFFFFFFFFFC0 : (x))
 #define EXT7(x) ((x) & (1L << 6) ? (x) | 0xFFFFFFFFFFFFFF80 : (x))
 #define EXT18(x) ((x) & (1L << 17) ? (x) | 0xFFFFFFFFFFFC0000 : (x))
+#define EXT13(x) ((x) & (1L << 12) ? (x) | 0xFFFFFFFFFFFFE000 : (x))
 #define EXT36(x) ((x) & (1L << 35) ? (x) | 0xFFFFFFF000000000 : (x))
 
 #include <stdint.h>

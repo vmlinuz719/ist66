@@ -1474,20 +1474,44 @@ uint64_t exec_aa(
     uint64_t inst,
     uint64_t a, uint64_t b, int c
 ) {
+    uint64_t result;
     int op = (int) ((inst >> 20) & 0x7);
     op |= (int) ((inst >> 29) & 0x8);
     int ci = (int) ((inst >> 18) & 0x3);
     int cond = (int) ((inst >> 15) & 0x7);
     int nl = (int) ((inst >> 31) & 0x1);
-    int rc = (int) ((inst >> 14) & 0x1);
     
-    uint64_t mk_u = ((inst >> 7) & 0x7F);
-    uint64_t rt_u = (inst & 0x7F);
+    int mode = (int) ((inst >> 14) & 0x1);
+    int submode = (int) ((inst >> 13) & 0x1);
     
-    int mk = (int) (EXT7(mk_u));
-    int rt = (int) (EXT7(rt_u));
+    if (mode == 0) {
+        
+        int mr = (int) ((inst >> 12) & 0x1);
+        
+        int mk = (int) ((inst >> 6) & 0x3F);
+        if (mr) mk = -mk;
+        
+        int rt = (int) (inst & 0x3F);
+        
+        result = compute(a, b, c, op, ci, cond, nl, submode, mk, rt);
+    }
     
-    uint64_t result = compute(a, b, c, op, ci, cond, nl, rc, mk, rt);
+    else if (mode == 1 && submode == 0) {
+        int mr = (int) ((inst >> 12) & 0x1);
+        int rt = (int) (inst & 0x3F);
+        
+        if (mr) a >>= rt;
+        else a <<= rt;
+        
+        result = compute(a, b, c, op, ci, cond, nl, 0, 0, 0);
+    }
+    
+    else {
+        b = inst & 0x1FFF;
+        b = EXT13(b);
+        result = compute(a, b, c, op, ci, cond, nl, 0, 0, 0);
+    }
+    
     return result;
 }
 
@@ -1817,12 +1841,12 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
         uint64_t acs = (inst >> 27) & 0xF;
         uint64_t acd = (inst >> 23) & 0xF;
         uint64_t result = exec_aa(inst, cpu->a[acs], cpu->a[acd], get_cf(cpu));
-        /*
-        if (((inst >> 11) & 0x7) == 0x4) {
+        
+        if (((inst >> 13) & 0x3) == 0x2) {
             // ADR encoding; save to alternate register
-            acd = (inst >> 7) & 0xF;
+            acd = (inst >> 6) & 0xF;
         }
-        */
+        
         cpu->a[acd] = result & MASK_36;
         set_cf(cpu, (result >> 36) & 1);
         if (SKIP(result)) {
@@ -2000,7 +2024,7 @@ int main(int argc, char *argv[]) {
     cpu.memory[517] = 0670000200012;
     cpu.memory[518] = 0700010540000;
     cpu.memory[519] = 0000002777774;
-    cpu.memory[520] = 0700011010200;
+    cpu.memory[520] = 0700011004100;
     cpu.memory[521] = 0703150000003;
     cpu.memory[522] = 0740150000000;
     cpu.memory[523] = 0005102000021;

@@ -18,4 +18,4 @@ TTY_LOOP TIOBZ   48
 
 TTY_END  HLT
 
-STRING   ASCII   Hellorld!\015\012
+STRING   ASCII   Can you read this?\015\012
