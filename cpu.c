@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <sys/time.h>
+#include <SDL2/SDL.h>
 
 #include "alu.h"
 #include "fpu.h"
@@ -11,6 +14,7 @@
 #include "pch.h"
 #include "lpt.h"
 #include "tty.h"
+#include "panel.h"
 
 #include "softfloat.h"
 
@@ -1837,6 +1841,8 @@ void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
 }
 
 void exec_all(ist66_cu_t *cpu, uint64_t inst) {
+    cpu->inst = inst;
+    
     if (inst >> 33 == 0x7) { // ALU operation
         uint64_t acs = (inst >> 27) & 0xF;
         uint64_t acd = (inst >> 23) & 0xF;
@@ -1893,6 +1899,13 @@ void *run(void *vctx) {
     fprintf(stderr, "CPU: starting\n");
     
     do {
+        if (cpu->throttle) {
+            struct timespec millisecond;
+            millisecond.tv_nsec = 33333333;
+            millisecond.tv_sec = 0;
+            nanosleep(&millisecond, NULL);
+        }
+        
         int done_edit = 0;
         if (cpu->do_edit) {
             exec_all(cpu, cpu->xeq_inst);
@@ -2008,7 +2021,14 @@ void destroy_cpu(ist66_cu_t *cpu) {
 int main(int argc, char *argv[]) {
     ist66_cu_t cpu;
     
+    int do_sdl = (SDL_Init(SDL_INIT_EVERYTHING) == 0);
+    
+    
+    
     init_cpu(&cpu, 65536, 512);
+
+    if (do_sdl)
+        init_panel(&cpu, 0);
 
     init_ppt(&cpu, 012, 9);
     init_lpt(&cpu, 013, 8, stdout);
@@ -2176,6 +2196,11 @@ int main(int argc, char *argv[]) {
     }
     
     destroy_cpu(&cpu);
+    
+    if (do_sdl) {
+        SDL_Quit();
+    }
+    
     return 0;
 }
 

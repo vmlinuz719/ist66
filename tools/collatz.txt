@@ -32,7 +32,7 @@ COL_ODD  LA      0,3,CC,RC(1)                   3N+1 (3N-1) IF ODD
          AX      0,-1(3)
          TNV
          
-COL_EVEN LA      0,0,SC,RC(-1)                  N/2 IF EVEN
+COL_EVEN LA      0,0,SC,RC(36)                  N/2 IF EVEN
 
 COL_PRT  NA      0,2                            GET POSITIVE
          LX      11,.O2A_ARG                    SETUP OCTAL TO ASCII

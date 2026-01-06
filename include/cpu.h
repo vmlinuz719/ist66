@@ -48,6 +48,7 @@ struct ist66_cu {
     
     uint64_t a[16]; // accumulators
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
+    uint64_t inst;
     extFloat80_t f[16];
     seg_cache_t seg_cache[32], tlb[32];
     uint64_t stop_code;
@@ -69,7 +70,7 @@ struct ist66_cu {
     int pending[16];
     int min_pending;
     uint16_t mask;
-    int running, exit;
+    int running, throttle, exit;
 };
 
 static inline void halt(ist66_cu_t *cpu) {
