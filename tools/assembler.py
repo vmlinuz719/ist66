@@ -231,8 +231,12 @@ def assemble_aa_arg(arg: str) -> int:
         #       fn                bits shl extra
         
         "M": (get_paren_number, 6,   6,  0         ),
+        "MR": (get_paren_number, 6,   6,  0x1000   ),
         "R": (get_paren_number, 6,   0,  0         ),
         "RC": (get_paren_number, 6,   0,  0x2000),
+        "RR": (get_paren_number, 6,   0,  0x1000),
+        "I": (get_paren_number, 13,   0,  0x6000),
+        "D": (get_paren_number, 4,   6,  0x4000),
         
         "NL": (static(1),        1,   31, 0         ),
         
@@ -352,17 +356,6 @@ class AssembleHelper0(AssemblerModule):
     def __init__(self):
         self.opcodes = {
             "HLT": 0o600002000001,
-            "NOP": 0o700010040000,
-            "CC": 0o700011040000,
-            "SC": 0o700012040000,
-            "CMC": 0o700013040000,
-            "TNV": 0o700010140000,
-            "TCN": 0o700010240000,
-            "TCZ": 0o700010340000,
-            "TACN": 0o700010440000,
-            "TACZ": 0o700010540000,
-            "TCACN": 0o700010640000,
-            "TCACZ": 0o700010740000
         }
 
 def ascii7(string: str) -> list[int]:
@@ -549,6 +542,18 @@ class AssembleCommand(AssemblerModule):
         }
 
 helpers = {
+    "NOP": ("LA", "0,0"),
+    "CC": ("LA", "0,0,CC"),
+    "SC": ("LA", "0,0,SC"),
+    "CMC": ("LA", "0,0,CMC"),
+    "TNV": ("LA", "0,0,TNV"),
+    "TCN": ("LA", "0,0,TCN"),
+    "TCZ": ("LA", "0,0,TCZ"),
+    "TACN": ("LA", "0,0,TRN"),
+    "TACZ": ("LA", "0,0,TRZ"),
+    "TCACN": ("LA", "0,0,TCRN"),
+    "TCACZ": ("LA", "0,0,TCRZ"),
+    
     "TRN": ("LA", "{},0,NL,TRN"),
     "TRZ": ("LA", "{},0,NL,TRZ"),
     "TCRN": ("LA", "{},0,NL,TCRN"),

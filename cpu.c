@@ -516,7 +516,7 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
             
-            uint64_t result = compute(data, 1, 0, 6, 0, 4, 0, 0, 0, 0);
+            uint64_t result = compute(data, 1, 0, 6, 0, 4, 0, 0, 0);
             uint64_t w_res = write_mem(cpu, cpu->c[C_PSW] >> 28, ea, result);
             if (w_res == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -543,7 +543,7 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
             
-            uint64_t result = compute(1, data, 0, 5, 0, 4, 0, 0, 0, 0);
+            uint64_t result = compute(1, data, 0, 5, 0, 4, 0, 0, 0);
             uint64_t w_res = write_mem(cpu, cpu->c[C_PSW] >> 28, ea, result);
             if (w_res == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -737,13 +737,13 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
             xmul(cpu->a[1], data, &low, &high);
             
             uint64_t result_l = compute(
-                low, cpu->a[0], 0, 6, 0, 0, 0, 0, 0, 0
+                low, cpu->a[0], 0, 6, 0, 0, 0, 0, 0
             );
             
             uint64_t carry_l = result_l >> 36;
             
             uint64_t result_h = compute(
-                high + carry_l, cpu->a[2], get_cf(cpu), 6, 0, 0, 0, 0, 0, 0
+                high + carry_l, cpu->a[2], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
             
             cpu->a[0] = result_l & MASK_36;
@@ -768,13 +768,13 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
             xmul(cpu->a[1], data, &low, &high);
             
             uint64_t result_l = compute(
-                low, cpu->a[0], 0, 6, 0, 0, 0, 0, 0, 0
+                low, cpu->a[0], 0, 6, 0, 0, 0, 0, 0
             );
             
             uint64_t carry_l = result_l >> 36;
             
             uint64_t result_h = compute(
-                high + carry_l, cpu->a[2], get_cf(cpu), 6, 0, 0, 0, 0, 0, 0
+                high + carry_l, cpu->a[2], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
             
             cpu->a[0] = result_l & MASK_36;
@@ -838,7 +838,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 10, 0, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 10, 0, 0, 0, 0, 0
             );
             cpu->do_edit = 1;
             cpu->xeq_inst = result & MASK_36;
@@ -855,7 +855,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 10, 0, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 10, 0, 0, 0, 0, 0
             );
             cpu->do_edit = 1;
             cpu->do_edsk = 1;
@@ -867,7 +867,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
         } break;
         case 004: { // ADDEA
             uint64_t result = compute(
-                ea, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0, 0
+                ea, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
@@ -875,7 +875,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
         } break;
         case 005: { // ISE
             uint64_t result = compute(
-                1, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0, 0
+                1, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
             
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
@@ -888,7 +888,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
             
-            if (data == result & MASK_36) {
+            if (data == (result & MASK_36)) {
                 set_pc(cpu, get_pc(cpu) + 2);
             } else {
                 set_pc(cpu, get_pc(cpu) + 1);
@@ -899,7 +899,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
         } break;
         case 006: { // DSE
             uint64_t result = compute(
-                1, cpu->a[ac], get_cf(cpu), 5, 0, 0, 0, 0, 0, 0
+                1, cpu->a[ac], get_cf(cpu), 5, 0, 0, 0, 0, 0
             );
             
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
@@ -912,7 +912,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
             
-            if (data == result & MASK_36) {
+            if (data == (result & MASK_36)) {
                 set_pc(cpu, get_pc(cpu) + 2);
             } else {
                 set_pc(cpu, get_pc(cpu) + 1);
@@ -937,7 +937,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, 0, 0, 0, 0, 0, 0, 0, 0, 0
+                data, 0, 0, 0, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
@@ -954,7 +954,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, 0, 0, 1, 0, 0, 0, 0, 0, 0
+                data, 0, 0, 1, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
@@ -998,7 +998,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 4, 0, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 4, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
@@ -1016,7 +1016,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 5, 0, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 5, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
@@ -1034,7 +1034,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
@@ -1052,7 +1052,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 7, 0, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 7, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
@@ -1070,7 +1070,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 10, 0, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 10, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
@@ -1088,7 +1088,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 15, 0, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 15, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
@@ -1485,7 +1485,6 @@ uint64_t exec_aa(
     op |= (int) ((inst >> 29) & 0x8);
     int ci = (int) ((inst >> 18) & 0x3);
     int cond = (int) ((inst >> 15) & 0x7);
-    int nl = (int) ((inst >> 31) & 0x1);
     
     int mode = (int) ((inst >> 14) & 0x1);
     int submode = (int) ((inst >> 13) & 0x1);
@@ -1499,23 +1498,22 @@ uint64_t exec_aa(
         
         int rt = (int) (inst & 0x3F);
         
-        result = compute(a, b, c, op, ci, cond, nl, submode, mk, rt);
+        result = compute(a, b, c, op, ci, cond, submode, mk, rt);
     }
     
     else if (mode == 1 && submode == 0) {
         int mr = (int) ((inst >> 12) & 0x1);
         int rt = (int) (inst & 0x3F);
-        int mk = rt;
+        if (mr) rt = -rt;
+        int mk = -rt;
         
-        if (mr) mk = -mk;
-        
-        result = compute(a, b, c, op, ci, cond, nl, 0, mk, rt);
+        result = compute(a, b, c, op, ci, cond, 0, mk, rt);
     }
     
     else {
         b = inst & 0x1FFF;
         b = EXT13(b);
-        result = compute(a, b, c, op, ci, cond, nl, 0, 0, 0);
+        result = compute(a, b, c, op, ci, cond, 0, 0, 0);
     }
     
     return result;
@@ -1855,8 +1853,10 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
             acd = (inst >> 6) & 0xF;
         }
         
-        cpu->a[acd] = result & MASK_36;
+        if (!((inst >> 31) & 0x1)) cpu->a[acd] = result & MASK_36;
+        
         set_cf(cpu, (result >> 36) & 1);
+        
         if (SKIP(result)) {
             set_pc(cpu, get_pc(cpu) + 2);
         } else {
@@ -1979,7 +1979,7 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
-    fprintf(stderr, "CPU: RDS-700 %ldW memory, %d devices\n", mem_size, max_io);
+    fprintf(stderr, "CPU: RDC700 %ldW memory, %d devices\n", mem_size, max_io);
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
@@ -2023,7 +2023,7 @@ void destroy_cpu(ist66_cu_t *cpu) {
 int main(int argc, char *argv[]) {
     ist66_cu_t cpu;
     
-    int do_sdl = 0; // (SDL_Init(SDL_INIT_EVERYTHING) == 0);
+    int do_sdl = 0; //(SDL_Init(SDL_INIT_EVERYTHING) == 0);
     
     
     
@@ -2044,7 +2044,7 @@ int main(int argc, char *argv[]) {
     cpu.memory[515] = 0670000560012;
     cpu.memory[516] = 0000002777777;
     cpu.memory[517] = 0670000200012;
-    cpu.memory[518] = 0700010540000;
+    cpu.memory[518] = 0700010500000;
     cpu.memory[519] = 0000002777774;
     cpu.memory[520] = 0700011004100;
     cpu.memory[521] = 0703150000003;
@@ -2059,10 +2059,10 @@ int main(int argc, char *argv[]) {
     cpu.memory[530] = 0000002777774;
     cpu.memory[531] = 0003103777736;
     cpu.memory[532] = 0005102000011;
-    cpu.memory[533] = 0700010140000;
+    cpu.memory[533] = 0700010100000;
     cpu.memory[534] = 0000002777753;
     cpu.memory[535] = 0005102000007;
-    cpu.memory[536] = 0700010140000;
+    cpu.memory[536] = 0700010100000;
     cpu.memory[537] = 0600002000001;
     cpu.memory[538] = 0044101000006;
     cpu.memory[539] = 0000002777763;
@@ -2173,6 +2173,10 @@ int main(int argc, char *argv[]) {
                 start_cpu(&cpu, 0);
             }
             
+            else if (cmd[i] == 'T') {
+                cpu.throttle ^= 1;
+            }
+            
             else if (cmd[i] == 'P') {
                 if (cpu.running)
                     stop_cpu(&cpu);
@@ -2199,11 +2203,9 @@ int main(int argc, char *argv[]) {
     
     destroy_cpu(&cpu);
     
-    /*
     if (do_sdl) {
         SDL_Quit();
     }
-    */
     
     return 0;
 }

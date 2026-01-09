@@ -21,7 +21,6 @@ uint64_t compute(
     int op,                         // opcode
     int ci,                         // carry init
     int cond,                       // skip condition
-    int nl,                         // no load
     int rc,                         // rotate through carry
     int mk,                         // mask
     int rt                          // rotate

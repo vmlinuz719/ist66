@@ -130,7 +130,6 @@ uint64_t compute(
     int op,                         // opcode
     int ci,                         // carry init
     int cond,                       // skip condition
-    int nl,                         // no load
     int rc,                         // rotate through carry
     int mk,                         // mask
     int rt                          // rotate
@@ -149,9 +148,5 @@ uint64_t compute(
     
     uint64_t result = skip(rotmask(opr(a, b, c, op), rc, mk, rt), cond);
     
-    if (nl) {
-        return b | (result & (~(MASK_36)));
-    } else {
-        return result;
-    }
+    return result;
 }
