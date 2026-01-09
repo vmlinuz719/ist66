@@ -72,9 +72,9 @@ void *panel_thread(void *ctx) {
         
         
         panel_rows[0] = panel_ctx->cpu->c[0];
-        panel_rows[1] = panel_ctx->cpu->c[1];
-        panel_rows[2] = panel_ctx->cpu->c[6];
-        panel_rows[3] = panel_ctx->cpu->inst;
+        panel_rows[1] = panel_ctx->cpu->inst;
+        panel_rows[2] = panel_ctx->cpu->c[1];
+        panel_rows[3] = panel_ctx->cpu->c[6];
         panel_rows[5] = panel_ctx->cpu->a[selection];
         panel_rows[6] = selection;
         

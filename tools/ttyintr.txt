@@ -1,6 +1,6 @@
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-         ORIGIN  24                             TTY HANDLER
+         ORIGIN  20                             TTY HANDLER
 
 TTY_VEC  DW      TTY_INTR,0
 
@@ -31,12 +31,65 @@ START    LX      13,STACK
          RIO     48,0,1                         Enable keyboard
          AX      0,256
          WIO     48,0,1
+
+IDLELOOP LX      3,.TEST_RST
+         LX      4,.TTY_STAT
+         BSM     .IDLE
          
+         B       .IDLELOOP
+
          LCTL    1,.HALT
          LMSK    .HALT
          HLT
 
 HALT     DW      0
+
+        ****************************************************************
+        * Fastcall: X0-X3 for first args, caller saved
+        *
+
+        ****************************************************************
+        * IDLE - wait until we have something to do
+        *
+        *      X0 -> test subroutine
+        *      X1, X2, X3 -> arguments to subroutine (optional, will not
+        *                    be modified by IDLE)
+        *      Return -> whatever the subroutine puts in AC
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+IDLE     USING   12
+
+         STMSK   1-                             Save interrupt mask
+DOIDLE   LMSK    .MASKALL                       Mask all interrupts
+
+         BL      0(3)                           Idle test callback
+         TACN
+         B       .DONTIDLE
+
+         MWAIT   0(13)                          Wait for interrupts
+         B       .DOIDLE
+
+DONTIDLE LMSK    1+                             Restore mask
+         BRM
+
+MASKALL  DW      0
+
+        ****************************************************************
+        * TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+TEST_RST L       0,0(4)
+         TACZ
+         B       .DONT_RST
+
+         ST      2,1-
+         XA      2,2
+         ST      2,0(4)
+         L       2,1+
+
+DONT_RST B       0(12)
 
         ****************************************************************
 

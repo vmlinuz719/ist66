@@ -2021,7 +2021,7 @@ void destroy_cpu(ist66_cu_t *cpu) {
 int main(int argc, char *argv[]) {
     ist66_cu_t cpu;
     
-    int do_sdl = (SDL_Init(SDL_INIT_EVERYTHING) == 0);
+    int do_sdl = 0; // (SDL_Init(SDL_INIT_EVERYTHING) == 0);
     
     
     
@@ -2197,9 +2197,11 @@ int main(int argc, char *argv[]) {
     
     destroy_cpu(&cpu);
     
+    /*
     if (do_sdl) {
         SDL_Quit();
     }
+    */
     
     return 0;
 }
