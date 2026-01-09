@@ -877,8 +877,6 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             uint64_t result = compute(
                 1, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0, 0
             );
-            cpu->a[ac] = result & MASK_36;
-            set_cf(cpu, (result >> 36) & 1);
             
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
@@ -890,18 +888,19 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
             
-            if (data == cpu->a[ac]) {
+            if (data == result & MASK_36) {
                 set_pc(cpu, get_pc(cpu) + 2);
             } else {
                 set_pc(cpu, get_pc(cpu) + 1);
             }
+            
+            cpu->a[ac] = result & MASK_36;
+            set_cf(cpu, (result >> 36) & 1);
         } break;
         case 006: { // DSE
             uint64_t result = compute(
                 1, cpu->a[ac], get_cf(cpu), 5, 0, 0, 0, 0, 0, 0
             );
-            cpu->a[ac] = result & MASK_36;
-            set_cf(cpu, (result >> 36) & 1);
             
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
@@ -913,11 +912,14 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
             
-            if (data == cpu->a[ac]) {
+            if (data == result & MASK_36) {
                 set_pc(cpu, get_pc(cpu) + 2);
             } else {
                 set_pc(cpu, get_pc(cpu) + 1);
             }
+            
+            cpu->a[ac] = result & MASK_36;
+            set_cf(cpu, (result >> 36) & 1);
         } break;
         case 007: { // MOVEAS
             cpu->a[ac] = (ea << 17) & MASK_36;
@@ -1503,11 +1505,11 @@ uint64_t exec_aa(
     else if (mode == 1 && submode == 0) {
         int mr = (int) ((inst >> 12) & 0x1);
         int rt = (int) (inst & 0x3F);
+        int mk = rt;
         
-        if (mr) a >>= rt;
-        else a <<= rt;
+        if (mr) mk = -mk;
         
-        result = compute(a, b, c, op, ci, cond, nl, 0, 0, 0);
+        result = compute(a, b, c, op, ci, cond, nl, 0, mk, rt);
     }
     
     else {
