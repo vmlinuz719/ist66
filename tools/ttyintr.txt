@@ -32,13 +32,53 @@ START    LX      13,STACK
          AX      0,256
          WIO     48,0,1
 
-IDLELOOP LX      3,.TEST_RST
-         LX      4,.TTY_STAT
-         BSM     .IDLE
-         
-         B       .IDLELOOP
+         AX      13,-66                         Allocate buffer
 
-         LCTL    1,.HALT
+MAINLOOP RIO     48,0,0                         Flush
+         RIO     48,0,2                         Get buffer count
+         LA      0,0,NL,CC,M(28),TRN            Repeat if not done
+         B       .MAINLOOP
+
+         LA      13,7                           String index
+         XA      0,0                            Length in first word
+         ST      0,0(13)
+
+         LX      8,-318                         Up to 318 characters
+
+IDLELOOP LX      3,.TEST_RST
+         LX      4,.TTY_STAT                    Wait for full buffer
+         BSM     .IDLE                          or crlf
+
+READLOOP RIO     48,0,2                         Get buffer count
+         LA      0,0,NL,CC,M(28),TRZ
+         B       .IDLELOOP                      Idle if no data
+
+         ITN     0(13)                          Increment length
+         RIO     48,0,0                         Get a byte
+         ISTC    0,7,7                          Save
+
+         IA      8,8,TRN                        Is buffer full?
+         SA      0,0,NL,I(10),TRZ               Or did we get LF?
+         B       .READDONE
+
+         B       .READLOOP
+
+READDONE XA      0,0
+         ISTC    0,7,7
+         LA      13,7
+
+TTY_LOOP TIOBZ   48
+         B       .TTY_LOOP
+
+         ILC     0,7,7
+         TRZ     0
+         B       .MAINLOOP
+
+         WIOS    48,0,0
+         
+         B       .TTY_LOOP
+
+DIE      LCTL    1,.HALT
          LMSK    .HALT
          HLT
 
@@ -61,6 +101,7 @@ HALT     DW      0
 IDLE     USING   12
 
          STMSK   1-                             Save interrupt mask
+
 DOIDLE   LMSK    .MASKALL                       Mask all interrupts
 
          BL      0(3)                           Idle test callback
