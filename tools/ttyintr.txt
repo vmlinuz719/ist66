@@ -26,24 +26,66 @@ TTY_INTR NIOC    48                             CLEAR INTR
 
 TTY_ACSV DW      0
 
+        ****************************************************************
+
 START    LX      13,STACK
-         
+
          RIO     48,0,1                         Enable keyboard
          AX      0,256
          WIO     48,0,1
 
-         AX      13,-66                         Allocate buffer
+         AX      13,-35
+         
+LOOP     LA      13,3
+         LX      4,170
+         BSM     .READLD
+         
+         SA      0,0,I(2),NL,TRZ
+         B       .DIE
+         
+         LA      13,3
+         BSM     .WRITELD
+         
+         B       .LOOP
 
-MAINLOOP RIO     48,0,0                         Flush
-         RIO     48,0,2                         Get buffer count
-         LA      0,0,NL,CC,M(28),TRN            Repeat if not done
-         B       .MAINLOOP
+DIE      AX      13,35
 
-         LA      13,7                           String index
-         XA      0,0                            Length in first word
-         ST      0,0(13)
+         RIO     48,0,1                         Disable keyboard
+         AX      0,-256
+         WIO     48,0,1
+         
+         LCTL    1,.HALT
+         LMSK    .HALT
+         HLT
 
-         LX      8,-318                         Up to 318 characters
+HALT     DW      0
+
+        ****************************************************************
+        * Fastcall: X0-X3 for first args, caller saved
+        *
+
+        ****************************************************************
+        * READLD - read up to n characters from the support console
+        *
+        *       X0 -> buffer address
+        *       X1 -> max chars
+        *
+        *       Returns length of input
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+READLD   USING   7,8
+
+         LA      3,7                            7: buffer
+         XA      0,0                            Clear count field
+         ST      0,0(7)
+         TRZ     7                              Don't read if count 0
+         BRM
+         NA      4,8                            8: max length
+         
+         ST      7,1-                           Push head of string
+         
+         B       .READLOOP
 
 IDLELOOP LX      3,.TEST_RST
          LX      4,.TTY_STAT                    Wait for full buffer
@@ -52,8 +94,8 @@ IDLELOOP LX      3,.TEST_RST
 READLOOP RIO     48,0,2                         Get buffer count
          LA      0,0,NL,CC,M(28),TRZ
          B       .IDLELOOP                      Idle if no data
-
-         ITN     0(13)                          Increment length
+         
+         ITN     @0(13)                         Increment length
          RIO     48,0,0                         Get a byte
          ISTC    0,7,7                          Save
 
@@ -63,30 +105,32 @@ READLOOP RIO     48,0,2                         Get buffer count
 
          B       .READLOOP
 
-READDONE XA      0,0
-         ISTC    0,7,7
-         LA      13,7
-
-TTY_LOOP TIOBZ   48
-         B       .TTY_LOOP
-
-         ILC     0,7,7
-         TRZ     0
-         B       .MAINLOOP
-
-         WIOS    48,0,0
-         
-         B       .TTY_LOOP
-
-DIE      LCTL    1,.HALT
-         LMSK    .HALT
-         HLT
-
-HALT     DW      0
+READDONE L       0,@1+                          Return length
+         BRM
 
         ****************************************************************
-        * Fastcall: X0-X3 for first args, caller saved
+        * WRITELD - write a length-data string to the support console
         *
+        *       X0 -> buffer address
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+WRITELD  DW      0
+
+         LN      4,0(3)
+         TRZ     4
+         BRM
+
+WRT_LOOP TIOBZ   48
+         B       .WRT_LOOP
+
+         ILC     0,3,7
+         WIOS    48,0,0
+         
+         IA      4,4,TRN
+         B       .WRT_LOOP
+         
+         BRM
 
         ****************************************************************
         * IDLE - wait until we have something to do
