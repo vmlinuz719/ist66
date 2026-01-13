@@ -52,7 +52,7 @@ START    LX      13,STACK
          ST      0(13)
          LA      13,4
          LX      5,48
-         BSM     .COPYBRAP
+         BSM     .LEFT_PAD
 
          LA      13,3
          BSM     .WRITELD
@@ -90,7 +90,7 @@ HALT     DW      0
         *
 
         ****************************************************************
-        * COPYBRAP - adjust string to right with padding
+        * LEFT_PAD - you already know
         *
         *       X0 -> input buffer address
         *       X1 -> output buffer address, must specify length
@@ -100,7 +100,7 @@ HALT     DW      0
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-COPYBRAP DW      0
+LEFT_PAD DW      0
 
          L       0(4)                           Abort if input too big
          S       0(3)
