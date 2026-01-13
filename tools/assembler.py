@@ -380,7 +380,8 @@ def ascii7(string: str) -> list[int]:
             shamt = 29
             result.append(char)
             char = 0
-    result.append(char)
+    if char != 0:
+        result.append(char)
     return result
 
 class AssembleData(AssemblerModule):

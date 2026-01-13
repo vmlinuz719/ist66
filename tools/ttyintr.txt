@@ -31,6 +31,39 @@ DEADBEEF DW      3735928559
 CRLF     DW      2
          ASCII   \015\012
 
+REGNAMES DW      5
+         ASCII   \000\000AC\040
+         DW      5
+         ASCII   \040\040MQ\040
+         DW      5
+         ASCII   \040\040XY\040
+         DW      5
+         ASCII   \015\012X0\040
+         DW      5
+         ASCII   \040\040X1\040
+         DW      5
+         ASCII   \040\040X2\040
+         DW      5
+         ASCII   \040\040X3\040
+         DW      5
+         ASCII   \015\012X4\040
+         DW      5
+         ASCII   \040\040X5\040
+         DW      5
+         ASCII   \040\040X6\040
+         DW      5
+         ASCII   \040\040X7\040
+         DW      5
+         ASCII   \015\012AP\040
+         DW      5
+         ASCII   \040\040LR\040
+         DW      5
+         ASCII   \040\040SP\040
+         DW      5
+         ASCII   \015\012TI\040
+         DW      5
+         ASCII   \040\040TR\040
+
         ****************************************************************
 
 START    LX      13,STACK
@@ -40,26 +73,6 @@ START    LX      13,STACK
          WIO     48,0,1
 
          AX      13,-35
-         
-         LA      13,3
-         L       4,.DEADBEEF
-         LX      5,16
-         BSM     .NUM2LD
-
-         LA      13,3
-         AX      13,-3
-         LX      8
-         ST      0(13)
-         LA      13,4
-         LX      5,48
-         BSM     .LEFT_PAD
-
-         LA      13,3
-         BSM     .WRITELD
-         LX      3,.CRLF
-         BSM     .WRITELD
-
-         AX      13,3
 
 LOOP     LA      13,3
          LX      4,170
@@ -78,6 +91,8 @@ DIE      AX      13,35
          RIO     48,0,1                         Disable keyboard
          AX      0,-256
          WIO     48,0,1
+
+         BSM     .DUMPNOW
          
          LCTL    1,.HALT
          LMSK    .HALT
@@ -88,6 +103,63 @@ HALT     DW      0
         ****************************************************************
         * Fastcall: X0-X3 for first args, caller saved
         *
+
+        ****************************************************************
+        * DUMPNOW - print current register contents
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+DUMPNOW  USING   0-15
+
+         LX      3,2(13)
+         BSM     .DUMPREGS
+         BRM
+
+        ****************************************************************
+        * DUMPREGS - print register contents
+        *
+        *       X0 -> input data address
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+DUMPREGS USING   7,8,9
+
+         LA      3,7
+         LX      8,.REGNAMES
+         LX      9,-16
+
+         AX      13,-6                          Num buf 3(13)
+         LX      9
+         ST      0(13)                          Pad buf 0(13)
+
+DUMPLOOP LA      8,3
+         AA      8,8,I(2)
+         BSM     .WRITELD
+
+         LX      3,3(13)
+         L       4,0(7)
+         LX      5,16
+         BSM     .NUM2LD
+
+         LX      3,3(13)
+         LX      4,0(13)
+         LX      5,040
+         BSM     .LEFT_PAD
+
+         LX      3,0(13)
+         BSM     .WRITELD
+
+         IA      7,7
+         IA      9,9,TRN
+         B       .DUMPLOOP
+
+         LX      3,.CRLF
+         BSM     .WRITELD
+         LX      3,.CRLF
+         BSM     .WRITELD
+
+         AX      13,6
+         BRM
 
         ****************************************************************
         * LEFT_PAD - you already know
