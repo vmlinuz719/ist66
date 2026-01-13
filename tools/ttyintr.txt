@@ -26,6 +26,11 @@ TTY_INTR NIOC    48                             CLEAR INTR
 
 TTY_ACSV DW      0
 
+DEADBEEF DW      3735928559
+
+CRLF     DW      2
+         ASCII   \015\012
+
         ****************************************************************
 
 START    LX      13,STACK
@@ -36,6 +41,26 @@ START    LX      13,STACK
 
          AX      13,-35
          
+         LA      13,3
+         L       4,.DEADBEEF
+         LX      5,16
+         BSM     .NUM2LD
+
+         LA      13,3
+         AX      13,-3
+         LX      8
+         ST      0(13)
+         LA      13,4
+         LX      5,48
+         BSM     .COPYBRAP
+
+         LA      13,3
+         BSM     .WRITELD
+         LX      3,.CRLF
+         BSM     .WRITELD
+
+         AX      13,3
+
 LOOP     LA      13,3
          LX      4,170
          BSM     .READLD
@@ -63,6 +88,87 @@ HALT     DW      0
         ****************************************************************
         * Fastcall: X0-X3 for first args, caller saved
         *
+
+        ****************************************************************
+        * COPYBRAP - adjust string to right with padding
+        *
+        *       X0 -> input buffer address
+        *       X1 -> output buffer address, must specify length
+        *       X2 -> padding character
+        *
+        *       Return -1 on failure, 0 on success
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+COPYBRAP DW      0
+
+         L       0(4)                           Abort if input too big
+         S       0(3)
+         TACBN   1
+         BRM
+
+         TACZ                                   Copy now if no padding
+         B       .CPYINPUT
+
+         NA      0,0
+
+WRITEPAD ISTC    5,4,7
+         IA      0,0,TRN
+         B       .WRITEPAD
+
+CPYINPUT LN      0(3)                           Done if input length 0
+         TACZ
+         BRM
+
+CPYILOOP ILC     5,3,7
+         ISTC    5,4,7
+         IA      0,0,TRN
+         B       .CPYILOOP
+
+         XA      0,0
+         BRM
+
+COPYFAIL SMAC    36
+         BRM
+
+        ****************************************************************
+        * NUM2LD - convert number to string
+        *
+        *       X0 -> buffer address
+        *       X1 -> value
+        *       X2 -> base
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+NUM2LD   USING   1,2
+
+         ST      5,1-                           Set up divisor at 5
+         LA      13,5
+
+         XA      0,0                            Initialize string
+         ST      0,0(3)
+
+         LA      4,0
+
+DIV      D       0(5)                           Grab digit and remainder
+         ST      2,1-                           Push digit
+         ITN     0(3)                           Increment string size
+         LA      1,0,TRN                        Test if done
+         B       .DIV                           Loop until zero
+
+         LA      3,5
+         LX      1,58
+
+CONVERT  L       4,1+                           Pop digits into string
+         AA      4,4,I(48)
+         TRGE    4,1
+         AA      4,4,I(7)
+         ISTC    4,3,7
+         ITNE    0,0(5)
+         B       .CONVERT
+
+         IA      13,13
+         BRM
 
         ****************************************************************
         * READLD - read up to n characters from the support console
