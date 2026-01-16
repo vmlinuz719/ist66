@@ -149,40 +149,6 @@ PSL      DW      5
          ASCII   \040PSL\040
 
         ****************************************************************
-
-START    LX      13,STACK
-
-         RIO     48,0,1                         Enable keyboard
-         AX      0,256
-         WIO     48,0,1
-
-         AX      13,-35
-
-LOOP     LA      13,3
-         LX      4,170
-         BSM     .READLD
-         
-         SA      0,0,I(2),NL,TRZ
-         B       .DIE
-         
-         LA      13,3
-         BSM     .WRITELD
-         
-         B       .LOOP
-
-DIE      AX      13,35
-
-         RIO     48,0,1                         Disable keyboard
-         AX      0,-256
-         WIO     48,0,1
-         
-         LCTL    1,.HALT
-         LMSK    .HALT
-         HLT
-
-HALT     DW      0
-
-        ****************************************************************
         * Fastcall: X0-X3 for first args, caller saved
         *
 
@@ -440,6 +406,40 @@ TEST_RST L       0,0(4)
          L       2,1+
 
 DONT_RST B       0(12)
+
+        ****************************************************************
+
+START    LX      13,STACK
+
+         RIO     48,0,1                         Enable keyboard
+         AX      0,256
+         WIO     48,0,1
+
+         AX      13,-35
+
+LOOP     LA      13,3
+         LX      4,170
+         BSM     .READLD
+         
+         SA      0,0,I(2),NL,TRZ
+         B       .DIE
+         
+         LA      13,3
+         BSM     .WRITELD
+         
+         B       .LOOP
+
+DIE      AX      13,35
+
+         RIO     48,0,1                         Disable keyboard
+         AX      0,-256
+         WIO     48,0,1
+         
+         LCTL    1,.HALT
+         LMSK    .HALT
+         HLT
+
+HALT     DW      0
 
         ****************************************************************
 
