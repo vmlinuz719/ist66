@@ -20,22 +20,24 @@ IPL      LCTL    1,.CW
 EXC_STUB ST      13,.EXC_SPSV
          LX      13,.EXC_STK0
          BSM     .EXHANDLR
-         L       13,.EXC_SPSV
-         RFI     0
+         RFI     1
 
-EXHANDLR USING   0-12,14-15
+EXHANDLR USING   0-15
          LX      13,.EXC_STK1
+         
+         L       .EXC_SPSV
+         ST      .EXC_OLDS
          
          LX      3,.EXC_SAVE
          BSM     .DUMPREGS
          
-         LX      13,.EXC_STK0
+         LX      13,.EXC_TOP
          BRM
 
-EXC_RETN BSS     1
-EXC_MASK BSS     1
+EXC_SPSV BSS     1
+EXC_TOP  BSS     2
 EXC_SAVE BSS     13
-EXC_SPSV BSS     3
+EXC_OLDS BSS     3
 EXC_STK0 BSS     0
          BSS     128
 EXC_STK1 BSS     0         
@@ -91,6 +93,12 @@ REGNAMES DW      5
          DW      5
          ASCII   \040\040TR\040
 
+DO_EXC   DW      17
+         ASCII   Do exception...\015\012
+         
+DONE_EXC DW      7
+         ASCII   Done!\015\012
+
         ****************************************************************
 
 START    LX      13,STACK
@@ -98,6 +106,18 @@ START    LX      13,STACK
          RIO     48,0,1                         Enable keyboard
          AX      0,256
          WIO     48,0,1
+         
+         LX      3,.DO_EXC
+         BSM     .WRITELD
+         
+         LX      0,-2
+         LX      15,-2
+         LX      11,.DONE_EXC
+         BSM     .DUMPNOW
+        *L       -1
+         
+         LA      11,3
+         BSM     .WRITELD
 
          AX      13,-35
 
@@ -118,8 +138,6 @@ DIE      AX      13,35
          RIO     48,0,1                         Disable keyboard
          AX      0,-256
          WIO     48,0,1
-
-         BSM     .DUMPNOW
          
          LCTL    1,.HALT
          LMSK    .HALT
