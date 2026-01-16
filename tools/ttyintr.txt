@@ -148,12 +148,6 @@ EXC_PFIX DW      7
 PSL      DW      5
          ASCII   \040PSL\040
 
-DO_EXC   DW      17
-         ASCII   Do exception...\015\012
-         
-DONE_EXC DW      7
-         ASCII   Done!\015\012
-
         ****************************************************************
 
 START    LX      13,STACK
@@ -161,16 +155,6 @@ START    LX      13,STACK
          RIO     48,0,1                         Enable keyboard
          AX      0,256
          WIO     48,0,1
-         
-         LX      3,.DO_EXC
-         BSM     .WRITELD
-         
-         LX      11,.DONE_EXC
-         
-         L       -1
-         
-         LA      11,3
-         BSM     .WRITELD
 
          AX      13,-35
 
