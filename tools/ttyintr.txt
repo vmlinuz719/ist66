@@ -20,7 +20,7 @@ IPL      LCTL    1,.CW
 EXC_STUB ST      13,.EXC_SPSV
          LX      13,.EXC_STK0
          BSM     .EXHANDLR
-         RFI     1
+         RFI     0
 
 EXHANDLR USING   0-15
          LX      13,.EXC_STK1
@@ -28,6 +28,12 @@ EXHANDLR USING   0-15
          STCTL   1,1-
          L       1+
          LA      0,3,CC,R(12),M(32)
+         LX      4,.EXTAB
+         AA      3,4
+         L       7,0(4)
+         TRN     7
+         B       .ALT_HNDL
+         
          LA      0,0,CC,R(8),M(32)
          LA      0,7,R(1)
          AX      7,34
@@ -79,12 +85,24 @@ DUMP_PSW AA      7,7,I(-1)
          LX      3,.EXC_SAVE
          BSM     .DUMPREGS
          
-         LX      13,.EXC_TOP
-         
          LCTL    1,.HALT
          LMSK    .HALT
          HLT
+         
+ALT_HNDL LX      4,.EXC_SAVE
+         L       .EXC_SPSV
+         ST      .EXC_OLDS
+         BSM     0(7)
+         
+         LX      13,.EXC_TOP
+         TACN
+         B       .NO_RETRY
          BRM
+
+NO_RETRY LX      .RFI_1
+         ST      0(13)
+         BRM
+RFI_1    RFI     1
 
 HALT     DW      0
 
@@ -94,7 +112,9 @@ EXC_SAVE BSS     13
 EXC_OLDS BSS     3
 EXC_STK0 BSS     0
          BSS     128
-EXC_STK1 BSS     0         
+EXC_STK1 BSS     0
+
+EXTAB    BSS     16   
 
 CW       DW      0036000000000                  RETURN TO IRQL 15
 MASK     DW      02000                          ENABLE CONSOLE IRQ
@@ -414,12 +434,33 @@ TEST_RST L       0,0(4)
 DONT_RST B       0(12)
 
         ****************************************************************
+        * SMILEY - print smiley face :D
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+SMILEY   DW      0
+         LX      3,.FACE
+         BSM     .WRITELD
+         LX      3,.CRLF
+         BSM     .WRITELD
+         LX      0,1
+         BRM
+         
+FACE     DW      2
+         ASCII   :D
+
+        ****************************************************************
 
 START    LX      13,STACK
 
          RIO     48,0,1                         Enable keyboard
          AX      0,256
          WIO     48,0,1
+
+         LX      3,.EXTAB
+         LX      4,.SMILEY
+         ST      4,8(3)
+         D       .ZERO
 
          AX      13,-35
 
@@ -442,6 +483,8 @@ DIE      AX      13,35
          WIO     48,0,1
          
          B       -1
+
+ZERO     DW      0
 
         ****************************************************************
 
