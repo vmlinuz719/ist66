@@ -80,7 +80,13 @@ DUMP_PSW AA      7,7,I(-1)
          BSM     .DUMPREGS
          
          LX      13,.EXC_TOP
+         
+         LCTL    1,.HALT
+         LMSK    .HALT
+         HLT
          BRM
+
+HALT     DW      0
 
 EXC_SPSV BSS     1
 EXC_TOP  BSS     2
@@ -435,11 +441,7 @@ DIE      AX      13,35
          AX      0,-256
          WIO     48,0,1
          
-         LCTL    1,.HALT
-         LMSK    .HALT
-         HLT
-
-HALT     DW      0
+         B       -1
 
         ****************************************************************
 
