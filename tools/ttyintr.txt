@@ -25,6 +25,54 @@ EXC_STUB ST      13,.EXC_SPSV
 EXHANDLR USING   0-15
          LX      13,.EXC_STK1
          
+         STCTL   1,1-
+         L       1+
+         LA      0,3,CC,R(12),M(32)
+         LA      0,0,CC,R(8),M(32)
+         LA      0,7,R(1)
+         AX      7,34
+         AX      3,.EXCNAMES
+         L       0(3)
+         ST      1-
+         LX      4
+         ST      1-
+         
+         LX      3,.EXC_PFIX
+         BSM     .WRITELD
+         LA      13,3
+         BSM     .WRITELD
+         AX      13,2
+         LX      3,.PSL
+         BSM     .WRITELD
+         AX      13,-6                          Num buf 3(13)
+         LX      9
+         ST      0(13)                          Pad buf 0(13)
+         
+         LX      8,-2
+         
+DUMP_PSW AA      7,7,I(-1)
+         LX      3,3(13)
+         L       4,0(7)
+         LX      5,16
+         BSM     .NUM2LD
+
+         LX      3,3(13)
+         LX      4,0(13)
+         LX      5,060
+         BSM     .LEFT_PAD
+
+         LX      3,0(13)
+         BSM     .WRITELD
+         
+         IA      8,8,TRN
+         B       .DUMP_PSW
+         
+         AX      13,6
+         LX      3,CRLF
+         BSM     .WRITELD
+         LX      3,CRLF
+         BSM     .WRITELD
+         
          L       .EXC_SPSV
          ST      .EXC_OLDS
          
@@ -60,38 +108,45 @@ DEADBEEF DW      3735928559
 CRLF     DW      2
          ASCII   \015\012
 
-REGNAMES DW      5
-         ASCII   \000\000AC\040
-         DW      5
+REGNAMES ASCII   \000\000AC\040
          ASCII   \040\040MQ\040
-         DW      5
          ASCII   \040\040XY\040
-         DW      5
          ASCII   \015\012X0\040
-         DW      5
          ASCII   \040\040X1\040
-         DW      5
          ASCII   \040\040X2\040
-         DW      5
          ASCII   \040\040X3\040
-         DW      5
          ASCII   \015\012X4\040
-         DW      5
          ASCII   \040\040X5\040
-         DW      5
          ASCII   \040\040X6\040
-         DW      5
          ASCII   \040\040X7\040
-         DW      5
          ASCII   \015\012AP\040
-         DW      5
          ASCII   \040\040LR\040
-         DW      5
          ASCII   \040\040SP\040
-         DW      5
          ASCII   \015\012TI\040
-         DW      5
          ASCII   \040\040TR\040
+
+EXCNAMES ASCII   USER
+         ASCII   INST
+         ASCII   MEMX
+         ASCII   DEVX
+         ASCII   PPFR
+         ASCII   PPFW
+         ASCII   PPFS
+         ASCII   TIME
+         ASCII   DIVZ
+         ASCII   NFPU
+         ASCII   ????
+         ASCII   ????
+         ASCII   ????
+         ASCII   ????
+         ASCII   MCHK
+         ASCII   PWRX
+
+EXC_PFIX DW      7
+         ASCII   \015\012EXC #
+
+PSL      DW      5
+         ASCII   \040PSL\040
 
 DO_EXC   DW      17
          ASCII   Do exception...\015\012
@@ -110,9 +165,8 @@ START    LX      13,STACK
          LX      3,.DO_EXC
          BSM     .WRITELD
          
-         LX      0,-2
-         LX      15,-2
          LX      11,.DONE_EXC
+         
          L       -1
          
          LA      11,3
@@ -176,9 +230,14 @@ DUMPREGS USING   7,8,9
          LX      9
          ST      0(13)                          Pad buf 0(13)
 
-DUMPLOOP LA      8,3
-         AA      8,8,I(2)
+DUMPLOOP L       0(8)
+         ST      1-
+         LX      5
+         ST      1-
+         IA      8,8
+         LA      13,3
          BSM     .WRITELD
+         AX      13,2
 
          LX      3,3(13)
          L       4,0(7)
