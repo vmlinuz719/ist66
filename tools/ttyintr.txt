@@ -1,5 +1,9 @@
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
+         ORIGIN  0                              EXCEPTION
+         
+EXC_VEC  DW      EXC_STUB,0
+
          ORIGIN  20                             TTY HANDLER
 
 TTY_VEC  DW      TTY_INTR,0
@@ -12,6 +16,29 @@ USR_SAVE DW      START,0740000000000
 
 IPL      LCTL    1,.CW
          RLMSK   .MASK
+
+EXC_STUB ST      13,.EXC_SPSV
+         LX      13,.EXC_STK0
+         BSM     .EXHANDLR
+         L       13,.EXC_SPSV
+         RFI     0
+
+EXHANDLR USING   0-12,14-15
+         LX      13,.EXC_STK1
+         
+         LX      3,.EXC_SAVE
+         BSM     .DUMPREGS
+         
+         LX      13,.EXC_STK0
+         BRM
+
+EXC_RETN BSS     1
+EXC_MASK BSS     1
+EXC_SAVE BSS     13
+EXC_SPSV BSS     3
+EXC_STK0 BSS     0
+         BSS     128
+EXC_STK1 BSS     0         
 
 CW       DW      0036000000000                  RETURN TO IRQL 15
 MASK     DW      02000                          ENABLE CONSOLE IRQ
@@ -356,6 +383,6 @@ DONT_RST B       0(12)
 
         ****************************************************************
 
-         ORIGIN  2048
+         ORIGIN  4096
 
 STACK    BSS     0

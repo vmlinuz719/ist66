@@ -1284,6 +1284,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 switch (ac) {
                     case 0: { // RFI
                         leave_intr(cpu);
+                        set_pc(cpu, get_pc(cpu) + ea);
                     } break;
                     case 1: { // RMSK
                         uint64_t data = read_mem(cpu, 0, ea);
