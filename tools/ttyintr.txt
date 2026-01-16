@@ -113,8 +113,7 @@ START    LX      13,STACK
          LX      0,-2
          LX      15,-2
          LX      11,.DONE_EXC
-         BSM     .DUMPNOW
-        *L       -1
+         L       -1
          
          LA      11,3
          BSM     .WRITELD
