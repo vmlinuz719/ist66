@@ -130,23 +130,23 @@ class AssembleMR(AssemblerModule):
             "TMN": 4,
             "TMZ": 5,
             
-            "M": 0x180,
-            "MA": 0x181,
-            "MNA": 0x182,
-            "D": 0x183,
+            "M": 0x10,
+            "MA": 0x11,
+            "MNA": 0x12,
+            "D": 0x13,
             
             "BSM": 0xE,
             "BRM": 0xF,
             
-            "SLR": 0xBF0,
+            "SLR": 0x87,
             
-            "RFI": 0x1820,
-            "RLMSK": 0x1821,
-            "LMSK": 0x1822,
-            "MWAIT": 0x1823,
-            "STMSK": 0x1824,
-            "INVSM": 0x1825,
-            "INVPG": 0x1826,
+            "RFI": 0x80,
+            "RLMSK": 0x81,
+            "LMSK": 0x82,
+            "MWAIT": 0x83,
+            "STMSK": 0x84,
+            "INVSM": 0x85,
+            "INVPG": 0x86,
         }
 
 class AssembleAM(AssemblerModule):
@@ -178,38 +178,38 @@ class AssembleAM(AssemblerModule):
     
     def __init__(self):
         self.opcodes = {
-            "EDIT": 0o001,
-            "EDITS": 0o002,
+            "EDIT": 0o041,
+            "EDITS": 0o042,
             
-            "LX": 0o003,
-            "AX": 0o004,
+            "LX": 0o043,
+            "AX": 0o044,
             
-            "ITNE": 0o005,
-            "DTNE": 0o006,
+            "ITNE": 0o045,
+            "DTNE": 0o046,
             
-            "LXH": 0o007,
+            "LXH": 0o047,
             
-            "LCM": 0o010,
-            "LN": 0o011,
-            "L": 0o012,
-            "ST": 0o013,
+            "LCM": 0o050,
+            "LN": 0o051,
+            "L": 0o052,
+            "ST": 0o053,
             
-            "AC": 0o014,
-            "S": 0o015,
-            "A": 0o016,
-            "AN": 0o017,
-            "O": 0o022,
-            "X": 0o026,
+            "AC": 0o054,
+            "S": 0o055,
+            "A": 0o056,
+            "AN": 0o057,
+            "O": 0o062,
+            "X": 0o066,
 
-            "WAIT": 0o600,
-            "INT": 0o601,
+            "WAIT": 0o070,
+            "INT": 0o071,
             
-            "LSK": 0o603,
-            "STSK": 0o604,
+            "LSK": 0o072,
+            "STSK": 0o073,
             
-            "LCTL": 0o605,
-            "STCTL": 0o606,
-            "LXRT": 0o607,
+            "LCTL": 0o074,
+            "STCTL": 0o075,
+            "LXRT": 0o076,
         }
 
 def get_paren_arg(arg: str) -> str:
@@ -329,11 +329,11 @@ class AssembleBX(AssemblerModule):
         
     def __init__(self):
         self.opcodes = {
-            "LC": 0o040,
-            "STC": 0o041,
-            "ICX": 0o042,
-            "ILC": 0o043,
-            "ISTC": 0o044
+            "LC": 0o100,
+            "STC": 0o101,
+            "ICX": 0o102,
+            "ILC": 0o103,
+            "ISTC": 0o104
         }
 
 class AssembleHelper0(AssemblerModule):
@@ -355,7 +355,7 @@ class AssembleHelper0(AssemblerModule):
         
     def __init__(self):
         self.opcodes = {
-            "HLT": 0o600002000001,
+            "HLT": 0o070002000001,
         }
 
 def ascii7(string: str) -> list[int]:
@@ -470,7 +470,7 @@ class AssembleIO(AssemblerModule):
         elif dev[0] in '0123456789-':
             result = int(dev, 10) & 0o7777
         
-        result |= (0o670 << 27) | (opcode << 12)
+        result |= (0o640 << 27) | (opcode << 12)
         
         if command[0:2] == "WI" or command[0:2] == "RI":
             register = int(args[1])

@@ -824,7 +824,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
     }
     
     switch ((inst >> 27) & 0x1FF) {
-        case 001: { // EDIT
+        case 041: { // EDIT
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -841,7 +841,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->do_edit = 1;
             cpu->xeq_inst = result & MASK_36;
         } break;
-        case 002: { // EDSK
+        case 042: { // EDSK
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -859,11 +859,11 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->do_edsk = 1;
             cpu->xeq_inst = result & MASK_36;
         } break;
-        case 003: { // MOVEA
+        case 043: { // MOVEA
             cpu->a[ac] = ea;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 004: { // ADDEA
+        case 044: { // ADDEA
             uint64_t result = compute(
                 ea, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
@@ -871,7 +871,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 005: { // ISE
+        case 045: { // ISE
             uint64_t result = compute(
                 1, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
@@ -895,7 +895,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
         } break;
-        case 006: { // DSE
+        case 046: { // DSE
             uint64_t result = compute(
                 1, cpu->a[ac], get_cf(cpu), 5, 0, 0, 0, 0, 0
             );
@@ -919,11 +919,11 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
         } break;
-        case 007: { // MOVEAS
+        case 047: { // MOVEAS
             cpu->a[ac] = (ea << 17) & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 010: { // LDCOM
+        case 050: { // LDCOM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -940,7 +940,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 011: { // LDNEG
+        case 051: { // LDNEG
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -957,7 +957,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 012: { // LDA
+        case 052: { // LDA
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -971,7 +971,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = data & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 013: { // STA
+        case 053: { // STA
             uint64_t w_res =
                 write_mem(cpu, cpu->c[C_PSW] >> 28, ea, cpu->a[ac]);
             if (w_res == MEM_FAULT) {
@@ -984,7 +984,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 014: { // ADCM
+        case 054: { // ADCM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1002,7 +1002,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 015: { // SUBM
+        case 055: { // SUBM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1020,7 +1020,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 016: { // ADDM
+        case 056: { // ADDM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1038,7 +1038,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 017: { // ANDM
+        case 057: { // ANDM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1056,7 +1056,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 022: { // ORM
+        case 062: { // ORM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1074,7 +1074,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 026: { // XORM
+        case 066: { // XORM
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1108,7 +1108,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t sh = cpu->a[ix] >> 27;
     
     switch ((inst >> 27) & 0x1FF) {
-        case 040: { // LCH
+        case 0100: { // LCH
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1125,7 +1125,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = data;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 041: { // DCH
+        case 0101: { // DCH
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1153,7 +1153,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 042: { // ICX
+        case 0102: { // ICX
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -1162,7 +1162,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = ea | (sh << 27);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 043: { // ILC
+        case 0103: { // ILC
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -1188,7 +1188,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = data;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 044: { // IDC
+        case 0104: { // IDC
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -1235,27 +1235,16 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
 
 void exec_local_trap(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t opcode = ((inst >> 27) & 0x1FF);
-
-    if (opcode == 0277) { // SLR
-        uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
-        if (!key) {
-            cpu->c[C_PSW] = cpu->a[15];
-        } else {
-            // Privilege
-            do_except(cpu, X_PPFS);
-        }
-    } else {
-        set_pc(cpu, get_pc(cpu) + 1);
-        if (opcode >= 0200) { // SLT, set key to 0 and save full PSW
-            cpu->a[15] = cpu->c[C_PSW];
-            cpu->c[C_PSW] &= (1 << 27);
-            set_pc(cpu, cpu->c[C_SLT] + (opcode & 077));
-        } else { // PLT, preserve key and save only program counter
-            cpu->a[15] = get_pc(cpu);
-            set_pc(cpu, cpu->c[C_PLT] + (opcode & 077));
-        }
-        cpu->a[14] = inst;
+    set_pc(cpu, get_pc(cpu) + 1);
+    if (opcode >= 0300) { // SLT, set key to 0 and save full PSW
+        cpu->a[15] = cpu->c[C_PSW];
+        cpu->c[C_PSW] &= (1 << 27);
+        set_pc(cpu, cpu->c[C_SLT] + (opcode & 077));
+    } else { // PLT, preserve key and save only program counter
+        cpu->a[15] = get_pc(cpu);
+        set_pc(cpu, cpu->c[C_PLT] + (opcode & 077));
     }
+    cpu->a[14] = inst;
 }
 
 void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
@@ -1269,16 +1258,16 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
         
         uint64_t ac = (inst >> 23) & 0xF;
         switch ((inst >> 27) & 0x1FF) {
-            case 0600: { // HLT
+            case 070: { // HLT
                 halt(cpu);
                 cpu->stop_code = cpu->a[ac];
                 set_pc(cpu, ea);
             } break;
-            case 0601: { // INT
+            case 071: { // INT
                 set_pc(cpu, ea);
                 do_intr(cpu, ac);
             } break;
-            case 0602: { // various
+            case 010: { // various
                 switch (ac) {
                     case 0: { // RFI
                         leave_intr(cpu);
@@ -1334,13 +1323,16 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                         tlb_invalidate(cpu, (ea >> 9) & 0x1F);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
+                    case 7: { // SLR
+                        cpu->c[C_PSW] = cpu->a[15];
+                    }
                     default: {
                         // Illegal
                         do_except(cpu, X_INST);
                     }
                 }
             } break;
-            case 0603: { // LDK
+            case 072: { // LDK
                 ea &= ~(0x1FF);
                 if (ea < cpu->mem_size) {
                     cpu->a[ac] = cpu->memory[ea] >> 36;
@@ -1349,7 +1341,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 0604: { // STK
+            case 073: { // STK
                 uint64_t w_res = set_key(cpu, cpu->a[ac], ea);
                 if (w_res == MEM_FAULT) {
                     do_except(cpu, X_MEMX);
@@ -1357,7 +1349,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 0605: { // LCT
+            case 074: { // LCT
                 uint64_t data = read_mem(cpu, 0, ea);
                 if (data == MEM_FAULT) {
                     do_except(cpu, X_MEMX);
@@ -1372,7 +1364,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 0606: { // STCTL
+            case 075: { // STCTL
                 uint64_t w_res = write_mem(cpu, 0, ea, cpu->c[ac & 0x7]);
                 if (w_res == MEM_FAULT) {
                     do_except(cpu, X_MEMX);
@@ -1380,7 +1372,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 0607: { // LXRT
+            case 076: { // LXRT
                 uint64_t vaddress = ea & MASK_ADDR;
         
                 seg_cache_t *seg = seg_lookup(cpu, vaddress >> 18);
@@ -1518,327 +1510,6 @@ uint64_t exec_aa(
     return result;
 }
 
-void update_fpu_status(ist66_cu_t *cpu) {
-    int flags[5] = {
-        softfloat_flag_inexact,
-        softfloat_flag_underflow,
-        softfloat_flag_overflow,
-        softfloat_flag_infinite,
-        softfloat_flag_invalid
-    };
-    for (int i = 0; i < 5; i++) {
-        if ((softfloat_exceptionFlags & flags[i])) {
-            cpu->a[2] |= 1 << i;
-        }
-    }
-    softfloat_exceptionFlags = 0;
-}
-
-void exec_fp2(ist66_cu_t *cpu, uint64_t inst) {
-    int rmod = !!(cpu->c[C_FCW] & 4);
-    uint64_t rmod_override = (inst >> 15) & 3;
-    if (rmod_override == 1) rmod = 0;
-    else if (rmod_override == 2) rmod = 1;
-    
-    uint64_t fpac_d = (inst >> 27) & 3;
-    fpac_d |= (cpu->c[C_FCW] & 3) << 2;
-    
-    uint64_t fpac_t = (inst >> 18) & 3;
-    fpac_t |= (cpu->c[C_FCW] & 3) << 2;
-    
-    uint64_t fpac_s = (inst >> 20) & 3;
-    fpac_s |= (cpu->c[C_FCW] & 3) << 2;
-    
-    softfloat_roundingMode = rmod 
-        ? softfloat_round_near_even
-        : softfloat_round_minMag;
-    
-    switch ((inst >> 23) & 0xF) {
-        case 8: { // FAD
-            extF80M_add(
-                &(cpu->f[fpac_s]),
-                &(cpu->f[fpac_t]),
-                &(cpu->f[fpac_d])
-            );
-        } break;
-        case 9: { // FSB
-            extF80M_sub(
-                &(cpu->f[fpac_s]),
-                &(cpu->f[fpac_t]),
-                &(cpu->f[fpac_d])
-            );
-        } break;
-        case 10: { // FMY
-            extF80M_mul(
-                &(cpu->f[fpac_s]),
-                &(cpu->f[fpac_t]),
-                &(cpu->f[fpac_d])
-            );
-        } break;
-        case 11: { // FDV
-            extF80M_div(
-                &(cpu->f[fpac_s]),
-                &(cpu->f[fpac_t]),
-                &(cpu->f[fpac_d])
-            );
-        } break;
-        case 12: { // FSQ
-            extF80M_sqrt(
-                &(cpu->f[fpac_s]),
-                &(cpu->f[fpac_d])
-            );
-        } break;
-        case 13: { // FEQ
-            cpu->a[0] = extF80M_eq(
-                &(cpu->f[fpac_s]),
-                &(cpu->f[fpac_t])
-            );
-        } break;
-        case 14: { // FLE
-            cpu->a[0] = extF80M_le(
-                &(cpu->f[fpac_s]),
-                &(cpu->f[fpac_t])
-            );
-        } break;
-        case 15: { // FLT
-            cpu->a[0] = extF80M_lt(
-                &(cpu->f[fpac_s]),
-                &(cpu->f[fpac_t])
-            );
-        } break;
-    }
-    
-    update_fpu_status(cpu);
-    set_pc(cpu, get_pc(cpu) + 1);
-}
-
-void exec_fp1(ist66_cu_t *cpu, uint64_t inst) {
-    if (!!(cpu->c[C_FCW] & 8)) {
-        do_except(cpu, X_NFPU);
-        return;
-    }
-    
-    if (((inst >> 23) & 0xF) >= 8) {
-        // exec_fp2(cpu, inst);
-        return;
-    }
-    
-    uint64_t ea = comp_mr(cpu, inst);
-    
-    if (ea == MEM_FAULT) {
-        do_except(cpu, X_MEMX);
-        return;
-    } else if (ea == KEY_FAULT) {
-        do_except(cpu, X_PPFR);
-        return;
-    }
-    
-    uint64_t fpac = (inst >> 27) & 3;
-    fpac |= (cpu->c[C_FCW] & 3) << 2;
-    
-    switch ((inst >> 23) & 0xF) {
-        case 0: { // LFS
-            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
-            if (data == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (data == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-                return;
-            }
-            data &= MASK_36;
-            
-            ist66f_to_extF80M(data, 0, &(cpu->f[fpac]));
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 1: { // LFD
-            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
-            if (data == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (data == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-                return;
-            }
-            data &= MASK_36;
-            
-            uint64_t data_l = read_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1);
-            if (data_l == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (data_l == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-                return;
-            }
-            data_l &= MASK_36;
-            
-            ist66f_to_extF80M(data, data_l, &(cpu->f[fpac]));
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 2: { // LXE
-            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
-            if (data == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (data == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-                return;
-            }
-            data &= MASK_36;
-            
-            uint64_t exp = i36_to_exp15(data);
-            if (exp == 0x0000 && data != 0x0000) cpu->a[2] |= 2;
-            else if (exp == 0x7FFF) cpu->a[2] |= 4;
-            
-            exp |= cpu->f[fpac].signExp & 0x8000;
-            cpu->f[fpac].signExp = exp;
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 3: { // LXS
-            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
-            if (data == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (data == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-                return;
-            }
-            data &= MASK_36;
-            
-            uint64_t data_l = read_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1);
-            if (data_l == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (data_l == KEY_FAULT) {
-                do_except(cpu, X_PPFR);
-                return;
-            }
-            data_l &= MASK_36;
-            
-            uint64_t sign = data >> 35;
-            data |= 1L << 35;
-            data <<= 28;
-            data |= data_l >> 8;
-            if ((data_l & 0xFF)) cpu->a[2] |= 1;
-            cpu->f[fpac].signif = data;
-            cpu->f[fpac].signExp =
-                (cpu->f[fpac].signExp & 0x7FFF) | (sign << 15);
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 4: { // DFS
-            uint64_t data;
-            int inexact = 0;
-            if ((cpu->f[fpac].signif & 0777777777)) inexact = 1;
-            
-            int xflow = extF80M_to_ist66f36(
-                &(cpu->f[fpac]),
-                &data,
-                cpu->c[C_FCW] & 4
-            );
-            
-            uint64_t w_res =
-                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
-            if (w_res == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (w_res == KEY_FAULT) {
-                do_except(cpu, X_PPFW);
-                return;
-            }
-            
-            if (inexact) cpu->a[2] |= 1;
-            if (xflow == -1) cpu->a[2] |= 2;
-            if (xflow == 1) cpu->a[2] |= 4;
-            
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 5: { // DFH
-            uint64_t data, data_l;
-            
-            int xflow = extF80M_to_ist66f72(
-                &(cpu->f[fpac]),
-                &data,
-                &data_l
-            );
-            
-            uint64_t w_res =
-                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
-            if (w_res == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (w_res == KEY_FAULT) {
-                do_except(cpu, X_PPFW);
-                return;
-            }
-            
-            w_res =
-                write_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1, data_l);
-            if (w_res == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (w_res == KEY_FAULT) {
-                do_except(cpu, X_PPFW);
-                return;
-            }
-            
-            if (xflow == -1) cpu->a[2] |= 2;
-            if (xflow == 1) cpu->a[2] |= 4;
-            
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 6: { // DXE
-            uint64_t data = exp15_to_i36(cpu->f[fpac].signExp & 0x7FFF);
-            
-            uint64_t w_res =
-                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
-            if (w_res == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (w_res == KEY_FAULT) {
-                do_except(cpu, X_PPFW);
-                return;
-            }
-            
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        case 7: { // DXS
-            uint64_t data, data_l;
-            
-            uint64_t sign = cpu->f[fpac].signExp >> 15;
-            data = (cpu->f[fpac].signif >> 28) & MASK_36;
-            data &= ~(1L << 35);
-            data |= sign << 35;
-            data_l = (cpu->f[fpac].signif << 8) & MASK_36;
-            
-            uint64_t w_res =
-                write_mem(cpu, cpu->c[C_PSW] >> 28, ea, data);
-            if (w_res == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (w_res == KEY_FAULT) {
-                do_except(cpu, X_PPFW);
-                return;
-            }
-            
-            w_res =
-                write_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1, data_l);
-            if (w_res == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-                return;
-            } else if (w_res == KEY_FAULT) {
-                do_except(cpu, X_PPFW);
-                return;
-            }
-            
-            set_pc(cpu, get_pc(cpu) + 1);
-        } break;
-        default: {
-            // UMR
-            do_except(cpu, X_USER);
-        }
-    }
-}
-
 void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     cpu->inst = inst;
     
@@ -1865,27 +1536,24 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     else if (inst >> 27 == 0) {
         exec_mr(cpu, inst);
     }
-    else if (inst >> 27 <= 027) {
-        exec_am(cpu, inst);
-    }
-    else if (inst >> 27 == 030) {
+    else if (inst >> 27 == 1) {
         exec_md(cpu, inst);
     }
-    else if (inst >> 27 == 034) {
-        exec_fp1(cpu, inst);
+    else if (inst >> 27 >= 040 && inst >> 27 <= 067) {
+        exec_am(cpu, inst);
     }
     
-    else if (inst >> 27 >= 0100 && inst >> 27 < 0300) {
+    else if (inst >> 27 >= 0200 && inst >> 27 < 0400) {
         exec_local_trap(cpu, inst);
     }
     
-    else if (inst >> 27 == 0670) {
+    else if (inst >> 27 == 0640) {
         exec_io1(cpu, inst);
     }
-    else if (inst >> 30 == 04) {
+    else if (inst >> 27 >= 0100 && inst >> 27 <= 0104) {
         exec_bx(cpu, inst);
     }
-    else if (inst >> 33 == 06) {
+    else if ((inst >> 27 >= 070 && inst >> 27 <= 076) || inst >> 27 == 010) {
         exec_smi(cpu, inst);
     }
     else {
@@ -2037,33 +1705,33 @@ int main(int argc, char *argv[]) {
     // init_pch(&cpu, 014, 6);
     init_tty(&cpu, 060, 10, 8080);
     
-    cpu.memory[512] = 0670000370012;
+    cpu.memory[512] = 0640000370012;
     cpu.memory[513] = 0743170000000;
     cpu.memory[514] = 0742130000000;
-    cpu.memory[515] = 0670000560012;
+    cpu.memory[515] = 0640000560012;
     cpu.memory[516] = 0000002777777;
-    cpu.memory[517] = 0670000200012;
+    cpu.memory[517] = 0640000200012;
     cpu.memory[518] = 0700010500000;
     cpu.memory[519] = 0000002777774;
     cpu.memory[520] = 0700011004100;
     cpu.memory[521] = 0703150000003;
     cpu.memory[522] = 0740150000000;
-    cpu.memory[523] = 0005102000021;
+    cpu.memory[523] = 0045102000021;
     cpu.memory[524] = 0000002777767;
-    cpu.memory[525] = 0003043777777;
-    cpu.memory[526] = 0670000560012;
+    cpu.memory[525] = 0043043777777;
+    cpu.memory[526] = 0640000560012;
     cpu.memory[527] = 0000002777777;
-    cpu.memory[528] = 0670140200012;
+    cpu.memory[528] = 0640140200012;
     cpu.memory[529] = 0723010500000;
     cpu.memory[530] = 0000002777774;
-    cpu.memory[531] = 0003103777736;
-    cpu.memory[532] = 0005102000011;
+    cpu.memory[531] = 0043103777736;
+    cpu.memory[532] = 0045102000011;
     cpu.memory[533] = 0700010100000;
     cpu.memory[534] = 0000002777753;
-    cpu.memory[535] = 0005102000007;
+    cpu.memory[535] = 0045102000007;
     cpu.memory[536] = 0700010100000;
-    cpu.memory[537] = 0600002000001;
-    cpu.memory[538] = 0044101000006;
+    cpu.memory[537] = 0070002000001;
+    cpu.memory[538] = 0104101000006;
     cpu.memory[539] = 0000002777763;
     cpu.memory[540] = 0000000000011;
     cpu.memory[541] = 0000000000133;
