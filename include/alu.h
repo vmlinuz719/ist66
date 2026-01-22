@@ -32,6 +32,7 @@ static inline void xmul(
     uint64_t *rl,
     uint64_t *rh
 ) {
+    // TODO: need unsigned option
     int negate = 0;
     
     if (a & (1L << 35)) {
