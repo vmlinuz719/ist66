@@ -32,7 +32,8 @@ static inline void xmul(
     uint64_t *rl,
     uint64_t *rh
 ) {
-    // TODO: need unsigned option
+    // TODO: need signed option
+    /*
     int negate = 0;
     
     if (a & (1L << 35)) {
@@ -44,6 +45,7 @@ static inline void xmul(
         negate ^= 1;
         b = ((~b) + 1) & MASK_36;
     }
+    */
     
     uint64_t ah = (a >> 18) & 0777777;
     uint64_t al = a & 0777777;
@@ -66,12 +68,14 @@ static inline void xmul(
     *rh += (*rl >> 36);
     *rl &= MASK_36;
     
+    /*
     if (negate) {
         *rl = (~(*rl) + 1) & MASK_37;
         *rh = (~(*rh)) & MASK_36;
         *rh += *rl >> 36;
         *rl &= MASK_36;
     }
+    */
 }
 
 #endif
