@@ -295,10 +295,11 @@ class AssembleAA(AssemblerModule):
             "ANA": 0xE7,
             "OA": 0xF2,
             "XA": 0xF6,
+            "PCTA": 0xF7,
         }
 
     def will_assemble(self, card: Card) -> bool:
-        return (card.command.strip().upper()[0:3] in self.opcodes)
+        return (card.command.strip().upper()[0:4] in self.opcodes)
 
 class AssembleBX(AssemblerModule):
     def size(self, card: Card) -> int:
