@@ -116,7 +116,7 @@ static inline uint64_t opr(uint64_t a, uint64_t b, int c, int op) {
         case 10: {
             result = (a | b) & MASK_36;
         } break;
-        case 15: {
+        case 14: {
             result = (a ^ b) & MASK_36;
         } break;
     }

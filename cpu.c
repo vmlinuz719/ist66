@@ -1086,7 +1086,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
             data &= MASK_36;
             
             uint64_t result = compute(
-                data, cpu->a[ac], get_cf(cpu), 15, 0, 0, 0, 0, 0
+                data, cpu->a[ac], get_cf(cpu), 14, 0, 0, 0, 0, 0
             );
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
