@@ -797,11 +797,111 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
             
+            int64_t data_s = (int64_t) (EXT36(data));
             uint64_t ac = cpu->a[0];
+            int64_t ac_s = (int64_t) (EXT36(ac));
+
+            cpu->a[1] = ((uint64_t) (ac_s / data_s)) & MASK_36;
+            cpu->a[2] = ((uint64_t) (ac_s % data_s)) & MASK_36;
             
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 4: { // MU
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+
+            xmulu(cpu->a[1], data, &cpu->a[0], &cpu->a[2]);
+
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 5: { // MAU
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+
+            uint64_t high, low;
+
+            xmulu(cpu->a[1], data, &low, &high);
+
+            uint64_t result_l = compute(
+                low, cpu->a[0], 0, 6, 0, 0, 0, 0, 0
+            );
+
+            uint64_t carry_l = result_l >> 36;
+
+            uint64_t result_h = compute(
+                high + carry_l, cpu->a[2], get_cf(cpu), 6, 0, 0, 0, 0, 0
+            );
+
+            cpu->a[0] = result_l & MASK_36;
+            cpu->a[2] = result_h & MASK_36;
+
+            set_cf(cpu, (result_h >> 36) & 1);
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 6: { // MNAU
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data = ((~data) + 1) & MASK_36;
+
+            uint64_t high, low;
+
+            xmulu(cpu->a[1], data, &low, &high);
+
+            uint64_t result_l = compute(
+                low, cpu->a[0], 0, 6, 0, 0, 0, 0, 0
+            );
+
+            uint64_t carry_l = result_l >> 36;
+
+            uint64_t result_h = compute(
+                high + carry_l, cpu->a[2], get_cf(cpu), 6, 0, 0, 0, 0, 0
+            );
+
+            cpu->a[0] = result_l & MASK_36;
+            cpu->a[2] = result_h & MASK_36;
+
+            set_cf(cpu, (result_h >> 36) & 1);
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        case 7: { // DU
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            } else if (data == 0) {
+                do_except(cpu, X_DIVZ);
+                return;
+            }
+            data &= MASK_36;
+
+            uint64_t ac = cpu->a[0];
+
             cpu->a[1] = ((uint64_t) (ac / data)) & MASK_36;
             cpu->a[2] = ((uint64_t) (ac % data)) & MASK_36;
-            
+
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
         default: {
