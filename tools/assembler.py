@@ -134,6 +134,10 @@ class AssembleMR(AssemblerModule):
             "MA": 0x11,
             "MNA": 0x12,
             "D": 0x13,
+            "MU": 0x14,
+            "MAU": 0x15,
+            "MNAU": 0x16,
+            "DU": 0x17,
             
             "BSM": 0xE,
             "BRM": 0xF,
