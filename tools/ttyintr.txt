@@ -97,7 +97,7 @@ DUMP_PSW AA      7,7,I(-1)
          LMSK    .HALT
          HLT
          
-ALT_HNDL LX      4,.EXC_SAVE
+ALT_HNDL LX      3,.EXC_SAVE
          L       .EXC_SPSV
          ST      .EXC_OLDS
          BSM     0(7)
@@ -183,7 +183,9 @@ PSL      DW      5
          ASCII   \040PSL\040
 
 PROMPT   DW      4
-         ASCII   ==>\040
+         ASCII   MCL>
+
+MEM_SIZE DW      0
 
         ****************************************************************
         * Fastcall: X0-X3 for first args, caller saved
@@ -445,8 +447,56 @@ TEST_RST L       0,0(4)
 DONT_RST B       0(12)
 
         ****************************************************************
+        * ENUMDONE - break out of memory count loop
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+ENUMDONE DW      0
+         L       .OK
+         ST      0(3)
+         BRM
+
+        ****************************************************************
 
 START    LX      13,STACK
+
+         LX      3,.EXTAB
+         LX      4,.ENUMDONE
+         ST      4,2(3)
+         
+         LX      3,.BANNER1
+         BSM     .WRITELD
+         
+         LX      5,STACK
+         O       5,.INCPTR
+         ST      5,1-
+
+MEMTEST  XA      0,0
+         L       2,@0(13)
+         TACZ
+         B       .MEMTEST
+         
+         LX      3,.EXTAB
+         LX      4,0
+         ST      4,2(3)
+         
+         L       1+
+         LA      0,4,CC,M(9)
+         ST      4,.MEM_SIZE
+         
+         AX      13,-4                          Num buf 0(13)
+         LX      15
+         
+         LX      3,0(13)
+         LX      5,10
+         BSM     .NUM2LD
+         
+         LX      3,0(13)
+         BSM     .WRITELD
+         LX      3,.BANNER2
+         BSM     .WRITELD
+         
+         AX      13,4
 
          RIO     48,0,1                         Enable keyboard
          AX      0,256
@@ -480,6 +530,11 @@ DIE      AX      13,35
 
 OK       DW      0631463146314
 ZERO     DW      0
+INCPTR   DW      0401000000000
+BANNER1  DW      11
+         ASCII   RDC-700/75\040
+BANNER2  DW      10
+         ASCII   W ONLINE\015\012
 
         ****************************************************************
 

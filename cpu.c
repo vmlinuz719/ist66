@@ -1715,6 +1715,8 @@ void *run(void *vctx) {
             pthread_mutex_unlock(&cpu->lock);
         }
         
+        // NOTE: this already gets cancelled on exception
+        // see cpu.h
         if (cpu->do_inc) {
             uint64_t w_res =
                 write_mem
