@@ -585,7 +585,37 @@ MATHTST0 USING   3,4
          B       .MT0_FAIL
          IA      4,4
          
+         L       3,.CMA_0                       F: mask clear left
+         LA      3,3,CC,M(18),TCN
+         B       .MT0_FAIL
+         S       3,.CMA_LO
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+
+         L       3,.CMA_LO                      10: mask set left
+         LA      3,3,SC,M(18),TCZ
+         B       .MT0_FAIL
+         S       3,.CMA_0
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
          
+         L       3,.CMA_0                       11: mask clear right
+         LA      3,3,CC,MR(18),TCN
+         B       .MT0_FAIL
+         S       3,.CMA_HI
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       3,.CMA_HI                      12: mask set right
+         LA      3,3,SC,MR(18),TCZ
+         B       .MT0_FAIL
+         S       3,.CMA_0
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
          
          XA      0,0
          BRM

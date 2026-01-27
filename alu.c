@@ -48,12 +48,13 @@ static inline uint64_t maskl(uint64_t a, int b) {
 }
 
 static inline uint64_t maskr(uint64_t a, int b) {
-    uint64_t mask = (~1L) << (b > 35 ? 36 : b);
-    return (
+    uint64_t mask = (~0L) << (b > 35 ? 36 : b);
+    uint64_t result = (
         a & (1L << 36)
-            ? a | mask
-            : a & (~mask)
-    ) & MASK_37;
+            ? a | (~mask)
+            : a & mask
+    ) & MASK_36;
+    return result | (a & ~MASK_36);
 }
 
 static inline uint64_t mask(uint64_t a, int b) {

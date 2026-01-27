@@ -1585,7 +1585,9 @@ uint64_t exec_aa(
         int mr = (int) ((inst >> 12) & 0x1);
         
         int mk = (int) ((inst >> 6) & 0x3F);
-        if (mr) mk = -mk;
+        if (mr) {
+            mk = -mk;
+        }
         
         int rt = (int) (inst & 0x3F);
         
