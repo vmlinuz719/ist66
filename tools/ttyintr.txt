@@ -312,7 +312,7 @@ NUM2LD   USING   1,2
 
          LA      4,0
 
-DIV      D       0(5)                           Grab digit and remainder
+DIV      DU      0(5)                           Grab digit and remainder
          ST      2,1-                           Push digit
          ITN     0(3)                           Increment string size
          LA      1,0,TRN                        Test if done
