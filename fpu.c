@@ -94,7 +94,7 @@ int main(int argc, char *argv) {
     
     rdc700_float_t tgt = {
         .sign_exp = 16384,
-        .signif = 0x8000000000000000
+        .signif = 0xC000000000000000
     };
     
     rdc700_float_t result;
