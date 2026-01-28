@@ -83,7 +83,7 @@ void print_rdc_float(rdc700_float_t *f) {
     }
     frac_print[last_nonzero + 1] = 0;
     
-    printf("%c%d.%s(%d)", is_neg ? '-' : 0, whole, frac_print, 2 * exp);
+    printf("%c%d.%sE(2^%d)", is_neg ? '-' : 0, whole, frac_print, exp);
 }
 
 int main(int argc, char *argv) {
@@ -93,7 +93,7 @@ int main(int argc, char *argv) {
     };
     
     rdc700_float_t tgt = {
-        .sign_exp = 16383,
+        .sign_exp = 16384,
         .signif = 0x8000000000000000
     };
     
