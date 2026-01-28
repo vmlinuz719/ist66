@@ -531,43 +531,47 @@ MATHTST0 USING   3,4
          B       .MT0_FAIL
          IA      4,4
          
-         L       .CMA_LO                        9: CMA_0 - CMA_LO
+         L       .CMA_LO                        -> CMA_0 - CMA_LO
          L       3,.CMA_0                          == CMA_HI
          SA      0,3,CC,TCZ                        + carry set
-         B       .MT0_FAIL
+         B       .MT0_FAIL                      9: correct carry
+         IA      4,4                            A: correct value
          S       3,.CMA_HI
          TRN     3
          B       .MT0_FAIL
          IA      4,4
          
-         L       .CMA_0                         A: CMA_0 - CMA_0
+         L       .CMA_0                         -> CMA_0 - CMA_0
          L       3,.CMA_0                          == 0
          SA      0,3,CC,TCZ                        + carry set
-         B       .MT0_FAIL
+         B       .MT0_FAIL                      B: correct carry
+         IA      4,4                            C: correct value
          TRN     3
          B       .MT0_FAIL
          IA      4,4
          
-         L       .CMA_0                         B: CMA_LO - CMA_0
+         L       .CMA_0                         -> CMA_LO - CMA_0
          L       3,.CMA_LO                         == CMA_LO + 1
          SA      0,3,CC,TCN                        + carry clear
-         B       .MT0_FAIL
+         B       .MT0_FAIL                      D: correct carry
+         IA      4,4                            E: correct value
          A       3,.CMA_0
          S       3,.CMA_LO
          TRN     3
          B       .MT0_FAIL
          IA      4,4
          
-         L       .CMA_HI                        C: CMA_LO + CMA_HI + 1
+         L       .CMA_HI                        -> CMA_LO + CMA_HI + 1
          L       3,.CMA_LO                         == 0
          IA      3,3                               + carry set
-         AA      0,3,CC,TCZ
-         B       .MT0_FAIL
+         AA      0,3,CC,TCZ                     F: correct carry
+         B       .MT0_FAIL                      10: correct value
+         IA      4,4
          TRN     3
          B       .MT0_FAIL
          IA      4,4
          
-         L       3,.CMA_0                       D: AND all together
+         L       3,.CMA_0                       11: AND all together
          L       .CMA_LO
          L       2,.CMA_HI
          ANA     0,3
@@ -575,7 +579,7 @@ MATHTST0 USING   3,4
          B       .MT0_FAIL
          IA      4,4
          
-         L       3,.CMA_0                       E: (X)OR all together
+         L       3,.CMA_0                       12: (X)OR all together
          L       .CMA_LO
          L       2,.CMA_HI
          OA      0,2
@@ -585,38 +589,60 @@ MATHTST0 USING   3,4
          B       .MT0_FAIL
          IA      4,4
          
-         L       3,.CMA_0                       F: mask clear left
-         LA      3,3,CC,M(18),TCN
-         B       .MT0_FAIL
+         L       3,.CMA_0                       -> mask clear left
+         LA      3,3,CC,M(18),TCN               13: correct carry
+         B       .MT0_FAIL                      14: correct value
+         IA      4,4
          S       3,.CMA_LO
          TRN     3
          B       .MT0_FAIL
          IA      4,4
 
-         L       3,.CMA_LO                      10: mask set left
-         LA      3,3,SC,M(18),TCZ
-         B       .MT0_FAIL
+         L       3,.CMA_LO                      -> mask set left
+         LA      3,3,SC,M(18),TCZ               15: correct carry
+         B       .MT0_FAIL                      16: correct value
+         IA      4,4
          S       3,.CMA_0
          TRN     3
          B       .MT0_FAIL
          IA      4,4
          
-         L       3,.CMA_0                       11: mask clear right
-         LA      3,3,CC,MR(18),TCN
-         B       .MT0_FAIL
+         L       3,.CMA_0                       -> mask clear right
+         LA      3,3,CC,MR(18),TCN              17: correct carry
+         B       .MT0_FAIL                      18: correct value
+         IA      4,4
          S       3,.CMA_HI
          TRN     3
          B       .MT0_FAIL
          IA      4,4
          
-         L       3,.CMA_HI                      12: mask set right
-         LA      3,3,SC,MR(18),TCZ
-         B       .MT0_FAIL
+         L       3,.CMA_HI                      -> mask set right
+         LA      3,3,SC,MR(18),TCZ              19: correct carry
+         B       .MT0_FAIL                      1A: correct value
+         IA      4,4
          S       3,.CMA_0
          TRN     3
          B       .MT0_FAIL
          IA      4,4
          
+         L       3,.CMA_HI                      1B: rotate left
+         LA      3,3,SC,R(18),M(18)
+         S       3,.CMA_0
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+
+         L       3,.CMA_LO                      -> rotate carry
+         LA      3,3,CC,R(19),MR(1)             1C: correct carry
+         LA      3,3,SC,RC(18),TCN              1D: correct value
+         B       .MT0_FAIL
+         IA      4,4
+         A       3,.CMA_HI
+         S       3,.CMA_0
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+
          XA      0,0
          BRM
          
