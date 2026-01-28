@@ -51,8 +51,7 @@ void rdc700_fmul_n(
         exp_dst = 16384;
     }
     
-    if (c == 0) new_sign_exp = 0;
-    if (c != 0) new_sign_exp |= ((uint16_t) (exp_dst + 16383));
+    new_sign_exp |= ((uint16_t) (exp_dst + 16383));
     dst->sign_exp = new_sign_exp;
     dst->signif = c;
 }
