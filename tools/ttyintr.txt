@@ -841,3 +841,5 @@ BATTERY  DW      XPASS,XFAIL,MATHTST0,0
          ORIGIN  4096
 
 STACK    BSS     0
+
+         ORIGIN  8192

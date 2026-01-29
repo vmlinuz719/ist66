@@ -216,6 +216,76 @@ class AssembleAM(AssemblerModule):
             "LXRT": 0o076,
         }
 
+class AssembleFPM(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 1
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> list[int]:
+        args = card.argument.strip().split(",")
+        if len(args) == 2:
+            register = int(args[0])
+            if register < 0 or register > 3:
+                raise ValueError("No such FPU register")
+        elif len(args) == 1:
+            register = 0
+        else:
+            raise ValueError("Syntax error")
+            
+        address = generate_address(args[-1], symbols, pc)
+        
+        upper_cmd = card.command.strip().upper()
+        
+        extra_bits = 0
+        if upper_cmd[-2:] == "RN":
+            extra_bits = 3
+            upper_cmd = upper_cmd[0:-2]
+        elif upper_cmd[-1:] == "R" or upper_cmd[-1:] == "N":
+            extra_bits = {"R": 2, "N": 1}[upper_cmd[-1:]]
+            upper_cmd = upper_cmd[0:-1]
+        
+        return [(
+            (self.opcodes[upper_cmd] << 27)
+            | (extra_bits << 25)
+            | (register << 23)
+            | address
+        )]
+    
+    def will_assemble(self, card: Card) -> bool:
+        upper_cmd = card.command.strip().upper()
+        if upper_cmd[-2:] == "RN":
+            upper_cmd = upper_cmd[0:-2]
+        elif upper_cmd[-1:] == "R" or upper_cmd[-1:] == "N":
+            upper_cmd = upper_cmd[0:-1]
+    
+        return (upper_cmd in self.opcodes)
+    
+    def __init__(self):
+        self.opcodes = {
+            "LF": 0o400,
+            "STF": 0o401,
+            "AF": 0o402,
+            "SF": 0o403,
+            "MF": 0o404,
+            "DF": 0o405,
+            
+            "LG": 0o406,
+            "STG": 0o407,
+            "AG": 0o410,
+            "SG": 0o411,
+            "MG": 0o412,
+            "DG": 0o413,
+            
+            "LE": 0o414,
+            "STE": 0o415,
+            "LS": 0o416,
+            "STS": 0o417,
+        }
+
 def get_paren_arg(arg: str) -> str:
     spl = arg.strip().split('(')
     return spl[1].rstrip(')').strip()
@@ -606,6 +676,7 @@ class Assembler:
             AssembleAM(),
             AssembleAA(),
             AssembleBX(),
+            AssembleFPM(),
             AssembleHelper0(),
             AssembleIO(),
             AssembleData()
