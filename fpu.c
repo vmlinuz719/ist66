@@ -3,7 +3,8 @@
 
 #define F_OVRF 1    // overflow
 #define F_UNDF 2    // underflow
-#define F_ILGL 4    // illegal argument
+#define F_INSG 4    // insignificant
+#define F_ILGL 8    // illegal argument
 
 typedef struct {
     uint16_t sign_exp;
@@ -77,6 +78,98 @@ void rdc700_fnorm(rdc700_float_t *src, rdc700_float_t *dst) {
     }
     dst->sign_exp = (src->sign_exp & 0x8000) | new_exp;
     dst->signif = new_signif;
+}
+
+/*
+ * 80-bit floating-point conormalize: adjust lesser exponent
+ */
+
+void rdc700_fconorm(
+    rdc700_float_t *src, rdc700_float_t *tgt,
+    rdc700_float_t *dst_g, rdc700_float_t *dst_l
+) {
+    if (
+        is_inf(src) ||
+        is_nan(src) ||
+        is_inf(tgt) ||
+        is_nan(tgt) ||
+        (src->sign_exp & 0x7FFF) == (tgt->sign_exp & 0x7FFF)
+    ) {
+        dst_g->sign_exp = src->sign_exp;
+        dst_g->signif = src->signif;
+        dst_l->sign_exp = tgt->sign_exp;
+        dst_l->signif = tgt->signif;
+        return;
+    }
+
+    else if (is_zero(src)) {
+        dst_l->sign_exp = 0;
+        dst_l->signif = 0;
+        if (is_zero(tgt)) {
+            dst_g->sign_exp = 0;
+            dst_g->signif = 0;
+        } else {
+            dst_g->sign_exp = tgt->sign_exp;
+            dst_g->signif = tgt->signif;
+        }
+        return;
+    }
+
+    else if (is_zero(tgt)) {
+        dst_l->sign_exp = 0;
+        dst_l->signif = 0;
+        if (is_zero(src)) {
+            dst_g->sign_exp = 0;
+            dst_g->signif = 0;
+        } else {
+            dst_g->sign_exp = src->sign_exp;
+            dst_g->signif = src->signif;
+        }
+        return;
+    }
+
+    rdc700_float_t lesser;
+
+    if ((src->sign_exp & 0x7FFF) > (tgt->sign_exp & 0x7FFF)) {
+        dst_g->sign_exp = src->sign_exp;
+        dst_g->signif = src->signif;
+        lesser.sign_exp = tgt->sign_exp;
+        lesser.signif = tgt->signif;
+    } else {
+        dst_g->sign_exp = tgt->sign_exp;
+        dst_g->signif = tgt->signif;
+        lesser.sign_exp = src->sign_exp;
+        lesser.signif = src->signif;
+    }
+
+    uint16_t greater_exp = dst_g->sign_exp & 0x7FFF;
+    uint16_t lesser_exp = lesser.sign_exp & 0x7FFF;
+    uint16_t diff_exp = greater_exp - lesser_exp;
+
+    if (diff_exp > 64) {
+        // insignificant
+        dst_l->sign_exp = 0;
+        dst_l->signif = 0;
+        return;
+    }
+
+    uint64_t round_one = (lesser.signif >> (diff_exp - 1)) & 1;
+    uint64_t new_signif = (lesser.signif >> diff_exp) + round_one;
+
+    dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
+    dst_l->signif = new_signif;
+}
+
+/*
+ * 80-bit floating-point add
+ */
+
+int rdc700_fadd(
+    rdc700_float_t *src,
+    rdc700_float_t *tgt,
+    rdc700_float_t *dst
+) {
+    return 0;
 }
 
 /*
@@ -203,7 +296,7 @@ void print_rdc_float(rdc700_float_t *f) {
 
 int main(int argc, char *argv[]) {
     rdc700_float_t src = {
-        .sign_exp = 16384,
+        .sign_exp = 16387,
         .signif = 0x5000000000000000
     };
     
@@ -212,18 +305,25 @@ int main(int argc, char *argv[]) {
         .signif = 0xC000000000000000
     };
     
-    rdc700_float_t result;
-    rdc700_fmul(&src, &tgt, &result);
+    rdc700_float_t result_a, result_b;
+    rdc700_fmul(&src, &tgt, &result_a);
     
     print_rdc_float(&src);
     printf(" x ");
     print_rdc_float(&tgt);
     printf(" = ");
-    print_rdc_float(&result);
+    print_rdc_float(&result_a);
     printf(" = ");
-    rdc700_fnorm(&result, &result);
-    print_rdc_float(&result);
+    rdc700_fnorm(&result_a, &result_a);
+    print_rdc_float(&result_a);
     printf("\n");
+
+    rdc700_fconorm(&src, &tgt, &result_a, &result_b);
+    printf("(");
+    print_rdc_float(&result_a);
+    printf(", ");
+    print_rdc_float(&result_b);
+    printf(")\n");
     
     return 0;
 }
