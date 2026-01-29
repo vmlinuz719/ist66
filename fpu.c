@@ -318,6 +318,73 @@ int rdc700_fmul(
     else return 0;
 }
 
+/*
+ * 80-bit floating-point divide
+ */
+
+int rdc700_fdiv(
+    rdc700_float_t *src,
+    rdc700_float_t *tgt,
+    rdc700_float_t *dst
+) {
+    uint16_t new_sign_exp = (
+        (src->sign_exp & (1 << 15)) ^ (tgt->sign_exp & (1 << 15))
+    );
+
+    if (is_nan(src) || is_nan(tgt)) {
+        dst->sign_exp = 0x8000;
+        dst->signif = 0;
+        return F_ILGL;
+    }
+    
+    else if (is_zero(tgt)) {
+        dst->sign_exp = new_sign_exp | 0x7FFF;
+        dst->signif = 0;
+        return F_ILGL;
+    }
+    
+    else if (is_inf(src)) {
+        if (is_inf(tgt)) {
+            dst->sign_exp = new_sign_exp | 16383;
+            dst->signif = 1L << 63;
+        } else {
+            dst->sign_exp = new_sign_exp | 0x7FFF;
+            dst->signif = 0;
+        }
+        return 0;
+    }
+    
+    else if (is_inf(tgt)) {
+        dst->sign_exp = 0;
+        dst->signif = 0;
+        return 0;
+    }
+    
+    int exp_src = ((int) (src->sign_exp & 0x7FFF)) - 16383;
+    int exp_tgt = ((int) (tgt->sign_exp & 0x7FFF)) - 16383;
+    
+    unsigned __int128 a = src->signif, b = tgt->signif;
+    a <<= 63;
+    unsigned __int128 c_lll = a / b;
+    uint64_t c = c_lll & 0xFFFFFFFFFFFFFFFF;
+    
+    int exp_dst = exp_src - exp_tgt;
+    if (exp_dst < -16382) {
+        dst->sign_exp = 0;
+        dst->signif = 0;
+        return F_UNDF;
+    } else if (exp_dst > 16383) {
+        exp_dst = 16384;
+    }
+    
+    new_sign_exp |= ((uint16_t) (exp_dst + 16383));
+    dst->sign_exp = new_sign_exp;
+    dst->signif = c;
+
+    if (exp_dst == 16384) return F_OVRF;
+    else return 0;
+}
+
 void print_rdc_float(rdc700_float_t *f) {
     int is_neg = f->sign_exp >> 15;
 
@@ -388,6 +455,18 @@ int main(int argc, char *argv[]) {
 
     print_rdc_float(&src);
     printf(" + ");
+    print_rdc_float(&tgt);
+    printf(" = ");
+    print_rdc_float(&result_a);
+    printf(" = ");
+    rdc700_fnorm(&result_a, &result_a);
+    print_rdc_float(&result_a);
+    printf("\n");
+    
+    rdc700_fdiv(&src, &tgt, &result_a);
+
+    print_rdc_float(&src);
+    printf(" / ");
     print_rdc_float(&tgt);
     printf(" = ");
     print_rdc_float(&result_a);
