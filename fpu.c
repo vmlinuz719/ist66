@@ -84,7 +84,7 @@ void rdc700_fnorm(rdc700_float_t *src, rdc700_float_t *dst) {
  * 80-bit floating-point conormalize: adjust lesser exponent
  */
 
-void rdc700_fconorm(
+int rdc700_fconorm(
     rdc700_float_t *src, rdc700_float_t *tgt,
     rdc700_float_t *dst_g, rdc700_float_t *dst_l
 ) {
@@ -99,7 +99,7 @@ void rdc700_fconorm(
         dst_g->signif = src->signif;
         dst_l->sign_exp = tgt->sign_exp;
         dst_l->signif = tgt->signif;
-        return;
+        return 0;
     }
 
     else if (is_zero(src)) {
@@ -112,20 +112,17 @@ void rdc700_fconorm(
             dst_g->sign_exp = tgt->sign_exp;
             dst_g->signif = tgt->signif;
         }
-        return;
+        return 0;
     }
 
     else if (is_zero(tgt)) {
         dst_l->sign_exp = 0;
         dst_l->signif = 0;
-        if (is_zero(src)) {
-            dst_g->sign_exp = 0;
-            dst_g->signif = 0;
-        } else {
-            dst_g->sign_exp = src->sign_exp;
-            dst_g->signif = src->signif;
-        }
-        return;
+
+        dst_g->sign_exp = src->sign_exp;
+        dst_g->signif = src->signif;
+
+        return 0;
     }
 
     rdc700_float_t lesser;
@@ -150,7 +147,7 @@ void rdc700_fconorm(
         // insignificant
         dst_l->sign_exp = 0;
         dst_l->signif = 0;
-        return;
+        return F_INSG;
     }
 
     uint64_t round_one = (lesser.signif >> (diff_exp - 1)) & 1;
@@ -158,6 +155,8 @@ void rdc700_fconorm(
 
     dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
     dst_l->signif = new_signif;
+
+    return 0;
 }
 
 /*
@@ -169,6 +168,72 @@ int rdc700_fadd(
     rdc700_float_t *tgt,
     rdc700_float_t *dst
 ) {
+    if (is_nan(src) || is_nan(tgt)) {
+        dst->sign_exp = 0x8000;
+        dst->signif = 0;
+        return F_ILGL;
+    }
+
+    else if (is_zero(src)) {
+        dst->sign_exp = tgt->sign_exp;
+        dst->signif = tgt->signif;
+        return 0;
+    }
+
+    else if (is_zero(tgt)) {
+        dst->sign_exp = src->sign_exp;
+        dst->signif = src->signif;
+        return 0;
+    }
+
+    else if (is_inf(src)) {
+        if (is_inf(tgt)) {
+            if ((src->sign_exp & 0x8000) != (tgt->sign_exp & 0x8000)) {
+                dst->sign_exp = 0;
+                dst->signif = 0;
+            } else {
+                dst->sign_exp = src->sign_exp;
+                dst->signif = 0;
+            }
+        } else {
+            dst->sign_exp = src->sign_exp;
+            dst->signif = src->signif;
+        }
+        return 0;
+    }
+
+    else if (is_inf(tgt)) {
+        dst->sign_exp = tgt->sign_exp;
+        dst->signif = tgt->signif;
+        return 0;
+    }
+
+    rdc700_float_t a, b;
+    int insignificant = rdc700_fconorm(src, tgt, &a, &b);
+    if (insignificant) {
+        dst->sign_exp = a.sign_exp;
+        dst->signif = a.signif;
+        return F_INSG;
+    }
+
+    rdc700_float_t *greater = (a.signif > b.signif) ? &a : &b;
+    rdc700_float_t *lesser = (a.signif > b.signif) ? &b : &a;
+    int carry = 0;
+    if ((src->sign_exp & 0x8000) == (tgt->sign_exp & 0x8000)) {
+        dst->signif = greater->signif + lesser->signif;
+        carry = (dst->signif < greater->signif);
+    } else {
+        dst->signif = greater->signif - lesser->signif;
+    }
+    if (carry) {
+        uint64_t round_one = dst->signif & 1;
+        dst->signif = ((dst->signif >> 1) | (1L << 63)) + round_one;
+        dst->sign_exp = greater->sign_exp + 1;
+        if ((dst->sign_exp & 0x7FFF) == 0x7FFF) return F_OVRF;
+    } else {
+        dst->sign_exp = greater->sign_exp;
+    }
+
     return 0;
 }
 
@@ -189,7 +254,7 @@ int rdc700_fmul(
     rdc700_float_t *dst
 ) {
     uint16_t new_sign_exp = (
-        (src->sign_exp & (1 << 15)) ^ (src->sign_exp & (1 << 15))
+        (src->sign_exp & (1 << 15)) ^ (tgt->sign_exp & (1 << 15))
     );
 
     if (is_nan(src) || is_nan(tgt)) {
@@ -199,8 +264,8 @@ int rdc700_fmul(
     }
 
     else if (
-        (is_zero(src) && is_inf(dst)) ||
-        (is_inf(src) && is_zero(dst))
+        (is_zero(src) && is_inf(tgt)) ||
+        (is_inf(src) && is_zero(tgt))
     ) {
         dst->sign_exp = 0x8000;
         dst->signif = 0;
@@ -214,6 +279,7 @@ int rdc700_fmul(
     }
 
     else if (is_inf(src) || is_inf(tgt)) {
+        printf("infinity\n");
         new_sign_exp |= 0x7FFF;
         dst->sign_exp = new_sign_exp;
         dst->signif = 0;
@@ -296,16 +362,16 @@ void print_rdc_float(rdc700_float_t *f) {
 
 int main(int argc, char *argv[]) {
     rdc700_float_t src = {
-        .sign_exp = 16387,
-        .signif = 0x5000000000000000
+        .sign_exp = 16384,
+        .signif = 0x8000000000000000
     };
     
     rdc700_float_t tgt = {
-        .sign_exp = 16384,
+        .sign_exp = 16384, // + 32768,
         .signif = 0xC000000000000000
     };
     
-    rdc700_float_t result_a, result_b;
+    rdc700_float_t result_a;
     rdc700_fmul(&src, &tgt, &result_a);
     
     print_rdc_float(&src);
@@ -318,12 +384,19 @@ int main(int argc, char *argv[]) {
     print_rdc_float(&result_a);
     printf("\n");
 
-    rdc700_fconorm(&src, &tgt, &result_a, &result_b);
-    printf("(");
+    rdc700_fadd(&src, &tgt, &result_a);
+
+    print_rdc_float(&src);
+    printf(" + ");
+    print_rdc_float(&tgt);
+    printf(" = ");
     print_rdc_float(&result_a);
-    printf(", ");
-    print_rdc_float(&result_b);
-    printf(")\n");
+    printf(" = ");
+    rdc700_fnorm(&result_a, &result_a);
+    print_rdc_float(&result_a);
+    printf("\n");
+
+
     
     return 0;
 }
