@@ -2,14 +2,49 @@
 #define _FMATH_
 
 #include <stdint.h>
-#include "softfloat_types.h"
 
-void ist66f_to_extF80M(uint64_t x, uint64_t y, extFloat80_t *z);
-int extF80M_to_ist66f72(extFloat80_t *x, uint64_t *y, uint64_t *z);
-int extF80M_to_ist66f36(extFloat80_t *x, uint64_t *y, int rnd);
+#define F_OVRF 1    // overflow
+#define F_UNDF 2    // underflow
+#define F_INSG 4    // insignificant
+#define F_ILGL 8    // illegal argument
 
-uint64_t exp15_to_i36(uint16_t exp);
-uint16_t i36_to_exp15(uint64_t exp);
+typedef struct {
+    uint16_t sign_exp;
+    uint64_t signif;
+} rdc700_float_t;
+
+int is_nan(rdc700_float_t *n);
+
+int is_inf(rdc700_float_t *n);
+
+int is_zero(rdc700_float_t *n);
+
+void rdc700_fnorm(rdc700_float_t *src, rdc700_float_t *dst);
+
+int rdc700_fconorm(
+    rdc700_float_t *src, rdc700_float_t *tgt,
+    rdc700_float_t *dst_g, rdc700_float_t *dst_l
+);
+
+int rdc700_fadd(
+    rdc700_float_t *src,
+    rdc700_float_t *tgt,
+    rdc700_float_t *dst
+);
+
+int rdc700_fmul(
+    rdc700_float_t *src,
+    rdc700_float_t *tgt,
+    rdc700_float_t *dst
+);
+
+int rdc700_fdiv(
+    rdc700_float_t *src,
+    rdc700_float_t *tgt,
+    rdc700_float_t *dst
+);
+
+void print_rdc_float(rdc700_float_t *f);
 
 #endif
 

@@ -1,15 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
-
-#define F_OVRF 1    // overflow
-#define F_UNDF 2    // underflow
-#define F_INSG 4    // insignificant
-#define F_ILGL 8    // illegal argument
-
-typedef struct {
-    uint16_t sign_exp;
-    uint64_t signif;
-} rdc700_float_t;
+#include "fpu.h"
 
 /*
  * RDC-700 floating point format
@@ -427,6 +418,7 @@ void print_rdc_float(rdc700_float_t *f) {
     printf("%c%d.%s(2^%d)", is_neg ? '-' : 0, whole, frac_print, exp);
 }
 
+/*
 int main(int argc, char *argv[]) {
     rdc700_float_t src = {
         .sign_exp = 16384,
@@ -479,3 +471,4 @@ int main(int argc, char *argv[]) {
     
     return 0;
 }
+*/

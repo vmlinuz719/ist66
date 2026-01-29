@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#include "softfloat_types.h"
+#include "fpu.h"
 
 #define MASK_ADDR 0x7FFFFFFL
 #define C_PSW 0
@@ -49,7 +49,7 @@ struct ist66_cu {
     uint64_t a[16]; // accumulators
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
     uint64_t inst;
-    extFloat80_t f[16];
+    rdc700_float_t f[16];
     seg_cache_t seg_cache[32], tlb[32];
     uint64_t stop_code;
     

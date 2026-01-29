@@ -16,8 +16,6 @@
 #include "tty.h"
 #include "panel.h"
 
-#include "softfloat.h"
-
 seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
     uint8_t cache_row = selector & 0x1F;
     uint8_t cache_key = selector >> 5;
