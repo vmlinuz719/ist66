@@ -457,6 +457,236 @@ ENUMDONE DW      0
          BRM
 
         ****************************************************************
+        * XPASS - test that always passes
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+XPASS    DW      0
+         XA      0,0
+         BRM
+
+        ****************************************************************
+        * XFAIL - test that always fails
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+XFAIL    DW      0
+         L       .OK
+         BRM
+
+        ****************************************************************
+        * MATHTST0 - basic ALU math test
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+MATHTST0 USING   3,4
+
+         XA      4,4
+         L       3,.CMA_0
+         
+         LA      0,0,CC,TCN                     0: clear carry flag
+         B       .MT0_FAIL
+         IA      4,4
+         
+         LA      0,0,SC,TCZ                     1: set carry flag
+         B       .MT0_FAIL
+         IA      4,4
+         
+         LA      0,0,CMC,TCN                    2: flip carry flag
+         B       .MT0_FAIL
+         IA      4,4
+         
+         LA      0,0,CMC,TCZ                    3: flip carry flag
+         B       .MT0_FAIL
+         IA      4,4
+
+         L       .CMA_0                         4: CMA(-1) == 0
+         CMA     0,3,TRN
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_0                         5: NA(-1) == 1
+         NA      0,3
+         A       3,.CMA_0
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_0                         6: IA(-1) == 0
+         IA      0,3,CC,TRN                        + carry set
+         B       .MT0_FAIL
+         TCZ
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_0                         7: IA(-1) == 0
+         IA      0,3,TCN                           + carry invert
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_LO                        8: ACA(CMA_LO,CMA_LO)
+         L       3,.CMA_LO                         == -1
+         ACA     0,3
+         IA      3,3,TRN
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_LO                        -> CMA_0 - CMA_LO
+         L       3,.CMA_0                          == CMA_HI
+         SA      0,3,CC,TCZ                        + carry set
+         B       .MT0_FAIL                      9: correct carry
+         IA      4,4                            A: correct value
+         S       3,.CMA_HI
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_0                         -> CMA_0 - CMA_0
+         L       3,.CMA_0                          == 0
+         SA      0,3,CC,TCZ                        + carry set
+         B       .MT0_FAIL                      B: correct carry
+         IA      4,4                            C: correct value
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_0                         -> CMA_LO - CMA_0
+         L       3,.CMA_LO                         == CMA_LO + 1
+         SA      0,3,CC,TCN                        + carry clear
+         B       .MT0_FAIL                      D: correct carry
+         IA      4,4                            E: correct value
+         A       3,.CMA_0
+         S       3,.CMA_LO
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_HI                        -> CMA_LO + CMA_HI + 1
+         L       3,.CMA_LO                         == 0
+         IA      3,3                               + carry set
+         AA      0,3,CC,TCZ                     F: correct carry
+         B       .MT0_FAIL                      10: correct value
+         IA      4,4
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       3,.CMA_0                       11: AND all together
+         L       .CMA_LO
+         L       2,.CMA_HI
+         ANA     0,3
+         ANA     2,3,TRN
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       3,.CMA_0                       12: (X)OR all together
+         L       .CMA_LO
+         L       2,.CMA_HI
+         OA      0,2
+         XA      0,3
+         S       3,.CMA_HI
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       3,.CMA_0                       -> mask clear left
+         LA      3,3,CC,M(18),TCN               13: correct carry
+         B       .MT0_FAIL                      14: correct value
+         IA      4,4
+         S       3,.CMA_LO
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+
+         L       3,.CMA_LO                      -> mask set left
+         LA      3,3,SC,M(18),TCZ               15: correct carry
+         B       .MT0_FAIL                      16: correct value
+         IA      4,4
+         IA      3,3,TRN
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       3,.CMA_0                       -> mask clear right
+         LA      3,3,CC,MR(18),TCN              17: correct carry
+         B       .MT0_FAIL                      18: correct value
+         IA      4,4
+         S       3,.CMA_HI
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       3,.CMA_HI                      -> mask set right
+         LA      3,3,SC,MR(18),TCZ              19: correct carry
+         B       .MT0_FAIL                      1A: correct value
+         IA      4,4
+         IA      3,3,TRN
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       3,.CMA_HI                      1B: rotate left
+         LA      3,3,SC,R(18),M(18)
+         IA      3,3,TRN
+         B       .MT0_FAIL
+         IA      4,4
+
+         L       3,.CMA_LO                      -> rotate carry
+         LA      3,3,CC,R(19),MR(1)             1C: correct carry
+         LA      3,3,SC,RC(18),TCN              1D: correct value
+         B       .MT0_FAIL
+         IA      4,4
+         A       3,.CMA_HI
+         IA      3,3,TRN
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_LO                        1E: dest/shift
+         L       2,.CMA_LO
+         AA      0,2,CC,R(17),D(3)
+         S       3,.CMA_HI
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+         
+         L       .CMA_HI                        1F: dest/shift right
+         AA      0,0,CC,RR(19),D(3)
+         IA      3,3,TRN
+         B       .MT0_FAIL
+         IA      4,4
+         
+         XA      3,3                            20: immediate
+         AA      3,3,I(511)
+         R       3,9
+         AA      3,3,I(511)
+         S       3,.CMA_LO
+         TRN     3
+         B       .MT0_FAIL
+         IA      4,4
+
+         XA      0,0
+         BRM
+         
+MT0_FAIL LA      4,0
+         BRM
+
+CMA_0    DW      0777777777777
+CMA_LO   DW      0777777
+CMA_HI   DW      0777777000000
+
+        ****************************************************************
+        * MATHTST1 - multiplication/division test
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+MATHTST1 USING   3,4
+
+         XA      4,4
+         
+         
+         
+         XA      0,0
+         BRM
+
+        ****************************************************************
 
 START    LX      13,STACK
 
@@ -503,6 +733,90 @@ MEMTEST  XA      0,0
          BSM     .WRITELD
          
         ****************************************************************
+        * Start executing the test battery
+        *
+        
+         LX      .BATTERY
+         O       .INCPTR
+         ST      1-
+         
+         AX      13,-8
+         LX      8
+         ST      0(13)
+         
+        ****************************************************************
+        * Left-pad buffer    0(13)
+        * Number buffer      4(13)
+        * Battery index      8(13), R8
+        *
+         
+         XA      8,8
+         
+BATT_RUN L       7,@8(13)
+         TRZ     7
+         B       .BATTDONE
+         
+         LX      3,4(13)
+         LA      8,4
+         LX      5,10
+         BSM     .NUM2LD
+         
+         IA      8,8
+         
+         LX      3,4(13)
+         LX      4,0(13)
+         LX      5,040
+         BSM     .LEFT_PAD
+         
+         LX      3,0(13)
+         BSM     .WRITELD
+         
+         LX      3,.TEST_TAB
+         BSM     .WRITELD
+         
+         BSM     0(7)
+         
+         TACN
+         B       .TESTFAIL
+         
+         LX      3,.PASS
+         BSM     .WRITELD
+         
+         B       .BATT_RUN
+
+TESTFAIL LA      0,7
+         LX      3,.FAIL
+         BSM     .WRITELD
+         
+         LX      9
+         ST      0(13)
+         
+         LX      3,4(13)
+         LA      7,4
+         LX      5,16
+         BSM     .NUM2LD
+         
+         LX      3,4(13)
+         LX      4,0(13)
+         LX      5,060
+         BSM     .LEFT_PAD
+         
+         LX      3,0(13)
+         BSM     .WRITELD
+         
+         LX      3,.CRLF
+         BSM     .WRITELD
+         
+         LX      8
+         ST      0(13)
+         
+         B       .BATT_RUN
+
+BATTDONE AX      13,9
+         LX      3,.CRLF
+         BSM     .WRITELD
+
+        ****************************************************************
         * Self-test complete, start the MCL interpreter (TODO)
         *
          
@@ -545,6 +859,15 @@ BANNER1  DW      11
          ASCII   RDC-700/E1\040
 BANNER2  DW      12
          ASCII   W ONLINE\015\012\015\012
+
+PASS     DW      6
+         ASCII   PASS\015\012
+FAIL     DW      8
+         ASCII   FAIL\040\040\040\040
+TEST_TAB DW      8
+         ASCII   ...\040\040\040\040\040
+
+BATTERY  DW      XPASS,XFAIL,MATHTST0,MATHTST1,0
 
         ****************************************************************
 
