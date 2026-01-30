@@ -393,8 +393,14 @@ void print_rdc_float(rdc700_float_t *f) {
 
     int exp = ((int) (f->sign_exp & 0x7FFF)) - 16383;
     
-    int whole = f->signif >> 63;
+    uint64_t whole = f->signif >> 63;
     uint64_t frac = f->signif << 1;
+    
+    if (0 <= exp && exp <= 63) {
+        whole = f->signif >> (63 - exp);
+        frac = f->signif << (exp + 1);
+        exp = 0;
+    }
     
     uint64_t frac_digit = 5000000000000000000;
     uint64_t frac_out = 0;
@@ -416,10 +422,10 @@ void print_rdc_float(rdc700_float_t *f) {
     }
     frac_print[last_nonzero + 1] = 0;
     
-    printf("%c%d.%s(2^%d)", is_neg ? '-' : 0, whole, frac_print, exp);
+    printf("%c%lu.%s(2^%d)", is_neg ? '-' : 0, whole, frac_print, exp);
 }
 
-/*
+
 int main(int argc, char *argv[]) {
     rdc700_float_t src = {
         .sign_exp = 16384,
@@ -472,4 +478,3 @@ int main(int argc, char *argv[]) {
     
     return 0;
 }
-*/
