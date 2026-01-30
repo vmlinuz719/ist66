@@ -673,6 +673,18 @@ CMA_LO   DW      0777777
 CMA_HI   DW      0777777000000
 
         ****************************************************************
+        * MATHTST1 - multiplication/division test
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+MATHTST1 USING   3,4
+
+         XA      4,4
+         
+         XA      0,0
+         BRM
+
+        ****************************************************************
 
 START    LX      13,STACK
 
@@ -853,7 +865,7 @@ FAIL     DW      8
 TEST_TAB DW      8
          ASCII   ...\040\040\040\040\040
 
-BATTERY  DW      XPASS,XFAIL,MATHTST0,0
+BATTERY  DW      XPASS,XFAIL,MATHTST0,MATHTST1,0
 
         ****************************************************************
 

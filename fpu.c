@@ -355,9 +355,10 @@ int rdc700_fdiv(
     int exp_tgt = ((int) (tgt->sign_exp & 0x7FFF)) - 16383;
     
     unsigned __int128 a = src->signif, b = tgt->signif;
-    a <<= 63;
+    a <<= 64;
     unsigned __int128 c_lll = a / b;
-    uint64_t c = c_lll & 0xFFFFFFFFFFFFFFFF;
+    uint64_t c = (c_lll >> 1) & 0xFFFFFFFFFFFFFFFF;
+    if ((c_lll & 1)) c++;
     
     int exp_dst = exp_src - exp_tgt;
     if (exp_dst < -16382) {
