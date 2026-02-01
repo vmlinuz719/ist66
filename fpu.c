@@ -128,6 +128,34 @@ int get_f36(rdc700_float_t *src, uint64_t *dst) {
     return 0;
 }
 
+void set_f36(uint64_t *src, rdc700_float_t *dst) {
+    if (*src == 0) {
+        dst->sign_exp = 0;
+        dst->signif = 0;
+        return;
+    }
+
+    else if (
+        (*src & 0xFF8000000) == 0x800000000 || ( // true NaN
+            ((*src & 0xFF8000000) == 0) && // pseudo NaN
+            ((*src & 0x7FFFFFF) != 0)
+        )
+    ) {
+        dst->sign_exp = 0x8000;
+        dst->signif = 0;
+        return;
+    }
+
+    dst->sign_exp = (*src & 0x800000000) ? 0x8000 : 0;
+    uint64_t new_exp = (*src & 0x7F8000000) >> 27;
+    if (new_exp == 0x1FF) {
+        dst->sign_exp |= 0x7FFF;
+    } else if (new_exp != 0) {
+        dst->sign_exp |= new_exp + 16256;
+    }
+    dst->signif = *src << 37;
+}
+
 int get_f72(rdc700_float_t *src, uint64_t *dst, uint64_t *dst_l) {
     if (is_nan(src)) {
         *dst = 0x800000000;
@@ -157,6 +185,37 @@ int get_f72(rdc700_float_t *src, uint64_t *dst, uint64_t *dst_l) {
     *dst = result;
     *dst_l = (src->signif >> 1) & 0xFFFFFFFFF;
     return 0;
+}
+
+void set_f72(uint64_t *src, uint64_t *src_l, rdc700_float_t *dst) {
+    if (*src == 0 && *src_l == 0) {
+        dst->sign_exp = 0;
+        dst->signif = 0;
+        return;
+    }
+
+    else if (
+        (*src & 0xFF8000000) == 0x800000000 || ( // true NaN
+            ((*src & 0xFF8000000) == 0) && ( // pseudo NaN
+                ((*src & 0x7FFFFFF) != 0) ||
+                (*src_l != 0)
+            )
+        )
+    ) {
+        dst->sign_exp = 0x8000;
+        dst->signif = 0;
+        return;
+    }
+
+    dst->sign_exp = (*src & 0x800000000) ? 0x8000 : 0;
+    uint64_t new_exp = (*src & 0x7F8000000) >> 27;
+    if (new_exp == 0x1FF) {
+        dst->sign_exp |= 0x7FFF;
+    } else if (new_exp != 0) {
+        dst->sign_exp |= new_exp + 16256;
+    }
+    dst->signif = *src << 37;
+    dst->signif |= *src_l << 1;
 }
 
 /*
