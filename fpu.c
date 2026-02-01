@@ -20,7 +20,7 @@
  *  Any Range Nonzero Numeric value
  */
 
-int f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst) {
+int rdc_f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst) {
     uint16_t exp = src->sign_exp & 0x7FFF;
     if (exp < (1 + 16383 - 127)) {
         dst->sign_exp = 0;
@@ -47,6 +47,36 @@ int f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst) {
 
     dst->sign_exp = exp | (src->sign_exp & 0x8000);
     dst->signif = new_signif << 37;
+    return 0;
+}
+
+int rdc_f80_round_to_f72(rdc700_float_t *src, rdc700_float_t *dst) {
+    uint16_t exp = src->sign_exp & 0x7FFF;
+    if (exp < (1 + 16383 - 127)) {
+        dst->sign_exp = 0;
+        dst->signif = 0;
+        return F_UNDF;
+    }
+    else if (exp > (254 + 16383 - 127)) {
+        dst->sign_exp = src->sign_exp | 0x7FFF;
+        dst->signif = 0;
+        return F_OVRF;
+    }
+
+    int round_one = src->signif & 1;
+    uint64_t new_signif = (src->signif >> 1) + round_one;
+    if ((new_signif & (1L << 63))) {
+        exp++;
+        if (exp > (254 + 16383 - 127)) {
+            dst->sign_exp = src->sign_exp | 0x7FFF;
+            dst->signif = 0;
+            return F_OVRF;
+        }
+        new_signif = (new_signif >> 1) + (new_signif & 1);
+    }
+
+    dst->sign_exp = exp | (src->sign_exp & 0x8000);
+    dst->signif = new_signif << 1;
     return 0;
 }
 
