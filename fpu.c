@@ -601,7 +601,7 @@ void print_rdc_float(rdc700_float_t *f) {
     printf("%c%lu.%s(2^%d)", is_neg ? '-' : 0, whole, frac_print, exp);
 }
 
-
+/*
 int main(int argc, char *argv[]) {
     rdc700_float_t src = {
         .sign_exp = 16384,
@@ -654,3 +654,4 @@ int main(int argc, char *argv[]) {
     
     return 0;
 }
+*/

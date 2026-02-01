@@ -1197,6 +1197,187 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
+    if ((cpu->c[C_FCW] & 4) == 0) {
+        do_except(cpu, X_NFPU);
+        return;
+    }
+
+    uint64_t ea = comp_mr(cpu, inst);
+    uint64_t ac = ((inst >> 23) & 0x3) | ((cpu->c[C_FCW] & 3) << 2);
+
+    int normalize = !!(inst & (1 << 26));
+    int round = !!(inst & (1 << 25));
+
+    if (ea == MEM_FAULT) {
+        do_except(cpu, X_MEMX);
+        return;
+    } else if (ea == KEY_FAULT) {
+        do_except(cpu, X_PPFR);
+        return;
+    }
+
+    switch ((inst >> 27) & 0x1FF) {
+        case 0400: { // LF
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+
+            set_f36(&data, &cpu->f[ac]);
+            if (normalize) {
+                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+            }
+
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
+        case 0401: { // STF
+            int status = 0;
+            uint64_t result;
+            rdc700_float_t temp = {
+                .sign_exp = cpu->f[ac].sign_exp,
+                .signif = cpu->f[ac].signif
+            };
+            if (normalize) {
+                rdc700_fnorm(&temp, &temp);
+            }
+            if (round) {
+                status |= f80_round_to_f36(&temp, &temp);
+            }
+            status |= get_f36(&temp, &result);
+
+            uint64_t w_res =
+            write_mem(cpu, cpu->c[C_PSW] >> 28, ea, result);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+
+            cpu->a[2] |= status;
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
+        case 0402: { // AF
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+
+            rdc700_float_t temp;
+            set_f36(&data, &temp);
+            int status = rdc700_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
+
+            if (normalize) {
+                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+            }
+            if (round) {
+                status |= f80_round_to_f36(&cpu->f[ac], &cpu->f[ac]);
+            }
+
+            cpu->a[2] |= status;
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
+        case 0403: { // SF
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+            data ^= 1L << 35;
+
+            rdc700_float_t temp;
+            set_f36(&data, &temp);
+            int status = rdc700_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
+
+            if (normalize) {
+                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+            }
+            if (round) {
+                status |= f80_round_to_f36(&cpu->f[ac], &cpu->f[ac]);
+            }
+
+            cpu->a[2] |= status;
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
+        case 0404: { // MF
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+
+            rdc700_float_t temp;
+            set_f36(&data, &temp);
+            int status = rdc700_fmul(&cpu->f[ac], &temp, &cpu->f[ac]);
+
+            if (normalize) {
+                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+            }
+            if (round) {
+                status |= f80_round_to_f36(&cpu->f[ac], &cpu->f[ac]);
+            }
+
+            cpu->a[2] |= status;
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
+        case 0405: { // DF
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+
+            rdc700_float_t temp;
+            set_f36(&data, &temp);
+            int status = rdc700_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
+
+            if (normalize) {
+                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+            }
+            if (round) {
+                status |= f80_round_to_f36(&cpu->f[ac], &cpu->f[ac]);
+            }
+
+            cpu->a[2] |= status;
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
+        default: {
+            // Illegal
+            do_except(cpu, X_INST);
+        }
+    }
+}
+
 void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ac = (inst >> 23) & 0xF;
     uint64_t ix = (inst >> 18) & 0xF;
