@@ -13,6 +13,11 @@ typedef struct {
     uint64_t signif;
 } rdc700_float_t;
 
+int f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst);
+int f80_round_to_f72(rdc700_float_t *src, rdc700_float_t *dst);
+int get_f36(rdc700_float_t *src, uint64_t *dst);
+int get_f72(rdc700_float_t *src, uint64_t *dst, uint64_t *dst_l);
+
 int is_nan(rdc700_float_t *n);
 
 int is_inf(rdc700_float_t *n);

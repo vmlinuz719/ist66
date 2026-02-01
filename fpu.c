@@ -20,7 +20,7 @@
  *  Any Range Nonzero Numeric value
  */
 
-int rdc_f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst) {
+int f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst) {
     uint16_t exp = src->sign_exp & 0x7FFF;
     if (exp < (1 + 16383 - 127)) {
         dst->sign_exp = 0;
@@ -50,7 +50,7 @@ int rdc_f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst) {
     return 0;
 }
 
-int rdc_f80_round_to_f72(rdc700_float_t *src, rdc700_float_t *dst) {
+int f80_round_to_f72(rdc700_float_t *src, rdc700_float_t *dst) {
     uint16_t exp = src->sign_exp & 0x7FFF;
     if (exp < (1 + 16383 - 127)) {
         dst->sign_exp = 0;
@@ -100,6 +100,63 @@ int is_zero(rdc700_float_t *n) {
     return (
         !is_nan(n) && !is_inf(n) && (n->signif == 0)
     );
+}
+
+int get_f36(rdc700_float_t *src, uint64_t *dst) {
+    if (is_nan(src)) {
+        *dst = 0x800000000;
+        return 0;
+    }
+    else if (is_inf(src)) {
+        *dst = ((src->sign_exp & 0x8000) ? 0x800000000 : 0) + 0x7F8000000;
+        return 0;
+    }
+
+    int exp_src = ((int) (src->sign_exp & 0x7FFF)) - 16383;
+    if (exp_src > 127) {
+        *dst = ((src->sign_exp & 0x8000) ? 0x800000000 : 0) + 0x7F8000000;
+        return F_OVRF;
+    } else if (exp_src < -126) {
+        *dst = 0;
+        return F_UNDF;
+    }
+
+    uint64_t result = ((uint64_t) (exp_src + 127)) << 27;
+    result |= ((src->sign_exp & 0x8000) ? 0x800000000 : 0);
+    result |= src->signif >> 37;
+    *dst = result;
+    return 0;
+}
+
+int get_f72(rdc700_float_t *src, uint64_t *dst, uint64_t *dst_l) {
+    if (is_nan(src)) {
+        *dst = 0x800000000;
+        *dst_l = 0;
+        return 0;
+    }
+    else if (is_inf(src)) {
+        *dst = ((src->sign_exp & 0x8000) ? 0x800000000 : 0) + 0x7F8000000;
+        *dst_l = 0;
+        return 0;
+    }
+
+    int exp_src = ((int) (src->sign_exp & 0x7FFF)) - 16383;
+    if (exp_src > 127) {
+        *dst = ((src->sign_exp & 0x8000) ? 0x800000000 : 0) + 0x7F8000000;
+        *dst_l = 0;
+        return F_OVRF;
+    } else if (exp_src < -126) {
+        *dst = 0;
+        *dst_l = 0;
+        return F_UNDF;
+    }
+
+    uint64_t result = ((uint64_t) (exp_src + 127)) << 27;
+    result |= ((src->sign_exp & 0x8000) ? 0x800000000 : 0);
+    result |= src->signif >> 37;
+    *dst = result;
+    *dst_l = (src->signif >> 1) & 0xFFFFFFFFF;
+    return 0;
 }
 
 /*
