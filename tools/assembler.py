@@ -241,11 +241,11 @@ class AssembleFPM(AssemblerModule):
         upper_cmd = card.command.strip().upper()
         
         extra_bits = 0
-        if upper_cmd[-2:] == "RN":
+        if upper_cmd[-2:] == "NR":
             extra_bits = 3
             upper_cmd = upper_cmd[0:-2]
         elif upper_cmd[-1:] == "R" or upper_cmd[-1:] == "N":
-            extra_bits = {"R": 2, "N": 1}[upper_cmd[-1:]]
+            extra_bits = {"R": 1, "N": 2}[upper_cmd[-1:]]
             upper_cmd = upper_cmd[0:-1]
         
         return [(
@@ -257,9 +257,9 @@ class AssembleFPM(AssemblerModule):
     
     def will_assemble(self, card: Card) -> bool:
         upper_cmd = card.command.strip().upper()
-        if upper_cmd[-2:] == "RN":
+        if upper_cmd[-2:] == "NR":
             upper_cmd = upper_cmd[0:-2]
-        elif upper_cmd[-1:] == "R" or upper_cmd[-1:] == "N":
+        elif upper_cmd[-1:] == "N" or upper_cmd[-1:] == "R":
             upper_cmd = upper_cmd[0:-1]
     
         return (upper_cmd in self.opcodes)
