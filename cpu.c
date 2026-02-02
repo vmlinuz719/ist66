@@ -1583,6 +1583,81 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
+        case 0414: { // LE
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+
+            int64_t exp = (int64_t) (EXT36(data));
+            if (exp < -16383) {
+                cpu->a[2] |= F_UNDF;
+                cpu->f[ac].sign_exp &= 0x8000;
+            }
+            else if (exp > 16384) {
+                cpu->a[2] |= F_OVRF;
+                cpu->f[ac].sign_exp |= 0x7FFF;
+            }
+            else {
+                cpu->f[ac].sign_exp &= 0x8000;
+                cpu->f[ac].sign_exp |= (exp + 16383) & 0x7FFF;
+            }
+
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
+        case 0415: { // STE
+            uint64_t result = cpu->f[ac].sign_exp;
+            result -= 16383;
+            result &= MASK_36;
+
+            uint64_t w_res =
+            write_mem(cpu, cpu->c[C_PSW] >> 28, ea, result);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
+        case 0416: { // LS
+            uint64_t data_h = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
+            if (data_h == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data_h == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data_h &= MASK_36;
+
+            uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1);
+            if (data == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (data == KEY_FAULT) {
+                do_except(cpu, X_PPFR);
+                return;
+            }
+            data &= MASK_36;
+
+            data |= data_h << 36;
+            data_h >>= 28;
+
+            // TODO
+
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+
         default: {
             // Illegal
             do_except(cpu, X_INST);
