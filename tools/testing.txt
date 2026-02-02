@@ -93,7 +93,7 @@ DUMP_PSW AA      7,7,I(-1)
          LX      3,.EXC_SAVE
          BSM     .DUMPREGS
          
-         LCTL    1,.HALT
+DO_HALT  LCTL    1,.HALT
          LMSK    .HALT
          HLT
          
@@ -662,9 +662,8 @@ MATHTST0 USING   3,4
          B       .MT0_FAIL
          IA      4,4
 
-         XA      0,0
-         BRM
-         
+         XA      0,0,TNV
+
 MT0_FAIL LA      4,0
          BRM
 
@@ -681,10 +680,43 @@ MATHTST1 USING   3,4
 
          XA      4,4
          
-         
+        *TO BE DETERMINED
          
          XA      0,0
          BRM
+
+        ****************************************************************
+        * FMATHTST - FPU test
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+FMATHTST USING   3,4
+
+         XA      4,4
+         
+         LCTL    2,.FPU_ON
+         
+         LF      0,.MILU_NUM
+         DFNR    0,.MILU_DEN
+         SFN     0,.PI_SINGL
+         STF     0,1-
+         L       1+
+         TACN
+         B       .FMT_FAIL
+         IA      4,4
+         
+         XA      0,0,TNV
+         
+FMT_FAIL LA      4,0
+         LCTL    2,.FPU_OFF
+         BRM
+
+FPU_ON   DW      4
+FPU_OFF  DW      0
+
+PI_SINGL DW      0200622077325
+MILU_NUM DW      0231000311020
+MILU_DEN DW      0231000077773
 
         ****************************************************************
 
@@ -731,6 +763,8 @@ MEMTEST  XA      0,0
          BSM     .WRITELD
          LX      3,.BANNER2
          BSM     .WRITELD
+         
+         AX      13,4
          
         ****************************************************************
         * Start executing the test battery
@@ -817,40 +851,11 @@ BATTDONE AX      13,9
          BSM     .WRITELD
 
         ****************************************************************
-        * Self-test complete, start the MCL interpreter (TODO)
+        * Self-test complete, exit
         *
-         
-         AX      13,4
 
-         RIO     48,0,1                         Enable keyboard
-         AX      0,256
-         WIO     48,0,1
-
-         AX      13,-35
-
-LOOP     LX      3,.PROMPT
-         BSM     .WRITELD
-         
-         LA      13,3
-         LX      4,170
-         BSM     .READLD
-         
-         SA      0,0,I(2),NL,TRZ
-         B       .DIE
-         
-         LA      13,3
-         BSM     .WRITELD
-         
-         B       .LOOP
-
-DIE      AX      13,35
-
-         RIO     48,0,1                         Disable keyboard
-         AX      0,-256
-         WIO     48,0,1
-         
          L       .OK
-         B       -1
+         B       .DO_HALT
 
 OK       DW      0631463146314
 ZERO     DW      0
@@ -867,7 +872,8 @@ FAIL     DW      8
 TEST_TAB DW      8
          ASCII   ...\040\040\040\040\040
 
-BATTERY  DW      XPASS,XFAIL,MATHTST0,MATHTST1,0
+BATTERY  DW      XPASS,XFAIL,MATHTST0,MATHTST1
+         DW      FMATHTST,0
 
         ****************************************************************
 

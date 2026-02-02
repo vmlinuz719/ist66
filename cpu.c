@@ -1358,6 +1358,7 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
 
             rdc700_float_t temp;
             set_f36(&data, &temp);
+            rdc700_fnorm(&temp, &temp);
             int status = rdc700_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
@@ -1570,6 +1571,7 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
 
             rdc700_float_t temp;
             set_f72(&data, &data_l, &temp);
+            rdc700_fnorm(&temp, &temp);
             int status = rdc700_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
@@ -2166,6 +2168,10 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     
     else if (inst >> 27 >= 0200 && inst >> 27 < 0400) {
         exec_local_trap(cpu, inst);
+    }
+    
+    else if (inst >> 27 >= 0400 && inst >> 27 < 0420) {
+        exec_fm(cpu, inst);
     }
     
     else if (inst >> 27 == 0640) {

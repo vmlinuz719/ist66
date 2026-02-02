@@ -446,7 +446,6 @@ int rdc700_fmul(
     }
 
     else if (is_inf(src) || is_inf(tgt)) {
-        printf("infinity\n");
         new_sign_exp |= 0x7FFF;
         dst->sign_exp = new_sign_exp;
         dst->signif = 0;
@@ -650,7 +649,27 @@ int main(int argc, char *argv[]) {
     print_rdc_float(&result_a);
     printf("\n");
 
-
+    uint64_t to_float = 0x4C8000000;
+    
+    uint64_t numerator = 102928 | to_float;
+    uint64_t denominator = 32763 | to_float;
+    
+    set_f36(&numerator, &src);
+    // rdc700_fnorm(&src, &src);
+    
+    set_f36(&denominator, &tgt);
+    rdc700_fnorm(&tgt, &tgt);
+    
+    rdc700_fdiv(&src, &tgt, &result_a);
+    rdc700_fnorm(&result_a, &result_a);
+    f80_round_to_f36(&result_a, &result_a);
+    
+    print_rdc_float(&src);
+    printf(" / ");
+    print_rdc_float(&tgt);
+    printf(" = ");
+    print_rdc_float(&result_a);
+    printf("\n");
     
     return 0;
 }
