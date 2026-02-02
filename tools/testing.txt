@@ -731,6 +731,14 @@ FMATHTST USING   3,4
          B       .FMT_FAIL
          IA      4,4
          
+         LG      0,.G_TWOTHR                    Test multiplication
+         MFN     0,.F_THREE
+         SFNR    0,.F_TWO
+         STF     0,1-
+         TMN     1+
+         B       .FMT_FAIL
+         IA      4,4
+         
          XA      0,0,TNV
          
 FMT_FAIL LA      4,0
