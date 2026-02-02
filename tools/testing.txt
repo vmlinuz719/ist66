@@ -696,11 +696,38 @@ FMATHTST USING   3,4
          
          LCTL    2,.FPU_ON
          
-         LF      0,.MILU_NUM
-         DFNR    0,.MILU_DEN
-         SFN     0,.PI_SINGL
+         LF      0,.MILU_NUM                    Single precision pi
+         DFNR    0,.MILU_DEN                    using ancient Chinese
+         SFN     0,.PI_SINGL                    approximation
          STF     0,1-
          TMN     1+
+         B       .FMT_FAIL
+         IA      4,4    
+         
+         LFN     0,.F_TWO                       Test double precision
+         DFN     0,.F_THREE                     math and extended
+         STGR    0,2-                           precision load/store
+         LG      1,2+
+         STS     1,2-
+         L       1+
+         L       2,1+
+         CMA     0,0
+         CMA     2,2
+         IA      2,2,CC,TCN
+         IA      0,0
+         ST      2,1-
+         ST      1-
+         LS      2,2+
+         STE     1,1-
+         LE      2,1+
+         STG     2,2-
+         L       14,1+
+         L       15,1+
+         AGNR    2,.G_TWOTHR
+         STG     2,2-
+         L       1+
+         A       1+
+         TACN
          B       .FMT_FAIL
          IA      4,4
          
@@ -716,6 +743,9 @@ FPU_OFF  DW      0
 PI_SINGL DW      0200622077325
 MILU_NUM DW      0231000311020
 MILU_DEN DW      0231000077773
+F_TWO    DW      0231000000002
+F_THREE  DW      0231000000003
+G_TWOTHR DW      0176525252525,0252525252525
 
         ****************************************************************
 
