@@ -1653,8 +1653,61 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             data |= data_h << 36;
             data_h >>= 28;
 
-            // TODO
+            int new_sign = !!(data_h & (1 << 7));
+            if (new_sign) {
+                data_h = (~data_h) & 0xFF;
+                data = ~data;
+                if (data + 1 < data) {
+                    data_h = (data_h + 1) & 0xFF;
+                }
+                data++;
+            }
+            
+            if (data_h) {
+                cpu->a[2] |= F_OVRF;
+                cpu->f[ac].signif = 0;
+            } else {
+                cpu->f[ac].sign_exp = cpu->f[ac].sign_exp & 0x7FFF;
+                cpu->f[ac].sign_exp |= 0x8000 * new_sign;
+                cpu->f[ac].signif = data;
+            }
 
+            set_pc(cpu, get_pc(cpu) + 1);
+        } break;
+        
+        case 0417: { // STS
+            uint64_t result = 0, result_l = cpu->f[ac].signif;
+            if ((cpu->f[ac].sign_exp & 0x8000)) {
+                result = (~result) & 0xFF;
+                result_l = ~result_l;
+                if (result_l + 1 < result_l) {
+                    result = (result + 1) & 0xFF;
+                }
+                result_l++;
+            }
+            
+            result = (result << 28) | (result_l >> 36);
+            result_l &= MASK_36;
+
+            uint64_t w_res =
+            write_mem(cpu, cpu->c[C_PSW] >> 28, ea, result);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+
+            w_res = write_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1, result_l);
+            if (w_res == MEM_FAULT) {
+                do_except(cpu, X_MEMX);
+                return;
+            } else if (w_res == KEY_FAULT) {
+                do_except(cpu, X_PPFW);
+                return;
+            }
+            
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
