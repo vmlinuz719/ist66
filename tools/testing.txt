@@ -700,8 +700,7 @@ FMATHTST USING   3,4
          DFNR    0,.MILU_DEN
          SFN     0,.PI_SINGL
          STF     0,1-
-         L       1+
-         TACN
+         TMN     1+
          B       .FMT_FAIL
          IA      4,4
          
