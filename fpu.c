@@ -532,10 +532,28 @@ int rdc700_fdiv(
     unsigned __int128 a = src->signif, b = tgt->signif;
     a <<= 64;
     unsigned __int128 c_lll = a / b;
-    uint64_t c = (c_lll >> 1) & 0xFFFFFFFFFFFFFFFF;
-    if ((c_lll & 1)) c++;
+    
+    int round_one = c_lll & 1;
+    c_lll = (c_lll >> 1) + round_one;
     
     int exp_dst = exp_src - exp_tgt;
+    
+    unsigned __int128 mask = 0xFFFFFFFFFFFFFFFF;
+    mask <<= 64;
+    while ((c_lll & mask)) {
+        round_one = c_lll & 1;
+        c_lll = (c_lll >> 1);
+        exp_dst++;
+    }
+    
+    c_lll += round_one;
+    if (((c_lll >> 64) & 1)) {
+        exp_dst++;
+        c_lll = (c_lll >> 1) + (c_lll & 1);
+    }
+    
+    uint64_t c = c_lll & 0xFFFFFFFFFFFFFFFF;
+    
     if (exp_dst < -16382) {
         dst->sign_exp = 0;
         dst->signif = 0;

@@ -1358,12 +1358,14 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
 
             rdc700_float_t temp;
             set_f36(&data, &temp);
-            rdc700_fnorm(&temp, &temp);
+            // rdc700_fnorm(&temp, &temp);
+            
             int status = rdc700_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
                 rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
+            
             if (round) {
                 status |= f80_round_to_f36(&cpu->f[ac], &cpu->f[ac]);
             }
@@ -1540,6 +1542,7 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             if (normalize) {
                 rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
+            
             if (round) {
                 status |= f80_round_to_f72(&cpu->f[ac], &cpu->f[ac]);
             }
@@ -1571,7 +1574,8 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
 
             rdc700_float_t temp;
             set_f72(&data, &data_l, &temp);
-            rdc700_fnorm(&temp, &temp);
+            // rdc700_fnorm(&temp, &temp);
+            
             int status = rdc700_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
