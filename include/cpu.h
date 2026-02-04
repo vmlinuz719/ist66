@@ -53,8 +53,8 @@ struct ist66_cu {
     seg_cache_t seg_cache[32], tlb[32];
     uint64_t stop_code;
     
-    uint64_t xeq_inst, inc_addr, inc_data;
-    int do_edit, do_edsk, do_inc;
+    uint64_t xeq_inst, inc_addr, inc_data, next_stack;
+    int do_edit, do_edsk, do_inc, do_stack;
     
     uint64_t *memory;
     uint32_t mem_size;
@@ -92,6 +92,7 @@ static inline void do_intr(ist66_cu_t *cpu, int irq) {
     cpu->do_inc = 0;
     cpu->do_edit = 0;
     cpu->do_edsk = 0;
+    cpu->do_stack = 0;
 }
 
 #define X_USER      0   // unimplemented instruction

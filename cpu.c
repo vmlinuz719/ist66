@@ -427,12 +427,14 @@ uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
             ea_l = (cpu->c[C_PSW] & MASK_ADDR) + disp;
         } break;
         case 14: {
+            cpu->do_stack = 1;
             ea_l = cpu->a[13];
-            cpu->a[13] = (cpu->a[13] + disp) & MASK_36;
+            cpu->next_stack = (cpu->a[13] + disp) & MASK_36;
         } break;
         case 15: {
-            cpu->a[13] = (cpu->a[13] - disp) & MASK_36;
-            ea_l = cpu->a[13];
+            cpu->do_stack = 1;
+            cpu->next_stack = (cpu->a[13] - disp) & MASK_36;
+            ea_l = cpu->next_stack;
         } break;
         default: {
             ea_l = cpu->a[index] + disp;
@@ -2258,6 +2260,10 @@ void *run(void *vctx) {
                 do_except(cpu, X_PPFW);
             }
             cpu->do_inc = 0;
+        }
+        if (cpu->do_stack) {
+            cpu->a[13] = cpu->next_stack;
+            cpu->do_stack = 0;
         }
     } while (!cpu->exit || cpu->do_edit);
     
