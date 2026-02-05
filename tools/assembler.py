@@ -375,6 +375,79 @@ class AssembleAA(AssemblerModule):
     def will_assemble(self, card: Card) -> bool:
         return (card.command.strip().upper()[0:4] in self.opcodes)
 
+def assemble_fr_arg(arg: str) -> int:
+    def static(x):
+        return lambda y: x
+        
+    args_tbl = {
+        #       fn                bits shl extra
+
+        "NL": (static(1),        1,   22, 0         ),
+        
+        "TNV": (static(1),        3,   15, 0         ),
+        "TRL": (static(2),        3,   15, 0         ),
+        "TRG": (static(3),        3,   15, 0         ),
+        "TRN": (static(4),        3,   15, 0         ),
+        "TRZ": (static(5),        3,   15, 0         ),
+        "TINF": (static(6),        3,   15, 0         ),
+        "TNAN": (static(7),        3,   15, 0         ),
+    }
+    
+    argspl = arg.split("(")[0]
+    fn, bits, shl, extra = args_tbl[argspl.upper()]
+    return ((fn(arg.strip()[len(argspl):]) & ((1 << bits) - 1)) << shl) | extra
+
+class AssembleFR(AssemblerModule):
+    def size(self, card: Card) -> int:
+        return 1
+    
+    def assemble(
+        self,
+        card: Card,
+        symbols: dict[str, int],
+        pc: int
+    ) -> list[int]:
+        args = card.argument.strip().split(",")
+        if len(args) >= 3:
+            src = int(args[0])
+            tgt = int(args[1])
+            dst = int(args[2])
+            if src < 0 or src > 3 or tgt < 0 or tgt > 3 or dst < 0 or dst > 3:
+                raise ValueError("No such register")
+            result = (src << 20) | (tgt << 23) | (dst << 18)
+            for arg in args[3:]:
+                result |= assemble_fr_arg(arg)
+            opcode = self.opcodes[card.command.strip().upper()[0:2]]
+            ext = self.extensions[card.command.strip().upper()[2:]]
+            return [result | (opcode << 27) | ext]
+        else:
+            raise ValueError("Syntax error")
+
+        
+    def __init__(self):
+        self.opcodes = {
+            "LH": 0o440,
+            "AH": 0o441,
+            "SH": 0o442,
+            "MH": 0o443,
+            "DH": 0o444,
+        }
+        
+        self.extensions = {
+            "": 0,
+            "N": 1 << 26,
+            "F": (1 << 25),
+            "G": (1 << 25) | (1 << 14),
+            "NF": (1 << 25) | (1 << 26),
+            "NG": (1 << 25) | (1 << 14) | (1 << 26)
+        }
+
+    def will_assemble(self, card: Card) -> bool:
+        return (
+            (card.command.strip().upper()[0:2] in self.opcodes) and
+            (card.command.strip().upper()[2:] in self.extensions)
+        )
+
 class AssembleBX(AssemblerModule):
     def size(self, card: Card) -> int:
         return 1
@@ -677,6 +750,7 @@ class Assembler:
             AssembleAA(),
             AssembleBX(),
             AssembleFPM(),
+            AssembleFR(),
             AssembleHelper0(),
             AssembleIO(),
             AssembleData()
