@@ -426,11 +426,12 @@ class AssembleFR(AssemblerModule):
         
     def __init__(self):
         self.opcodes = {
-            "LH": 0o440,
-            "AH": 0o441,
-            "SH": 0o442,
-            "MH": 0o443,
-            "DH": 0o444,
+            "LL": 0o440,
+            "NL": 0o440,
+            "AL": 0o442,
+            "SL": 0o443,
+            "ML": 0o444,
+            "DL": 0o445,
         }
         
         self.extensions = {

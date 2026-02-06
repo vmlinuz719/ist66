@@ -1726,6 +1726,92 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
+void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
+    if ((cpu->c[C_FCW] & 4) == 0) {
+        do_except(cpu, X_NFPU);
+        return;
+    }
+
+    uint64_t tgt = ((inst >> 23) & 0x3) | ((cpu->c[C_FCW] & 3) << 2);
+    uint64_t src = ((inst >> 20) & 0x3) | ((cpu->c[C_FCW] & 3) << 2);
+    uint64_t dst = ((inst >> 18) & 0x3) | ((cpu->c[C_FCW] & 3) << 2);
+
+    int normalize = !!(inst & (1 << 26));
+    int round = !!(inst & (1 << 25));
+    int round_size = !!(inst & (1 << 14));
+
+    rdc700_float_t temp;
+    int status = 0;
+
+    switch ((inst >> 27) & 0x1FF) {
+        case 0440: { // LL
+            temp.sign_exp = cpu->f[src].sign_exp;
+            temp.signif = cpu->f[src].signif;
+        } break;
+        
+        case 0441: { // NL
+            temp.sign_exp = cpu->f[src].sign_exp ^ 0x8000;
+            temp.signif = cpu->f[src].signif;
+        } break;
+        
+        case 0442: { // AL
+            status = rdc700_fadd(&cpu->f[src], &cpu->f[tgt], &temp);
+        } break;
+        
+        case 0443: { // SL
+            temp.sign_exp = cpu->f[src].sign_exp ^ 0x8000;
+            temp.signif = cpu->f[src].signif;
+            status = rdc700_fadd(&temp, &cpu->f[tgt], &temp);
+        } break;
+        
+        case 0444: { // ML
+            status = rdc700_fmul(&cpu->f[src], &cpu->f[tgt], &temp);
+        } break;
+        
+        case 0445: { // DL
+            status = rdc700_fdiv(&cpu->f[src], &cpu->f[tgt], &temp);
+        } break;
+
+        default: {
+            // Illegal
+            do_except(cpu, X_INST);
+        }
+    }
+    
+    if (normalize) {
+        rdc700_fnorm(&temp, &temp);
+    }
+    if (round) {
+        if (round_size) {
+            status |= f80_round_to_f72(&temp, &temp);
+        } else {
+            status |= f80_round_to_f36(&temp, &temp);
+        }
+    }
+    
+    cpu->f[dst].signif = temp.signif;
+    cpu->f[dst].sign_exp = temp.sign_exp;
+    
+    cpu->a[2] |= status;
+    
+    int skip = 0;
+    switch ((inst >> 15) & 0x7) {
+        case 1: skip = 1;                               break;
+        case 2: skip = !(temp.sign_exp & 0x8000);       break;
+        case 3: skip = (temp.sign_exp & 0x8000);        break;
+        case 4: skip = is_zero(&temp);                  break;
+        case 5: skip = !is_zero(&temp);                 break;
+        case 6: skip = !is_inf(&temp);                  break;
+        case 7: skip = !is_nan(&temp);                  break;
+    }
+    
+    if (skip) {
+        set_pc(cpu, get_pc(cpu) + 2);
+    } else {
+        set_pc(cpu, get_pc(cpu) + 1);
+    }
+}
+
 void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t ac = (inst >> 23) & 0xF;
     uint64_t ix = (inst >> 18) & 0xF;
@@ -2178,6 +2264,10 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     
     else if (inst >> 27 >= 0400 && inst >> 27 < 0420) {
         exec_fm(cpu, inst);
+    }
+    
+    else if (inst >> 27 >= 0440 && inst >> 27 < 0450) {
+        exec_fr(cpu, inst);
     }
     
     else if (inst >> 27 == 0640) {
