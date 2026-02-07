@@ -1759,9 +1759,9 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
         } break;
         
         case 0443: { // SL
-            temp.sign_exp = cpu->f[src].sign_exp ^ 0x8000;
-            temp.signif = cpu->f[src].signif;
-            status = rdc700_fadd(&temp, &cpu->f[tgt], &temp);
+            temp.sign_exp = cpu->f[tgt].sign_exp ^ 0x8000;
+            temp.signif = cpu->f[tgt].signif;
+            status = rdc700_fadd(&cpu->f[src], &temp, &temp);
         } break;
         
         case 0444: { // ML
