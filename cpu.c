@@ -1789,8 +1789,10 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
         }
     }
     
-    cpu->f[dst].signif = temp.signif;
-    cpu->f[dst].sign_exp = temp.sign_exp;
+    if (!(inst & (1L << 22))) {
+        cpu->f[dst].signif = temp.signif;
+        cpu->f[dst].sign_exp = temp.sign_exp;
+    }
     
     cpu->a[2] |= status;
     
