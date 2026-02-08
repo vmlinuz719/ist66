@@ -459,8 +459,8 @@ START    LX      13,STACK
 
          LX      6,.BITMAP
          AX      6,-1
-         LX      4,300
-         LX      5,300
+         LX      4,30
+         LX      5,30
          BL      .MB_XYL
 
          IA      13,13

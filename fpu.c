@@ -578,9 +578,51 @@ int rdc700_fdiv(
 }
 
 void print_rdc_float(rdc700_float_t *f) {
-    /* BROKEN!!! */
+    int is_neg = f->sign_exp >> 15;
 
-    printf("% 6d %064lb", ((int) (f->sign_exp & 0x7FFF)) - 16383, f->signif);
+    if (is_inf(f)) {
+        printf("%cInfinity", is_neg ? '-' : 0);
+        return;
+    } else if (is_nan(f)) {
+        printf("%cNaN", is_neg ? 0 : 'P');
+        return;
+    } else if (f->sign_exp == 0 && f->signif == 0) {
+        printf("0.0");
+        return;
+    }
+
+    int exp = ((int) (f->sign_exp & 0x7FFF)) - 16383;
+
+    uint64_t whole = f->signif >> 63;
+    uint64_t frac = f->signif << 1;
+
+    if (0 <= exp && exp <= 63) {
+        whole = f->signif >> (63 - exp);
+        frac = f->signif << (exp + 1);
+        exp = 0;
+    }
+
+    uint64_t frac_digit = 5000000000000000000;
+    uint64_t frac_out = 0;
+
+    while (frac) {
+        if ((frac & (1L << 63))) {
+            frac_out += frac_digit;
+        }
+        frac_digit >>= 1;
+        frac <<= 1;
+    }
+
+    char frac_print[20];
+    snprintf(frac_print, 20, "%019lu", frac_out);
+    int last_nonzero = 0;
+    for (int i = 0; i < 19; i++) {
+        if (frac_print[i] == 0) break;
+        if (frac_print[i] != '0') last_nonzero = i;
+    }
+    frac_print[last_nonzero + 1] = 0;
+
+    printf("%c%lu.%s(2^%d)", is_neg ? '-' : 0, whole, frac_print, exp);
 }
 
 /*
