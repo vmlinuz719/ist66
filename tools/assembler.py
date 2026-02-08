@@ -427,7 +427,7 @@ class AssembleFR(AssemblerModule):
     def __init__(self):
         self.opcodes = {
             "LL": 0o440,
-            "NL": 0o440,
+            "NL": 0o441,
             "AL": 0o442,
             "SL": 0o443,
             "ML": 0o444,

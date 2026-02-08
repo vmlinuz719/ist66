@@ -2570,6 +2570,14 @@ int main(int argc, char *argv[]) {
             else if (cmd[i] == 'S') {
                 start_cpu(&cpu, 0);
             }
+
+            else if (cmd[i] == 'F') {
+                for (int i = 0; i < 16; i++) {
+                    printf("F%02d = ", i);
+                    print_rdc_float(&cpu.f[i]);
+                    printf("\n");
+                }
+            }
             
             else if (cmd[i] == 'T') {
                 cpu.throttle ^= 1;

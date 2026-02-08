@@ -317,11 +317,17 @@ int rdc700_fconorm(
         return F_INSG;
     }
 
-    uint64_t round_one = (lesser.signif >> (diff_exp - 1)) & 1;
-    uint64_t new_signif = (lesser.signif >> diff_exp) + round_one;
+    if (diff_exp) {
+        uint64_t round_one = (lesser.signif >> (diff_exp - 1)) & 1;
+        uint64_t new_signif = (lesser.signif >> diff_exp) + round_one;
+        dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
+        dst_l->signif = new_signif;
+    } else {
+        dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
+        dst_l->signif = lesser.signif;
+    }
 
-    dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
-    dst_l->signif = new_signif;
+
 
     return 0;
 }
@@ -689,6 +695,19 @@ int main(int argc, char *argv[]) {
     print_rdc_float(&result_a);
     printf("\n");
     
+    numerator = 7 | to_float;
+    set_f36(&numerator, &src);
+    rdc700_fnorm(&src, &src);
+    denominator = 10 | to_float;
+    set_f36(&denominator, &tgt);
+    rdc700_fnorm(&tgt, &tgt);
+    rdc700_fdiv(&src, &tgt, &result_a);
+    rdc700_fnorm(&result_a, &result_a);
+    f80_round_to_f72(&result_a, &result_a);
+    get_f72(&result_a, &numerator, &denominator);
+    printf("0%012lo,0%012lo\n", numerator, denominator);
+
     return 0;
 }
+
 */
