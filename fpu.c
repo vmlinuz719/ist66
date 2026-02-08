@@ -395,6 +395,7 @@ int rdc700_fadd(
     if ((src->sign_exp & 0x8000) == (tgt->sign_exp & 0x8000)) {
         dst->signif = greater->signif + lesser->signif;
         carry = (dst->signif < greater->signif);
+
     } else {
         dst->signif = greater->signif - lesser->signif;
     }
@@ -577,135 +578,53 @@ int rdc700_fdiv(
 }
 
 void print_rdc_float(rdc700_float_t *f) {
-    int is_neg = f->sign_exp >> 15;
+    /* BROKEN!!! */
 
-    if (is_inf(f)) {
-        printf("%cInfinity", is_neg ? '-' : 0);
-        return;
-    } else if (is_nan(f)) {
-        printf("%cNaN", is_neg ? 0 : 'P');
-        return;
-    } else if (f->sign_exp == 0 && f->signif == 0) {
-        printf("0.0");
-        return;
-    }
-
-    int exp = ((int) (f->sign_exp & 0x7FFF)) - 16383;
-    
-    uint64_t whole = f->signif >> 63;
-    uint64_t frac = f->signif << 1;
-    
-    if (0 <= exp && exp <= 63) {
-        whole = f->signif >> (63 - exp);
-        frac = f->signif << (exp + 1);
-        exp = 0;
-    }
-    
-    uint64_t frac_digit = 5000000000000000000;
-    uint64_t frac_out = 0;
-    
-    while (frac) {
-        if ((frac & (1L << 63))) {
-            frac_out += frac_digit;
-        }
-        frac_digit >>= 1;
-        frac <<= 1;
-    }
-    
-    char frac_print[20];
-    snprintf(frac_print, 20, "%lu", frac_out);
-    int last_nonzero = 0;
-    for (int i = 0; i < 19; i++) {
-        if (frac_print[i] == 0) break;
-        if (frac_print[i] != '0') last_nonzero = i;
-    }
-    frac_print[last_nonzero + 1] = 0;
-    
-    printf("%c%lu.%s(2^%d)", is_neg ? '-' : 0, whole, frac_print, exp);
+    printf("% 6d %064lb", ((int) (f->sign_exp & 0x7FFF)) - 16383, f->signif);
 }
 
 /*
 int main(int argc, char *argv[]) {
-    rdc700_float_t src = {
-        .sign_exp = 16384,
-        .signif = 0x8000000000000000
-    };
-    
-    rdc700_float_t tgt = {
-        .sign_exp = 16384, // + 32768,
-        .signif = 0xC000000000000000
-    };
-    
-    rdc700_float_t result_a;
-    rdc700_fmul(&src, &tgt, &result_a);
-    
-    print_rdc_float(&src);
-    printf(" x ");
-    print_rdc_float(&tgt);
-    printf(" = ");
-    print_rdc_float(&result_a);
-    printf(" = ");
-    rdc700_fnorm(&result_a, &result_a);
-    print_rdc_float(&result_a);
-    printf("\n");
-
-    rdc700_fadd(&src, &tgt, &result_a);
-
-    print_rdc_float(&src);
-    printf(" + ");
-    print_rdc_float(&tgt);
-    printf(" = ");
-    print_rdc_float(&result_a);
-    printf(" = ");
-    rdc700_fnorm(&result_a, &result_a);
-    print_rdc_float(&result_a);
-    printf("\n");
-    
-    rdc700_fdiv(&src, &tgt, &result_a);
-
-    print_rdc_float(&src);
-    printf(" / ");
-    print_rdc_float(&tgt);
-    printf(" = ");
-    print_rdc_float(&result_a);
-    printf(" = ");
-    rdc700_fnorm(&result_a, &result_a);
-    print_rdc_float(&result_a);
-    printf("\n");
-
+    rdc700_float_t src, tgt, result_a, result_b, result_c;
     uint64_t to_float = 0x4C8000000;
+
+    uint64_t numerator;
+    uint64_t denominator;
+
     
-    uint64_t numerator = 102928 | to_float;
-    uint64_t denominator = 32763 | to_float;
-    
+    numerator = 132 | to_float;
     set_f36(&numerator, &src);
-    // rdc700_fnorm(&src, &src);
-    
+    rdc700_fnorm(&src, &src);
+    denominator = 100 | to_float;
     set_f36(&denominator, &tgt);
     rdc700_fnorm(&tgt, &tgt);
-    
     rdc700_fdiv(&src, &tgt, &result_a);
     rdc700_fnorm(&result_a, &result_a);
-    f80_round_to_f36(&result_a, &result_a);
-    
-    print_rdc_float(&src);
-    printf(" / ");
-    print_rdc_float(&tgt);
-    printf(" = ");
-    print_rdc_float(&result_a);
-    printf("\n");
-    
+    // f80_round_to_f72(&result_a, &result_a);
+
     numerator = 7 | to_float;
     set_f36(&numerator, &src);
     rdc700_fnorm(&src, &src);
     denominator = 10 | to_float;
     set_f36(&denominator, &tgt);
     rdc700_fnorm(&tgt, &tgt);
+    rdc700_fdiv(&src, &tgt, &result_b);
+    rdc700_fnorm(&result_b, &result_b);
+    // f80_round_to_f72(&result_b, &result_b);
+
+    rdc700_fadd(&result_a, &result_b, &result_c);
+    printf("%d %lX\n", ((int) (result_c.sign_exp & 0x7FFF)) - 16383, result_c.signif);
+
+    printf("==== Should be ====\n");
+
+    numerator = 202 | to_float;
+    set_f36(&numerator, &src);
+    rdc700_fnorm(&src, &src);
+    denominator = 100 | to_float;
+    set_f36(&denominator, &tgt);
+    rdc700_fnorm(&tgt, &tgt);
     rdc700_fdiv(&src, &tgt, &result_a);
-    rdc700_fnorm(&result_a, &result_a);
-    f80_round_to_f72(&result_a, &result_a);
-    get_f72(&result_a, &numerator, &denominator);
-    printf("0%012lo,0%012lo\n", numerator, denominator);
+    printf("%d %064lb\n", ((int) (result_a.sign_exp & 0x7FFF)) - 16383, result_a.signif);
 
     return 0;
 }

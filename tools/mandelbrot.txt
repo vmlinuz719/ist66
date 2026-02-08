@@ -1,0 +1,590 @@
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+         ORIGIN  0                              EXCEPTION
+         
+EXC_VEC  DW      EXC_STUB,0
+
+         ORIGIN  20                             TTY HANDLER
+
+TTY_VEC  DW      TTY_INTR,0
+
+         ORIGIN  62                             USER SAVE
+
+USR_SAVE DW      START,0740000000000
+
+         ORIGIN  1024
+
+IPL      LX      3,.USR_RST
+         LX      4,.USR_SAVE
+         L       0(3)
+         ST      0(4)
+         L       1(3)
+         ST      1(4)
+         LCTL    1,.CW
+         RLMSK   .MASK
+
+USR_RST  DW      START,0740000000000
+
+EXC_STUB ST      13,.EXC_SPSV
+         LX      13,.EXC_STK0
+         BSM     .EXHANDLR
+         RFI     0
+
+EXHANDLR USING   0-15
+         LX      13,.EXC_STK1
+         
+         STCTL   1,1-
+         L       1+
+         LA      0,3,CC,R(12),M(32)
+         LX      4,.EXTAB
+         AA      3,4
+         L       7,0(4)
+         TRN     7
+         B       .ALT_HNDL
+         
+         LA      0,0,CC,R(8),M(32)
+         LA      0,7,R(1)
+         AX      7,34
+         AX      3,.EXCNAMES
+         L       0(3)
+         ST      1-
+         LX      4
+         ST      1-
+         
+         LX      3,.EXC_PFIX
+         BSM     .WRITELD
+         LA      13,3
+         BSM     .WRITELD
+         AX      13,2
+         LX      3,.PSL
+         BSM     .WRITELD
+         AX      13,-6                          Num buf 3(13)
+         LX      9
+         ST      0(13)                          Pad buf 0(13)
+         
+         LX      8,-2
+         
+DUMP_PSW AA      7,7,I(-1)
+         LX      3,3(13)
+         L       4,0(7)
+         LX      5,16
+         BSM     .NUM2LD
+
+         LX      3,3(13)
+         LX      4,0(13)
+         LX      5,060
+         BSM     .LEFT_PAD
+
+         LX      3,0(13)
+         BSM     .WRITELD
+         
+         IA      8,8,TRN
+         B       .DUMP_PSW
+         
+         AX      13,6
+         LX      3,CRLF
+         BSM     .WRITELD
+         LX      3,CRLF
+         BSM     .WRITELD
+         
+         L       .EXC_SPSV
+         ST      .EXC_OLDS
+         
+         LX      3,.EXC_SAVE
+         BSM     .DUMPREGS
+         
+         LCTL    1,.HALT
+         LMSK    .HALT
+         HLT
+
+DO_HALT  LCTL    1,.HALT
+         LMSK    .HALT
+         HLT
+         
+ALT_HNDL LX      3,.EXC_SAVE
+         L       .EXC_SPSV
+         ST      .EXC_OLDS
+         BSM     0(7)
+         
+         LX      13,.EXC_TOP
+         TACN
+         B       .NO_RETRY
+         BRM
+
+NO_RETRY LX      .RFI_1
+         ST      0(13)
+         BRM
+RFI_1    RFI     1
+
+HALT     DW      0
+
+EXC_SPSV BSS     1
+EXC_TOP  BSS     2
+EXC_SAVE BSS     13
+EXC_OLDS BSS     3
+EXC_STK0 BSS     0
+         BSS     128
+EXC_STK1 BSS     0
+
+EXTAB    BSS     16   
+
+CW       DW      0036000000000                  RETURN TO IRQL 15
+MASK     DW      02000                          ENABLE CONSOLE IRQ
+TTY_STAT DW      0
+
+TTY_INTR NIOC    48                             CLEAR INTR
+         ST      0,.TTY_ACSV
+         LX      0,1                            CONSOLE HAS DATA
+         ST      0,.TTY_STAT
+         L       0,.TTY_ACSV
+         RFI     0
+
+TTY_ACSV DW      0
+
+DEADBEEF DW      3735928559
+
+CRLF     DW      2
+         ASCII   \015\012
+
+REGNAMES ASCII   \000\000AC\040
+         ASCII   \040\040MQ\040
+         ASCII   \040\040XY\040
+         ASCII   \015\012X0\040
+         ASCII   \040\040X1\040
+         ASCII   \040\040X2\040
+         ASCII   \040\040X3\040
+         ASCII   \015\012X4\040
+         ASCII   \040\040X5\040
+         ASCII   \040\040X6\040
+         ASCII   \040\040X7\040
+         ASCII   \015\012AP\040
+         ASCII   \040\040LR\040
+         ASCII   \040\040SP\040
+         ASCII   \015\012TI\040
+         ASCII   \040\040TR\040
+
+EXCNAMES ASCII   USER
+         ASCII   INST
+         ASCII   MEMX
+         ASCII   DEVX
+         ASCII   PPFR
+         ASCII   PPFW
+         ASCII   PPFS
+         ASCII   TIME
+         ASCII   DIVZ
+         ASCII   NFPU
+         ASCII   ????
+         ASCII   ????
+         ASCII   ????
+         ASCII   ????
+         ASCII   MCHK
+         ASCII   PWRX
+
+EXC_PFIX DW      7
+         ASCII   \015\012EXC #
+
+PSL      DW      5
+         ASCII   \040PSL\040
+
+PROMPT   DW      4
+         ASCII   MCL>
+
+MEM_SIZE DW      0
+
+        ****************************************************************
+        * Fastcall: X0-X3 for first args, caller saved
+        *
+
+        ****************************************************************
+        * DUMPNOW - print current register contents
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+DUMPNOW  USING   0-15
+
+         LX      3,2(13)
+         BSM     .DUMPREGS
+         BRM
+
+        ****************************************************************
+        * DUMPREGS - print register contents
+        *
+        *       X0 -> input data address
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+DUMPREGS USING   7,8,9
+
+         LA      3,7
+         LX      8,.REGNAMES
+         LX      9,-16
+
+         AX      13,-6                          Num buf 3(13)
+         LX      9
+         ST      0(13)                          Pad buf 0(13)
+
+DUMPLOOP L       0(8)
+         ST      1-
+         LX      5
+         ST      1-
+         IA      8,8
+         LA      13,3
+         BSM     .WRITELD
+         AX      13,2
+
+         LX      3,3(13)
+         L       4,0(7)
+         LX      5,16
+         BSM     .NUM2LD
+
+         LX      3,3(13)
+         LX      4,0(13)
+         LX      5,040
+         BSM     .LEFT_PAD
+
+         LX      3,0(13)
+         BSM     .WRITELD
+
+         IA      7,7
+         IA      9,9,TRN
+         B       .DUMPLOOP
+
+         LX      3,.CRLF
+         BSM     .WRITELD
+         LX      3,.CRLF
+         BSM     .WRITELD
+
+         AX      13,6
+         BRM
+
+        ****************************************************************
+        * LEFT_PAD - you already know
+        *
+        *       X0 -> input buffer address
+        *       X1 -> output buffer address, must specify length
+        *       X2 -> padding character
+        *
+        *       Return -1 on failure, 0 on success
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+LEFT_PAD DW      0
+
+         L       0(4)                           Abort if input too big
+         S       0(3)
+         TACBN   1
+         BRM
+
+         TACZ                                   Copy now if no padding
+         B       .CPYINPUT
+
+         NA      0,0
+
+WRITEPAD ISTC    5,4,7
+         IA      0,0,TRN
+         B       .WRITEPAD
+
+CPYINPUT LN      0(3)                           Done if input length 0
+         TACZ
+         BRM
+
+CPYILOOP ILC     5,3,7
+         ISTC    5,4,7
+         IA      0,0,TRN
+         B       .CPYILOOP
+
+         XA      0,0
+         BRM
+
+COPYFAIL SMAC    36
+         BRM
+
+        ****************************************************************
+        * NUM2LD - convert number to string
+        *
+        *       X0 -> buffer address
+        *       X1 -> value
+        *       X2 -> base
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+NUM2LD   USING   1,2
+
+         ST      5,1-                           Set up divisor at 5
+         LA      13,5
+
+         XA      0,0                            Initialize string
+         ST      0,0(3)
+
+         LA      4,0
+
+DIV      DU      0(5)                           Grab digit and remainder
+         ST      2,1-                           Push digit
+         ITN     0(3)                           Increment string size
+         LA      1,0,TRN                        Test if done
+         B       .DIV                           Loop until zero
+
+         LA      3,5
+         LX      1,58
+
+CONVERT  L       4,1+                           Pop digits into string
+         AA      4,4,I(48)
+         TRGE    4,1
+         AA      4,4,I(7)
+         ISTC    4,3,7
+         ITNE    0,0(5)
+         B       .CONVERT
+
+         IA      13,13
+         BRM
+
+        ****************************************************************
+        * READLD - read up to n characters from the support console
+        *
+        *       X0 -> buffer address
+        *       X1 -> max chars
+        *
+        *       Returns length of input
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+READLD   USING   7,8
+
+         LA      3,7                            7: buffer
+         XA      0,0                            Clear count field
+         ST      0,0(7)
+         TRZ     7                              Don't read if count 0
+         BRM
+         NA      4,8                            8: max length
+
+         ST      7,1-                           Push head of string
+
+         B       .READLOOP
+
+IDLELOOP LX      3,.TEST_RST
+         LX      4,.TTY_STAT                    Wait for full buffer
+         BSM     .IDLE                          or crlf
+
+READLOOP RIO     48,0,2                         Get buffer count
+         LA      0,0,NL,CC,M(28),TRZ
+         B       .IDLELOOP                      Idle if no data
+
+         ITN     @0(13)                         Increment length
+         RIO     48,0,0                         Get a byte
+         ISTC    0,7,7                          Save
+
+         IA      8,8,TRN                        Is buffer full?
+         SA      0,0,NL,I(10),TRZ               Or did we get LF?
+         B       .READDONE
+
+         B       .READLOOP
+
+READDONE L       0,@1+                          Return length
+         BRM
+
+        ****************************************************************
+        * WRITELD - write a length-data string to the support console
+        *
+        *       X0 -> buffer address
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+WRITELD  DW      0
+
+         LN      4,0(3)
+         TRZ     4
+         BRM
+
+WRT_LOOP TIOBZ   48
+         B       .WRT_LOOP
+
+         ILC     0,3,7
+         WIOS    48,0,0
+         
+         IA      4,4,TRN
+         B       .WRT_LOOP
+         
+         BRM
+
+        ****************************************************************
+        * IDLE - wait until we have something to do
+        *
+        *      X0 -> test subroutine
+        *      X1, X2, X3 -> arguments to subroutine (optional, will not
+        *                    be modified by IDLE)
+        *      Return -> whatever the subroutine puts in AC
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+IDLE     USING   12
+
+         STMSK   1-                             Save interrupt mask
+
+DOIDLE   LMSK    .MASKALL                       Mask all interrupts
+
+         BL      0(3)                           Idle test callback
+         TACN
+         B       .DONTIDLE
+
+         MWAIT   0(13)                          Wait for interrupts
+         B       .DOIDLE
+
+DONTIDLE LMSK    1+                             Restore mask
+         BRM
+
+MASKALL  DW      0
+
+        ****************************************************************
+        * TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+TEST_RST L       0,0(4)
+         TACZ
+         B       .DONT_RST
+
+         ST      2,1-
+         XA      2,2
+         ST      2,0(4)
+         L       2,1+
+
+DONT_RST B       0(12)
+
+        ****************************************************************
+
+START    LX      13,STACK
+         LCTL    2,.FPU_ON
+
+        * TODO: the loop
+
+         LX      6,.BITMAP
+         AX      6,-1
+         LX      4,300
+         LX      5,300
+         BL      .MB_XYL
+
+         IA      13,13
+         LCTL    2,.FPU_OFF
+         B       .DO_HALT
+
+        ****************************************************************
+        * MB_XYL - iterate mandelbrot given hx and hy
+        *
+        * Locals from X0 (3):
+        *       0       x
+        *       2       y
+        *       4       xx (temp for x*x + y*y + cx)
+        *       6       cx
+        *       8       cy
+        *
+        * hx in X1 (4), hy in X2 (5)
+        * bitmap pointer in X3 (6)
+        *
+        * Iteration count in AC
+        *
+
+MB_XYL   AX      13,-10
+         LA      13,3
+
+         LA      4,2                            cx = (hx / xres - 0.5)
+         O       2,.INT_TO_F                         / 3 * mag - 0.7
+         ST      2,1-
+         LFN     0,1+
+         LX      2,500                          x resolution
+         O       2,.INT_TO_F
+         ST      2,1-
+         LFN     1,1+
+         DLNG    0,1,0
+         SFN     0,.F_0_5
+         DF      0,.F_MAG
+         MF      0,.F_3
+         SGNR    0,.G_0_7
+         STG     0,6(3)
+
+         LA      5,2                            cy = (hy / yres - 0.5)
+         O       2,.INT_TO_F                         / 3 * mag
+         ST      2,1-
+         LFN     0,1+
+         LX      2,500                          y resolution
+         O       2,.INT_TO_F
+         ST      2,1-
+         LFN     1,1+
+         DLNG    0,1,0
+         SFN     0,.F_0_5
+         DF      0,.F_MAG
+         MF      0,.F_3
+         STGNR   0,8(3)
+
+         XA      0,0                            x = y = 0
+         ST      0(3)
+         ST      1(3)
+         ST      2(3)
+         ST      3(3)
+
+         LX      2,100                          max iterations
+
+MB_XYL0  LG      0,0(3)                         xx = x^2 + y^2 + cx
+         MGN     0,0(3)
+         LG      1,2(3)
+         MGN     1,2(3)
+         AL      0,1,0
+         AGR     0,6(3)
+         STG     0,4(3)
+
+         LG      1,0(3)                         y = 2*x*y + cy
+         AG      1,0(3)
+         MGN     1,2(3)
+         AGR     1,8(3)
+         STG     1,2(3)
+
+         STG     0,0(3)                         x = xx
+
+         ML      0,0,0                          if x^2 + y^2 > 100
+         ML      1,1,1                          iteration = 999999
+         ALG     0,1,2
+         SF      0,.F_100
+         LL      0,0,0,NL,TRG
+         L       0,.BIG
+
+         IA      0,0
+         TRLT    0,2
+         B       .MB_XYL0
+
+         LX      2,99999
+         TRLT    0,2
+         B       .MB_XYLSM
+
+         XA      0,0
+         ISTC    0,6,1
+         B       .MB_XYLEN
+
+MB_XYLSM XA      0,0,SC,RC(1)
+         ISTC    0,6,1
+
+MB_XYLEN AX      13,10
+         B       0(12)
+
+        ****************************************************************
+
+FPU_ON   DW      4
+FPU_OFF  DW      0
+ZERO     DW      0
+INT_TO_F DW      0231000000000
+F_0_5    DW      0176400000000
+G_0_7    DW      0176546314631,0463146314632
+F_1      DW      0177400000000
+F_3      DW      0200600000000
+F_100    DW      0205620000000
+BIG      DW      999999
+
+F_MAG    DW      0177400000000                  magnification 1.0
+
+        ****************************************************************
+
+         ORIGIN  4096
+
+STACK    BSS     0
+
+         ORIGIN  8192
+
+BITMAP   BSS     0
