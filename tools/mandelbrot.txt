@@ -459,11 +459,24 @@ START    LX      13,STACK
 
          LX      6,.BITMAP
          AX      6,-1
-         LX      4,30
-         LX      5,30
-         BL      .MB_XYL
+         L       7,.X_RES
+         L       8,.Y_RES
+         
+         XA      5,5                            Y
+         XA      4,4                            X
+         
+LOOP_X   BL      .MB_XYL
 
-         IA      13,13
+         IA      4,4
+         SA      4,7,NL,TRN
+         B       .LOOP_X
+         
+         IA      5,5
+         XA      4,4
+         SA      5,8,NL,TRN
+         B       .LOOP_X
+
+EXIT     IA      13,13
          LCTL    2,.FPU_OFF
          B       .DO_HALT
 
@@ -479,6 +492,7 @@ START    LX      13,STACK
         *
         * hx in X1 (4), hy in X2 (5)
         * bitmap pointer in X3 (6)
+        * x_res, y_res in X4, X5 (7, 8)
         *
         * Iteration count in AC
         *
@@ -490,7 +504,7 @@ MB_XYL   AX      13,-10
          O       2,.INT_TO_F                         / 3 * mag - 0.7
          ST      2,1-
          LFN     0,1+
-         LX      2,500                          x resolution
+         LA      7,2                            x resolution
          O       2,.INT_TO_F
          ST      2,1-
          LFN     1,1+
@@ -505,7 +519,7 @@ MB_XYL   AX      13,-10
          O       2,.INT_TO_F                         / 3 * mag
          ST      2,1-
          LFN     0,1+
-         LX      2,500                          y resolution
+         LA      8,2                            y resolution
          O       2,.INT_TO_F
          ST      2,1-
          LFN     1,1+
@@ -578,6 +592,8 @@ F_100    DW      0205620000000
 BIG      DW      999999
 
 F_MAG    DW      0177400000000                  magnification 1.0
+X_RES    DW      500
+Y_RES    DW      500
 
         ****************************************************************
 
