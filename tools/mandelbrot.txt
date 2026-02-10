@@ -476,6 +476,29 @@ LOOP_X   BL      .MB_XYL
          SA      5,8,NL,TRN
          B       .LOOP_X
 
+         LX      3,.FORMAT
+         BSM     .WRITELD
+
+         L       1,.X_RES
+         M       .Y_RES
+         LA      0,7
+         LX      8,.BITMAP
+         AX      8,-1
+
+PRT_LOOP ILC     0,8,1
+         TACZ
+         B       .PRT_BLK
+
+PRT_WHT  LX      3,.WHITE
+         BSM     .WRITELD
+         B       .PRT_NEXT
+
+PRT_BLK  LX      3,.BLACK
+         BSM     .WRITELD
+
+PRT_NEXT AA      7,7,I(-1),TRN
+         B       .PRT_LOOP
+
 EXIT     IA      13,13
          LCTL    2,.FPU_OFF
          B       .DO_HALT
@@ -508,10 +531,11 @@ MB_XYL   AX      13,-10
          O       2,.INT_TO_F
          ST      2,1-
          LFN     1,1+
-         DLNG    0,1,0
+         DLN     0,1,0
          SFN     0,.F_0_5
-         DF      0,.F_MAG
-         MF      0,.F_3
+         DFN     0,.F_MAG
+         LLG     0,0,0
+         MFN     0,.F_3
          SGNR    0,.G_0_7
          STG     0,6(3)
 
@@ -523,10 +547,11 @@ MB_XYL   AX      13,-10
          O       2,.INT_TO_F
          ST      2,1-
          LFN     1,1+
-         DLNG    0,1,0
+         DLN     0,1,0
          SFN     0,.F_0_5
-         DF      0,.F_MAG
-         MF      0,.F_3
+         DFN     0,.F_MAG
+         LLG     0,0,0
+         MFN     0,.F_3
          STGNR   0,8(3)
 
          XA      0,0                            x = y = 0
@@ -537,24 +562,24 @@ MB_XYL   AX      13,-10
 
          LX      2,100                          max iterations
 
-MB_XYL0  LG      0,0(3)                         xx = x^2 + y^2 + cx
+MB_XYL0  LGN     0,0(3)                         xx = x^2 - y^2 + cx
          MGN     0,0(3)
-         LG      1,2(3)
+         LGN     1,2(3)
          MGN     1,2(3)
-         AL      0,1,0
-         AGR     0,6(3)
+         SLNG    0,1,0
+         AGNR    0,6(3)
          STG     0,4(3)
 
-         LG      1,0(3)                         y = 2*x*y + cy
-         AG      1,0(3)
-         MGN     1,2(3)
-         AGR     1,8(3)
+         LGN     1,0(3)                         y = 2*x*y + cy
+         AGN     1,0(3)
+         MGNR    1,2(3)
+         AGNR    1,8(3)
          STG     1,2(3)
 
          STG     0,0(3)                         x = xx
 
-         ML      0,0,0                          if x^2 + y^2 > 100
-         ML      1,1,1                          iteration = 999999
+         MLN     0,0,0                          if x^2 + y^2 > 100
+         MLN     1,1,1                          iteration = 999999
          ALG     0,1,2
          SF      0,.F_100
          LL      0,0,0,NL,TRG
@@ -594,6 +619,12 @@ BIG      DW      999999
 F_MAG    DW      0177400000000                  magnification 1.0
 X_RES    DW      500
 Y_RES    DW      500
+FORMAT   DW      15
+         ASCII   P6\012500 500\012255\012
+WHITE    DW      3
+         ASCII   \177\177\177
+BLACK    DW      3
+         ASCII   \000\000\000
 
         ****************************************************************
 
