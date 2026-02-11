@@ -11,7 +11,7 @@ IPL      LX      3,.USR_RST
          L       1(3)
          ST      1(4)
          LCTL    1,.CW
-         RLMSK   .HALT
+         RFI     0
 
 USR_RST  DW      START,0740000000000
 
@@ -151,6 +151,7 @@ MB_XYL   AX      13,-10
          ST      1(3)
          ST      2(3)
          ST      3(3)
+         IA      0,0                            C version starts at 1
 
          LX      1,100                          max iterations
 
