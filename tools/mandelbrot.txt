@@ -210,10 +210,10 @@ F_100    DW      0205620000000
 BIG      DW      999999
 
 F_MAG    DW      0177400000000                  magnification 1.0
-X_RES    DW      500
-Y_RES    DW      500
-FORMAT   DW      15
-         ASCII   P6\012500 500\012127\012
+X_RES    DW      2048
+Y_RES    DW      2048
+FORMAT   DW      17
+         ASCII   P6\0122048 2048\012127\012
 WHITE    DW      3
          ASCII   \177\177\177
 BLACK    DW      3

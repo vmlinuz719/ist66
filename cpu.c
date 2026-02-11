@@ -2427,7 +2427,7 @@ int main(int argc, char *argv[]) {
     
     
     
-    init_cpu(&cpu, 65536, 512);
+    init_cpu(&cpu, 262144, 512);
 
     if (do_sdl)
         init_panel(&cpu, 0);
