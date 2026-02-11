@@ -1304,10 +1304,10 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
                 return;
             }
             data &= MASK_36;
-            data ^= 1L << 35;
 
             rdc700_float_t temp;
             set_f36(&data, &temp);
+            rdc700_fneg(&temp, &temp);
             int status = rdc700_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
@@ -1489,7 +1489,6 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
                 return;
             }
             data &= MASK_36;
-            data ^= 1L << 35;
 
             uint64_t data_l = read_mem(cpu, cpu->c[C_PSW] >> 28, ea + 1);
             if (data_l == MEM_FAULT) {
@@ -1503,6 +1502,7 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
 
             rdc700_float_t temp;
             set_f72(&data, &data_l, &temp);
+            rdc700_fneg(&temp, &temp);
             int status = rdc700_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
@@ -1750,8 +1750,9 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
         } break;
         
         case 0441: { // NL
-            temp.sign_exp = cpu->f[src].sign_exp ^ 0x8000;
+            temp.sign_exp = cpu->f[src].sign_exp;
             temp.signif = cpu->f[src].signif;
+            rdc700_fneg(&temp, &temp);
         } break;
         
         case 0442: { // AL
@@ -1759,8 +1760,9 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
         } break;
         
         case 0443: { // SL
-            temp.sign_exp = cpu->f[tgt].sign_exp ^ 0x8000;
+            temp.sign_exp = cpu->f[tgt].sign_exp;
             temp.signif = cpu->f[tgt].signif;
+            rdc700_fneg(&temp, &temp);
             status = rdc700_fadd(&cpu->f[src], &temp, &temp);
         } break;
         

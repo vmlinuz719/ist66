@@ -248,6 +248,23 @@ void rdc700_fnorm(rdc700_float_t *src, rdc700_float_t *dst) {
 }
 
 /*
+ * 80-bit floating-point negate
+ */
+
+void rdc700_fneg(rdc700_float_t *src, rdc700_float_t *dst) {
+    if (is_nan(src)) {
+        dst->sign_exp = 0x8000;
+        dst->signif = 0;
+    } else if (src->sign_exp == 0 && src->signif == 0) {
+        dst->sign_exp = 0;
+        dst->signif = 0;
+    } else {
+        dst->sign_exp = src->sign_exp ^ 0x8000;
+        dst->signif = src->signif;
+    }
+}
+
+/*
  * 80-bit floating-point conormalize: adjust lesser exponent
  */
 

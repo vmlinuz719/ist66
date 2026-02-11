@@ -26,6 +26,7 @@ int is_inf(rdc700_float_t *n);
 int is_zero(rdc700_float_t *n);
 
 void rdc700_fnorm(rdc700_float_t *src, rdc700_float_t *dst);
+void rdc700_fneg(rdc700_float_t *src, rdc700_float_t *dst);
 int rdc700_fconorm(
     rdc700_float_t *src, rdc700_float_t *tgt,
     rdc700_float_t *dst_g, rdc700_float_t *dst_l
