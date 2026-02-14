@@ -1,3 +1,7 @@
+/*
+ * Begin AI-generated code
+ */
+
 #include <stdint.h>
 #include <stdio.h>
 #include <SDL2/SDL.h>
@@ -467,3 +471,7 @@ void init_panel(ist66_cu_t *cpu, int id) {
 
     pthread_create(&(ctx->thread), NULL, panel_thread, ctx);
 }
+
+/*
+ * End AI-generated code
+ */
