@@ -56,17 +56,18 @@ static const uint8_t seg_table[8] = {
 #define BTN_Y          140
 #define BTN_X           20
 
-#define NUM_BUTTONS     10    /* 0-7, Addr, Clr */
+#define NUM_BUTTONS     14    /* 0-7, Addr, Clr, Load, LdNxt, Store, StNxt */
 
 #define BTN_COLS        4
-#define BTN_ROWS        3     /* row 0: 0-3, row 1: 4-7, row 2: Addr Clr */
+#define BTN_ROWS        4     /* row 0: 0-3, row 1: 4-7, row 2: Addr/Clr, row 3: mem ops */
 
 #define SCREEN_WIDTH   (DISPLAY_X + DATA_DIGITS * (SEG_W + SEG_GAP) + 40)
 #define SCREEN_HEIGHT  (BTN_Y + BTN_ROWS * (BTN_H + BTN_GAP) + 12)
 
 /* Button label strings */
 static const char *btn_labels[NUM_BUTTONS] = {
-    "0", "1", "2", "3", "4", "5", "6", "7", "Addr", "Clr"
+    "0", "1", "2", "3", "4", "5", "6", "7",
+    "Addr", "Clr", "Load", "Ld +", "Str", "St +"
 };
 
 /* --- Panel state --- */
@@ -255,6 +256,14 @@ void *panel_thread(void *ctx) {
         BTN_Y + 2 * (BTN_H + BTN_GAP),
         2 * BTN_W + BTN_GAP, BTN_H
     };
+    /* Memory operation buttons — row 3, one per column */
+    for (int i = 0; i < 4; i++) {
+        panel->buttons[10 + i] = (SDL_Rect){
+            BTN_X + i * (BTN_W + BTN_GAP),
+            BTN_Y + 3 * (BTN_H + BTN_GAP),
+            BTN_W, BTN_H
+        };
+    }
 
     int pressed_btn = -1;
 
@@ -295,8 +304,26 @@ void *panel_thread(void *ctx) {
                         } else if (i == 8) {
                             panel->addr_reg =
                                 panel->data_reg & MASK_ADDR;
-                        } else {
+                        } else if (i == 9) {
                             panel->data_reg = 0;
+                        } else if (i == 10) { /* Load */
+                            uint32_t a = panel->addr_reg & MASK_ADDR;
+                            if (a < panel->cpu->mem_size)
+                                panel->data_reg = panel->cpu->memory[a] & MASK_36;
+                        } else if (i == 11) { /* Load Next */
+                            panel->addr_reg = (panel->addr_reg + 1) & MASK_ADDR;
+                            uint32_t a = panel->addr_reg;
+                            if (a < panel->cpu->mem_size)
+                                panel->data_reg = panel->cpu->memory[a] & MASK_36;
+                        } else if (i == 12) { /* Store */
+                            uint32_t a = panel->addr_reg & MASK_ADDR;
+                            if (a < panel->cpu->mem_size)
+                                panel->cpu->memory[a] = panel->data_reg & MASK_36;
+                        } else if (i == 13) { /* Store Next */
+                            panel->addr_reg = (panel->addr_reg + 1) & MASK_ADDR;
+                            uint32_t a = panel->addr_reg;
+                            if (a < panel->cpu->mem_size)
+                                panel->cpu->memory[a] = panel->data_reg & MASK_36;
                         }
                         break;
                     }
