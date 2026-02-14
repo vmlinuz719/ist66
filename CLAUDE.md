@@ -64,6 +64,6 @@ After building, `./ist66` starts an interactive command loop:
 - `.count` — display memory from pointer
 - `=value [value ...]` — write values to memory
 - `W` — start CPU and wait for halt
-- `S` — single-step
+- `S` — start CPU and re-enter command loop
 
 The TTY device listens on port 8080 for telnet connections.
