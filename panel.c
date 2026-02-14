@@ -266,6 +266,10 @@ static int key_to_button(SDL_Keycode sym) {
     case SDLK_z:         return 15;  /* St AC */
     case SDLK_PERIOD:    return 16;  /* Ld Ct */
     case SDLK_x:         return 17;  /* St Ct */
+    case SDLK_r:         return 18;  /* Run */
+    case SDLK_h:         return 19;  /* Halt */
+    case SDLK_t:         return 20;  /* Step */
+    case SDLK_p:         return 21;  /* St Pc */
     default:             return -1;
     }
 }
@@ -328,17 +332,17 @@ void *panel_thread(void *ctx) {
         BTN_Y + 2 * (BTN_H + BTN_GAP),
         2 * BTN_W + BTN_GAP, BTN_H
     };
-    /* Clr button — row 2, cols 2-3 */
+    /* Clr button — row 3, cols 0-1 */
     panel->buttons[9] = (SDL_Rect){
-        BTN_X + 2 * (BTN_W + BTN_GAP),
-        BTN_Y + 2 * (BTN_H + BTN_GAP),
+        BTN_X,
+        BTN_Y + 3 * (BTN_H + BTN_GAP),
         2 * BTN_W + BTN_GAP, BTN_H
     };
-    /* Memory operation buttons — row 3, one per column */
+    /* Memory operation buttons — block of four next to Addr,Clr */
     for (int i = 0; i < 4; i++) {
         panel->buttons[10 + i] = (SDL_Rect){
-            BTN_X + i * (BTN_W + BTN_GAP),
-            BTN_Y + 3 * (BTN_H + BTN_GAP),
+            BTN_X + (2 + (i % 2)) * (BTN_W + BTN_GAP),
+            BTN_Y + (2 + (i / 2)) * (BTN_H + BTN_GAP),
             BTN_W, BTN_H
         };
     }
@@ -368,10 +372,10 @@ void *panel_thread(void *ctx) {
 
         /* Row labels */
         SDL_Rect addr_label = {LABEL_X, ADDR_Y, LABEL_W - 5, SEG_H};
-        draw_text_centered(panel->render, font, "ADDR",
+        draw_text_centered(panel->render, font, "Addr",
                            &addr_label, 255, 170, 0);
         SDL_Rect data_label = {LABEL_X, DATA_Y, LABEL_W - 5, SEG_H};
-        draw_text_centered(panel->render, font, "DATA",
+        draw_text_centered(panel->render, font, "Data",
                            &data_label, 0, 220, 0);
 
         /* Address display (amber) */
