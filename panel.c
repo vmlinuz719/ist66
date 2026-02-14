@@ -256,7 +256,6 @@ static void do_button_action(panel_ctx_t *panel, int i) {
 /* Map key sym to button index, or -1 */
 static int key_to_button(SDL_Keycode sym) {
     if (sym >= SDLK_0 && sym <= SDLK_7) return sym - SDLK_0;
-    if (sym >= SDLK_KP_0 && sym <= SDLK_KP_7) return sym - SDLK_KP_0;
     switch (sym) {
     case SDLK_a:         return 8;   /* Addr */
     case SDLK_c:         return 9;   /* Clr */
