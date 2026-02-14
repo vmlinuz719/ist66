@@ -44,7 +44,9 @@ static const uint8_t seg_table[8] = {
 
 /* --- Layout constants --- */
 
-#define DISPLAY_X       20    /* left edge of digit displays */
+#define LABEL_W         60    /* width reserved for row labels */
+#define DISPLAY_X       (20 + LABEL_W)  /* left edge of digit displays */
+#define LABEL_X         10    /* left edge of labels */
 #define ADDR_Y          20    /* top of address row */
 #define DATA_Y          80    /* top of data row */
 #define ADDR_DIGITS      9
@@ -271,6 +273,14 @@ void *panel_thread(void *ctx) {
         /* --- Render --- */
         SDL_SetRenderDrawColor(panel->render, 0x1a, 0x1a, 0x1a, 255);
         SDL_RenderClear(panel->render);
+
+        /* Row labels */
+        SDL_Rect addr_label = {LABEL_X, ADDR_Y, LABEL_W - 5, SEG_H};
+        draw_text_centered(panel->render, font, "ADDR",
+                           &addr_label, 255, 170, 0);
+        SDL_Rect data_label = {LABEL_X, DATA_Y, LABEL_W - 5, SEG_H};
+        draw_text_centered(panel->render, font, "DATA",
+                           &data_label, 0, 220, 0);
 
         /* Address display (amber) */
         draw_octal_row(panel->render, DISPLAY_X, ADDR_Y,
