@@ -58,16 +58,17 @@ static const uint8_t seg_table[8] = {
 #define BTN_Y          140
 #define BTN_X           20
 
-#define NUM_BUTTONS     18    /* 0-7, Addr, Clr, Load, Ld+, Str, St+, LdAC, StAC, LdCt, StCt */
+#define NUM_BUTTONS     22    /* 0-7, Addr, Clr, Load, Ld+, Str, St+, LdAC, StAC, LdCt, StCt, Run, Halt, Step, StPC */
 
 #define BTN_COLS        4
 #define BTN_ROWS        4     /* row 0: 0-3, row 1: 4-7, row 2: Addr/Clr, row 3: mem ops */
 
-/* Right-side column for register buttons */
+/* Right-side columns for register and CPU control buttons */
 #define BTN_RX          (BTN_X + BTN_COLS * (BTN_W + BTN_GAP) + BTN_GAP)
+#define BTN_RX2         (BTN_RX + BTN_W + BTN_GAP)
 
 #define SCREEN_WIDTH_DISPLAYS (DISPLAY_X + DATA_DIGITS * (SEG_W + SEG_GAP) + 40)
-#define SCREEN_WIDTH_BUTTONS  (BTN_RX + BTN_W + 20)
+#define SCREEN_WIDTH_BUTTONS  (BTN_RX2 + BTN_W + 20)
 #define SCREEN_WIDTH   ((SCREEN_WIDTH_DISPLAYS > SCREEN_WIDTH_BUTTONS) ? SCREEN_WIDTH_DISPLAYS : SCREEN_WIDTH_BUTTONS)
 #define SCREEN_HEIGHT  (BTN_Y + BTN_ROWS * (BTN_H + BTN_GAP) + 12)
 
@@ -75,7 +76,8 @@ static const uint8_t seg_table[8] = {
 static const char *btn_labels[NUM_BUTTONS] = {
     "0", "1", "2", "3", "4", "5", "6", "7",
     "Addr", "Clr", "Load", "Ld +", "Str", "St +",
-    "LdAC", "StAC", "LdCt", "StCt"
+    "LdAC", "StAC", "LdCt", "StCt",
+    "Run", "Halt", "Step", "StPC"
 };
 
 /* --- Panel state --- */
@@ -237,6 +239,17 @@ static void do_button_action(panel_ctx_t *panel, int i) {
     } else if (i == 17) { /* St Ct */
         int r = panel->addr_reg & 0x7;
         panel->cpu->c[r] = panel->data_reg & MASK_36;
+    } else if (i == 18) { /* Run */
+        if (!panel->cpu->running)
+            start_cpu(panel->cpu, 0);
+    } else if (i == 19) { /* Halt */
+        if (panel->cpu->running)
+            stop_cpu(panel->cpu);
+    } else if (i == 20) { /* Step */
+        if (!panel->cpu->running)
+            start_cpu(panel->cpu, 1);
+    } else if (i == 21) { /* StPC */
+        set_pc(panel->cpu, panel->addr_reg & MASK_ADDR);
     }
 }
 
@@ -251,6 +264,10 @@ static int key_to_button(SDL_Keycode sym) {
     case SDLK_SEMICOLON: return 11;  /* Ld + */
     case SDLK_s:         return 12;  /* Str */
     case SDLK_d:         return 13;  /* St + */
+    case SDLK_COMMA:     return 14;  /* Ld AC */
+    case SDLK_z:         return 15;  /* St AC */
+    case SDLK_PERIOD:    return 16;  /* Ld Ct */
+    case SDLK_x:         return 17;  /* St Ct */
     default:             return -1;
     }
 }
@@ -331,6 +348,14 @@ void *panel_thread(void *ctx) {
     for (int i = 0; i < 4; i++) {
         panel->buttons[14 + i] = (SDL_Rect){
             BTN_RX,
+            BTN_Y + i * (BTN_H + BTN_GAP),
+            BTN_W, BTN_H
+        };
+    }
+    /* CPU control buttons — second right-side column, rows 0-3 */
+    for (int i = 0; i < 4; i++) {
+        panel->buttons[18 + i] = (SDL_Rect){
+            BTN_RX2,
             BTN_Y + i * (BTN_H + BTN_GAP),
             BTN_W, BTN_H
         };

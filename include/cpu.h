@@ -162,4 +162,8 @@ void init_iocpu(
     int max_io
 );
 
+void start_cpu(ist66_cu_t *cpu, int do_step);
+
+void stop_cpu(ist66_cu_t *cpu);
+
 #endif

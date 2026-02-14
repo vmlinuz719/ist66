@@ -2383,9 +2383,11 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
-    cpu->running = 1;
-    cpu->exit = do_step;
-    pthread_create(&cpu->thread, NULL, run, cpu);
+    if (!(cpu->running)) {
+        cpu->running = 1;
+        cpu->exit = do_step;
+        pthread_create(&cpu->thread, NULL, run, cpu);
+    }
 }
 
 void stop_cpu(ist66_cu_t *cpu) {
