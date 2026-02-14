@@ -200,6 +200,61 @@ static int point_in_rect(int px, int py, SDL_Rect *r) {
            py >= r->y && py < r->y + r->h;
 }
 
+static void do_button_action(panel_ctx_t *panel, int i) {
+    if (i < 8) {
+        panel->data_reg = ((panel->data_reg << 3) | i) & MASK_36;
+    } else if (i == 8) {
+        panel->addr_reg = panel->data_reg & MASK_ADDR;
+    } else if (i == 9) {
+        panel->data_reg = 0;
+    } else if (i == 10) { /* Load */
+        uint32_t a = panel->addr_reg & MASK_ADDR;
+        if (a < panel->cpu->mem_size)
+            panel->data_reg = panel->cpu->memory[a] & MASK_36;
+    } else if (i == 11) { /* Load Next */
+        panel->addr_reg = (panel->addr_reg + 1) & MASK_ADDR;
+        uint32_t a = panel->addr_reg;
+        if (a < panel->cpu->mem_size)
+            panel->data_reg = panel->cpu->memory[a] & MASK_36;
+    } else if (i == 12) { /* Store */
+        uint32_t a = panel->addr_reg & MASK_ADDR;
+        if (a < panel->cpu->mem_size)
+            panel->cpu->memory[a] = panel->data_reg & MASK_36;
+    } else if (i == 13) { /* Store Next */
+        panel->addr_reg = (panel->addr_reg + 1) & MASK_ADDR;
+        uint32_t a = panel->addr_reg;
+        if (a < panel->cpu->mem_size)
+            panel->cpu->memory[a] = panel->data_reg & MASK_36;
+    } else if (i == 14) { /* Ld AC */
+        int r = panel->addr_reg & 0xF;
+        panel->data_reg = panel->cpu->a[r] & MASK_36;
+    } else if (i == 15) { /* St AC */
+        int r = panel->addr_reg & 0xF;
+        panel->cpu->a[r] = panel->data_reg & MASK_36;
+    } else if (i == 16) { /* Ld Ct */
+        int r = panel->addr_reg & 0x7;
+        panel->data_reg = panel->cpu->c[r] & MASK_36;
+    } else if (i == 17) { /* St Ct */
+        int r = panel->addr_reg & 0x7;
+        panel->cpu->c[r] = panel->data_reg & MASK_36;
+    }
+}
+
+/* Map key sym to button index, or -1 */
+static int key_to_button(SDL_Keycode sym) {
+    if (sym >= SDLK_0 && sym <= SDLK_7) return sym - SDLK_0;
+    if (sym >= SDLK_KP_0 && sym <= SDLK_KP_7) return sym - SDLK_KP_0;
+    switch (sym) {
+    case SDLK_a:         return 8;   /* Addr */
+    case SDLK_c:         return 9;   /* Clr */
+    case SDLK_l:         return 10;  /* Load */
+    case SDLK_SEMICOLON: return 11;  /* Ld + */
+    case SDLK_s:         return 12;  /* Str */
+    case SDLK_d:         return 13;  /* St + */
+    default:             return -1;
+    }
+}
+
 /* --- Main panel thread --- */
 
 void *panel_thread(void *ctx) {
@@ -322,45 +377,7 @@ void *panel_thread(void *ctx) {
                     if (point_in_rect(event.button.x, event.button.y,
                                       &panel->buttons[i])) {
                         pressed_btn = i;
-                        if (i < 8) {
-                            panel->data_reg =
-                                ((panel->data_reg << 3) | i) & MASK_36;
-                        } else if (i == 8) {
-                            panel->addr_reg =
-                                panel->data_reg & MASK_ADDR;
-                        } else if (i == 9) {
-                            panel->data_reg = 0;
-                        } else if (i == 10) { /* Load */
-                            uint32_t a = panel->addr_reg & MASK_ADDR;
-                            if (a < panel->cpu->mem_size)
-                                panel->data_reg = panel->cpu->memory[a] & MASK_36;
-                        } else if (i == 11) { /* Load Next */
-                            panel->addr_reg = (panel->addr_reg + 1) & MASK_ADDR;
-                            uint32_t a = panel->addr_reg;
-                            if (a < panel->cpu->mem_size)
-                                panel->data_reg = panel->cpu->memory[a] & MASK_36;
-                        } else if (i == 12) { /* Store */
-                            uint32_t a = panel->addr_reg & MASK_ADDR;
-                            if (a < panel->cpu->mem_size)
-                                panel->cpu->memory[a] = panel->data_reg & MASK_36;
-                        } else if (i == 13) { /* Store Next */
-                            panel->addr_reg = (panel->addr_reg + 1) & MASK_ADDR;
-                            uint32_t a = panel->addr_reg;
-                            if (a < panel->cpu->mem_size)
-                                panel->cpu->memory[a] = panel->data_reg & MASK_36;
-                        } else if (i == 14) { /* Ld AC */
-                            int r = panel->addr_reg & 0xF;
-                            panel->data_reg = panel->cpu->a[r] & MASK_36;
-                        } else if (i == 15) { /* St AC */
-                            int r = panel->addr_reg & 0xF;
-                            panel->cpu->a[r] = panel->data_reg & MASK_36;
-                        } else if (i == 16) { /* Ld Ct */
-                            int r = panel->addr_reg & 0x7;
-                            panel->data_reg = panel->cpu->c[r] & MASK_36;
-                        } else if (i == 17) { /* St Ct */
-                            int r = panel->addr_reg & 0x7;
-                            panel->cpu->c[r] = panel->data_reg & MASK_36;
-                        }
+                        do_button_action(panel, i);
                         break;
                     }
                 }
@@ -370,33 +387,21 @@ void *panel_thread(void *ctx) {
                 pressed_btn = -1;
                 break;
 
-            case SDL_KEYDOWN:
-                switch (event.key.keysym.sym) {
-                case SDLK_0: case SDLK_1: case SDLK_2: case SDLK_3:
-                case SDLK_4: case SDLK_5: case SDLK_6: case SDLK_7: {
-                    int digit = event.key.keysym.sym - SDLK_0;
-                    panel->data_reg =
-                        ((panel->data_reg << 3) | digit) & MASK_36;
-                    break;
-                }
-                case SDLK_KP_0: case SDLK_KP_1: case SDLK_KP_2:
-                case SDLK_KP_3: case SDLK_KP_4: case SDLK_KP_5:
-                case SDLK_KP_6: case SDLK_KP_7: {
-                    int digit = event.key.keysym.sym - SDLK_KP_0;
-                    panel->data_reg =
-                        ((panel->data_reg << 3) | digit) & MASK_36;
-                    break;
-                }
-                case SDLK_a:
-                    panel->addr_reg = panel->data_reg & MASK_ADDR;
-                    break;
-                case SDLK_c:
-                    panel->data_reg = 0;
-                    break;
-                default:
-                    break;
+            case SDL_KEYDOWN: {
+                int btn = key_to_button(event.key.keysym.sym);
+                if (btn >= 0) {
+                    pressed_btn = btn;
+                    do_button_action(panel, btn);
                 }
                 break;
+            }
+
+            case SDL_KEYUP: {
+                int btn = key_to_button(event.key.keysym.sym);
+                if (btn >= 0 && pressed_btn == btn)
+                    pressed_btn = -1;
+                break;
+            }
 
             case SDL_QUIT:
                 panel->running = 0;
