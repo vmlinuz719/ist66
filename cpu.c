@@ -2361,6 +2361,7 @@ void *run(void *vctx) {
         }
     } while (!cpu->exit || cpu->do_edit);
     
+    cpu->running = 0;
     fprintf(stderr, "CPU: halted, code %012lo\n", cpu->stop_code);
     return NULL;
 }
@@ -2376,6 +2377,7 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     cpu->ioctx = calloc(sizeof(void *), max_io);
     cpu->max_io = max_io;
     cpu->mask = 0xFFFF;
+    cpu->exit = 1;
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
@@ -2383,28 +2385,35 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
-    if (!(cpu->running)) {
+    if (!(cpu->running) && cpu->exit) {
         cpu->running = 1;
         cpu->exit = do_step;
         pthread_create(&cpu->thread, NULL, run, cpu);
+    } else if (!(cpu->running)) {
+        cpu->running = 1;
+        pthread_cond_signal(&cpu->intr_cond);
     }
 }
 
 void stop_cpu(ist66_cu_t *cpu) {
-    cpu->running = 1;
-    cpu->exit = 1;
-    pthread_cond_signal(&cpu->intr_cond);
-    pthread_join(cpu->thread, NULL);
-    cpu->running = 0;
+    if (!(cpu->exit)) {
+        cpu->running = 1;
+        cpu->exit = 1;
+        pthread_cond_signal(&cpu->intr_cond);
+        pthread_join(cpu->thread, NULL);
+        cpu->running = 0;
+    }
 }
 
 void wait_for_cpu(ist66_cu_t *cpu) {
-    pthread_join(cpu->thread, NULL);
-    cpu->running = 0;
+    if (!(cpu->exit)) {
+        pthread_join(cpu->thread, NULL);
+        cpu->running = 0;
+    }
 }
 
 void destroy_cpu(ist66_cu_t *cpu) {
-    if (!cpu->exit && cpu->running) stop_cpu(cpu);
+    stop_cpu(cpu);
     
     for (int i = 0; i < cpu->max_io; i++) {
         if (cpu->io_destroy[i] != NULL) {
