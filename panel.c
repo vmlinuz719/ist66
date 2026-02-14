@@ -58,18 +58,24 @@ static const uint8_t seg_table[8] = {
 #define BTN_Y          140
 #define BTN_X           20
 
-#define NUM_BUTTONS     14    /* 0-7, Addr, Clr, Load, LdNxt, Store, StNxt */
+#define NUM_BUTTONS     18    /* 0-7, Addr, Clr, Load, Ld+, Str, St+, LdAC, StAC, LdCt, StCt */
 
 #define BTN_COLS        4
 #define BTN_ROWS        4     /* row 0: 0-3, row 1: 4-7, row 2: Addr/Clr, row 3: mem ops */
 
-#define SCREEN_WIDTH   (DISPLAY_X + DATA_DIGITS * (SEG_W + SEG_GAP) + 40)
+/* Right-side column for register buttons */
+#define BTN_RX          (BTN_X + BTN_COLS * (BTN_W + BTN_GAP) + BTN_GAP)
+
+#define SCREEN_WIDTH_DISPLAYS (DISPLAY_X + DATA_DIGITS * (SEG_W + SEG_GAP) + 40)
+#define SCREEN_WIDTH_BUTTONS  (BTN_RX + BTN_W + 20)
+#define SCREEN_WIDTH   ((SCREEN_WIDTH_DISPLAYS > SCREEN_WIDTH_BUTTONS) ? SCREEN_WIDTH_DISPLAYS : SCREEN_WIDTH_BUTTONS)
 #define SCREEN_HEIGHT  (BTN_Y + BTN_ROWS * (BTN_H + BTN_GAP) + 12)
 
 /* Button label strings */
 static const char *btn_labels[NUM_BUTTONS] = {
     "0", "1", "2", "3", "4", "5", "6", "7",
-    "Addr", "Clr", "Load", "Ld +", "Str", "St +"
+    "Addr", "Clr", "Load", "Ld +", "Str", "St +",
+    "LdAC", "StAC", "LdCt", "StCt"
 };
 
 /* --- Panel state --- */
@@ -266,6 +272,14 @@ void *panel_thread(void *ctx) {
             BTN_W, BTN_H
         };
     }
+    /* Register buttons — right-side column, rows 0-3 */
+    for (int i = 0; i < 4; i++) {
+        panel->buttons[14 + i] = (SDL_Rect){
+            BTN_RX,
+            BTN_Y + i * (BTN_H + BTN_GAP),
+            BTN_W, BTN_H
+        };
+    }
 
     int pressed_btn = -1;
 
@@ -334,6 +348,18 @@ void *panel_thread(void *ctx) {
                             uint32_t a = panel->addr_reg;
                             if (a < panel->cpu->mem_size)
                                 panel->cpu->memory[a] = panel->data_reg & MASK_36;
+                        } else if (i == 14) { /* Ld AC */
+                            int r = panel->addr_reg & 0xF;
+                            panel->data_reg = panel->cpu->a[r] & MASK_36;
+                        } else if (i == 15) { /* St AC */
+                            int r = panel->addr_reg & 0xF;
+                            panel->cpu->a[r] = panel->data_reg & MASK_36;
+                        } else if (i == 16) { /* Ld Ct */
+                            int r = panel->addr_reg & 0x7;
+                            panel->data_reg = panel->cpu->c[r] & MASK_36;
+                        } else if (i == 17) { /* St Ct */
+                            int r = panel->addr_reg & 0x7;
+                            panel->cpu->c[r] = panel->data_reg & MASK_36;
                         }
                         break;
                     }
