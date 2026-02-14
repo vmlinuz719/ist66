@@ -59,7 +59,7 @@ static const uint8_t seg_table[8] = {
 #define BTN_H           40
 #define BTN_GAP          8
 #define BTN_Y          140
-#define BTN_X           20
+#define BTN_X           36
 
 #define NUM_BUTTONS     22    /* 0-7, Addr, Clr, Load, Ld+, Str, St+, LdAC, StAC, LdCt, StCt, Run, Halt, Step, StPC */
 
@@ -377,13 +377,13 @@ void *panel_thread(void *ctx) {
         /* Row labels */
         SDL_Rect addr_label = {LABEL_X, ADDR_Y, LABEL_W - 5, SEG_H};
         draw_text_centered(panel->render, font, "Addr",
-                           &addr_label, 255, 170, 0);
+                           &addr_label, 255, 255, 255);
         SDL_Rect data_label = {LABEL_X, DATA_Y, LABEL_W - 5, SEG_H};
         draw_text_centered(panel->render, font, "Data",
-                           &data_label, 0, 220, 0);
+                           &data_label, 255, 255, 255);
 
         /* Address display (amber) */
-        draw_octal_row(panel->render, DISPLAY_X, ADDR_Y,
+        draw_octal_row(panel->render, DISPLAY_X + 78, ADDR_Y,
                        ADDR_DIGITS, panel->addr_reg, 255, 170, 0);
 
         /* Data display (green) */
