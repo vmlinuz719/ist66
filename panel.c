@@ -2,155 +2,361 @@
 #include <stdio.h>
 #include <string.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <time.h>
 
 #include "cpu.h"
+#include "alu.h"
 #include "panel.h"
 
-#define SCREEN_WIDTH 1280
-#define SCREEN_HEIGHT 256
-#define PANEL_ROWS 8
-#define PANEL_VPAD 10
-#define PANEL_HPAD 2
-#define LED_HEIGHT 16
-#define LED_WIDTH  16
+#define FONT_PATH "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Bold.ttf"
+#define FONT_SIZE 18
+
+/* --- Seven-segment display geometry --- */
+
+#define SEG_W       20   /* digit cell width */
+#define SEG_H       38   /* digit cell height */
+#define SEG_T        3   /* segment thickness */
+#define SEG_GAP      6   /* gap between digits */
+#define SEG_PAD      2   /* inset from cell edge */
+
+/* Segment bitmasks (standard A-G mapping) */
+#define SA 0x01  /* top */
+#define SB 0x02  /* top-right */
+#define SC 0x04  /* bottom-right */
+#define SD 0x08  /* bottom */
+#define SE 0x10  /* bottom-left */
+#define SF 0x20  /* top-left */
+#define SG 0x40  /* middle */
+
+static const uint8_t seg_table[8] = {
+    SA|SB|SC|SD|SE|SF,      /* 0 */
+    SB|SC,                   /* 1 */
+    SA|SB|SD|SE|SG,          /* 2 */
+    SA|SB|SC|SD|SG,          /* 3 */
+    SB|SC|SF|SG,             /* 4 */
+    SA|SC|SD|SF|SG,          /* 5 */
+    SA|SC|SD|SE|SF|SG,       /* 6 */
+    SA|SB|SC,                /* 7 */
+};
+
+/* --- Layout constants --- */
+
+#define DISPLAY_X       20    /* left edge of digit displays */
+#define ADDR_Y          20    /* top of address row */
+#define DATA_Y          80    /* top of data row */
+#define ADDR_DIGITS      9
+#define DATA_DIGITS     12
+
+#define BTN_W           50
+#define BTN_H           40
+#define BTN_GAP          8
+#define BTN_Y          140
+#define BTN_X           20
+
+#define NUM_BUTTONS     10    /* 0-7, Addr, Clr */
+
+#define BTN_COLS        4
+#define BTN_ROWS        3     /* row 0: 0-3, row 1: 4-7, row 2: Addr Clr */
+
+#define SCREEN_WIDTH   (DISPLAY_X + DATA_DIGITS * (SEG_W + SEG_GAP) + 40)
+#define SCREEN_HEIGHT  (BTN_Y + BTN_ROWS * (BTN_H + BTN_GAP) + 12)
+
+/* Button label strings */
+static const char *btn_labels[NUM_BUTTONS] = {
+    "0", "1", "2", "3", "4", "5", "6", "7", "Addr", "Clr"
+};
+
+/* --- Panel state --- */
 
 typedef struct {
     int running;
     pthread_t thread;
     ist66_cu_t *cpu;
-    
+
     SDL_Window *window;
     SDL_Renderer *render;
+
+    uint32_t addr_reg;   /* 27-bit address */
+    uint64_t data_reg;   /* 36-bit data */
+
+    SDL_Rect buttons[NUM_BUTTONS];
 } panel_ctx_t;
 
-void *panel_thread(void *ctx) {
-    panel_ctx_t *panel_ctx = (panel_ctx_t *) ctx;
+/* --- Drawing helpers --- */
 
-    panel_ctx->window = SDL_CreateWindow(
-        "RDC700",
+static void draw_segment(SDL_Renderer *r, int x, int y, uint8_t segs,
+                          int sr, int sg, int sb) {
+    /* dim color for unlit segments */
+    int dr = sr / 8, dg = sg / 8, db = sb / 8;
+    int hw = SEG_W - 2 * SEG_PAD;        /* horizontal seg length */
+    int vh = (SEG_H - 2 * SEG_PAD) / 2;  /* vertical seg length (half) */
+    int lx = x + SEG_PAD;                /* left x */
+    int rx = x + SEG_W - SEG_PAD - SEG_T; /* right x */
+    int ty = y + SEG_PAD;                /* top y */
+    int my = y + SEG_H / 2 - SEG_T / 2;  /* middle y */
+    int by = y + SEG_H - SEG_PAD - SEG_T; /* bottom y */
+
+    SDL_Rect seg;
+
+    /* A - top horizontal */
+    seg = (SDL_Rect){lx, ty, hw, SEG_T};
+    if (segs & SA) SDL_SetRenderDrawColor(r, sr, sg, sb, 255);
+    else           SDL_SetRenderDrawColor(r, dr, dg, db, 255);
+    SDL_RenderFillRect(r, &seg);
+
+    /* D - bottom horizontal */
+    seg = (SDL_Rect){lx, by, hw, SEG_T};
+    if (segs & SD) SDL_SetRenderDrawColor(r, sr, sg, sb, 255);
+    else           SDL_SetRenderDrawColor(r, dr, dg, db, 255);
+    SDL_RenderFillRect(r, &seg);
+
+    /* G - middle horizontal */
+    seg = (SDL_Rect){lx, my, hw, SEG_T};
+    if (segs & SG) SDL_SetRenderDrawColor(r, sr, sg, sb, 255);
+    else           SDL_SetRenderDrawColor(r, dr, dg, db, 255);
+    SDL_RenderFillRect(r, &seg);
+
+    /* F - top-left vertical */
+    seg = (SDL_Rect){lx, ty, SEG_T, vh};
+    if (segs & SF) SDL_SetRenderDrawColor(r, sr, sg, sb, 255);
+    else           SDL_SetRenderDrawColor(r, dr, dg, db, 255);
+    SDL_RenderFillRect(r, &seg);
+
+    /* B - top-right vertical */
+    seg = (SDL_Rect){rx, ty, SEG_T, vh};
+    if (segs & SB) SDL_SetRenderDrawColor(r, sr, sg, sb, 255);
+    else           SDL_SetRenderDrawColor(r, dr, dg, db, 255);
+    SDL_RenderFillRect(r, &seg);
+
+    /* E - bottom-left vertical */
+    seg = (SDL_Rect){lx, my, SEG_T, vh};
+    if (segs & SE) SDL_SetRenderDrawColor(r, sr, sg, sb, 255);
+    else           SDL_SetRenderDrawColor(r, dr, dg, db, 255);
+    SDL_RenderFillRect(r, &seg);
+
+    /* C - bottom-right vertical */
+    seg = (SDL_Rect){rx, my, SEG_T, vh};
+    if (segs & SC) SDL_SetRenderDrawColor(r, sr, sg, sb, 255);
+    else           SDL_SetRenderDrawColor(r, dr, dg, db, 255);
+    SDL_RenderFillRect(r, &seg);
+}
+
+static void draw_octal_row(SDL_Renderer *r, int x, int y, int ndigits,
+                            uint64_t value, int cr, int cg, int cb) {
+    for (int i = 0; i < ndigits; i++) {
+        int shift = (ndigits - 1 - i) * 3;
+        int digit = (value >> shift) & 7;
+        draw_segment(r, x + i * (SEG_W + SEG_GAP), y,
+                     seg_table[digit], cr, cg, cb);
+    }
+}
+
+static void draw_text_centered(SDL_Renderer *r, TTF_Font *font,
+                                const char *text, SDL_Rect *rect,
+                                int cr, int cg, int cb) {
+    SDL_Color color = {cr, cg, cb, 255};
+    SDL_Surface *surf = TTF_RenderText_Blended(font, text, color);
+    if (!surf) return;
+    SDL_Texture *tex = SDL_CreateTextureFromSurface(r, surf);
+    if (!tex) { SDL_FreeSurface(surf); return; }
+    SDL_Rect dst = {
+        rect->x + (rect->w - surf->w) / 2,
+        rect->y + (rect->h - surf->h) / 2,
+        surf->w, surf->h
+    };
+    SDL_RenderCopy(r, tex, NULL, &dst);
+    SDL_DestroyTexture(tex);
+    SDL_FreeSurface(surf);
+}
+
+static void draw_button(SDL_Renderer *r, SDL_Rect *rect, int pressed) {
+    /* button background */
+    if (pressed) {
+        SDL_SetRenderDrawColor(r, 80, 80, 80, 255);
+    } else {
+        SDL_SetRenderDrawColor(r, 50, 50, 50, 255);
+    }
+    SDL_RenderFillRect(r, rect);
+
+    /* button border */
+    SDL_SetRenderDrawColor(r, 140, 140, 140, 255);
+    SDL_RenderDrawRect(r, rect);
+}
+
+static int point_in_rect(int px, int py, SDL_Rect *r) {
+    return px >= r->x && px < r->x + r->w &&
+           py >= r->y && py < r->y + r->h;
+}
+
+/* --- Main panel thread --- */
+
+void *panel_thread(void *ctx) {
+    panel_ctx_t *panel = (panel_ctx_t *) ctx;
+
+    panel->window = SDL_CreateWindow(
+        "RDC-700 Programmer's Panel",
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
         SCREEN_WIDTH, SCREEN_HEIGHT,
         SDL_WINDOW_SHOWN
     );
-    
-    if (panel_ctx->window == NULL) {
+    if (!panel->window) {
+        fprintf(stderr, "Panel: window creation failed: %s\n", SDL_GetError());
         return NULL;
     }
-    
-    panel_ctx->render = SDL_CreateRenderer
-            (panel_ctx->window, -1, 
-            SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (panel_ctx->render == NULL) {
-        SDL_DestroyRenderer(panel_ctx->render);
-        return NULL;
-    }
-    
-    uint64_t panel_rows[PANEL_ROWS];
-    int start_led[PANEL_ROWS] = {
-        28, 28, 28, 28, 0, 28, 60, 0
-    };
-    int end_led[PANEL_ROWS] = {
-        64, 64, 64, 64, 0, 64, 64, 0
-    };
-    int row_color[PANEL_ROWS][3] = {
-        {255, 149, 66},
-        {255, 149, 66},
-        {255, 149, 66},
-        {255, 149, 66},
-        {0, 0, 0},
-        {255, 66, 66},
-        {255, 66, 66},
-    };
-    
-    int selection = 0;
-    while (panel_ctx->running) {
-        SDL_RenderClear(panel_ctx->render);
-        
-        
-        panel_rows[0] = panel_ctx->cpu->c[0];
-        panel_rows[1] = panel_ctx->cpu->inst;
-        panel_rows[2] = panel_ctx->cpu->c[1];
-        panel_rows[3] = panel_ctx->cpu->c[6];
-        panel_rows[5] = panel_ctx->cpu->a[selection];
-        panel_rows[6] = selection;
-        
-        for (int j = 0; j < PANEL_ROWS; j++) {
-            for (int i = start_led[j]; i < end_led[j]; i++) {
-                SDL_Rect rect;
-                rect.x = PANEL_VPAD + (PANEL_HPAD + LED_WIDTH) * i;
-                rect.y = PANEL_VPAD + (LED_HEIGHT + PANEL_VPAD) * j;
-                rect.w = LED_WIDTH;
-                rect.h = LED_HEIGHT;
-                if (panel_rows[j] & (0x8000000000000000 >> i)) {
-                    SDL_SetRenderDrawColor
-                            (panel_ctx->render,
-                            row_color[j][0],
-                            row_color[j][1],
-                            row_color[j][2],
-                            255);
-                    SDL_RenderFillRect(panel_ctx->render, &rect);
-                } else {
-                    SDL_SetRenderDrawColor(panel_ctx->render, 64, 64, 64, 255);
-                    SDL_RenderDrawRect(panel_ctx->render, &rect);
-                }
-                
-            }
-        }
-        
-        SDL_SetRenderDrawColor(panel_ctx->render, 0, 0, 0, 255);
 
-        SDL_RenderPresent(panel_ctx->render);
-        
+    panel->render = SDL_CreateRenderer(
+        panel->window, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
+    );
+    if (!panel->render) {
+        SDL_DestroyWindow(panel->window);
+        fprintf(stderr, "Panel: renderer creation failed: %s\n", SDL_GetError());
+        return NULL;
+    }
+
+    /* Load font */
+    if (TTF_Init() < 0) {
+        fprintf(stderr, "Panel: TTF_Init failed: %s\n", TTF_GetError());
+        SDL_DestroyRenderer(panel->render);
+        SDL_DestroyWindow(panel->window);
+        return NULL;
+    }
+    TTF_Font *font = TTF_OpenFont(FONT_PATH, FONT_SIZE);
+    if (!font) {
+        fprintf(stderr, "Panel: font load failed: %s\n", TTF_GetError());
+        TTF_Quit();
+        SDL_DestroyRenderer(panel->render);
+        SDL_DestroyWindow(panel->window);
+        return NULL;
+    }
+
+    /* Set up button positions: 4-column grid */
+    for (int i = 0; i < 8; i++) {
+        int col = i % BTN_COLS;
+        int row = i / BTN_COLS;
+        panel->buttons[i] = (SDL_Rect){
+            BTN_X + col * (BTN_W + BTN_GAP),
+            BTN_Y + row * (BTN_H + BTN_GAP),
+            BTN_W, BTN_H
+        };
+    }
+    /* Addr button — row 2, cols 0-1 */
+    panel->buttons[8] = (SDL_Rect){
+        BTN_X,
+        BTN_Y + 2 * (BTN_H + BTN_GAP),
+        2 * BTN_W + BTN_GAP, BTN_H
+    };
+    /* Clr button — row 2, cols 2-3 */
+    panel->buttons[9] = (SDL_Rect){
+        BTN_X + 2 * (BTN_W + BTN_GAP),
+        BTN_Y + 2 * (BTN_H + BTN_GAP),
+        2 * BTN_W + BTN_GAP, BTN_H
+    };
+
+    int pressed_btn = -1;
+
+    while (panel->running) {
+        /* --- Render --- */
+        SDL_SetRenderDrawColor(panel->render, 0x1a, 0x1a, 0x1a, 255);
+        SDL_RenderClear(panel->render);
+
+        /* Address display (amber) */
+        draw_octal_row(panel->render, DISPLAY_X, ADDR_Y,
+                       ADDR_DIGITS, panel->addr_reg, 255, 170, 0);
+
+        /* Data display (green) */
+        draw_octal_row(panel->render, DISPLAY_X, DATA_Y,
+                       DATA_DIGITS, panel->data_reg, 0, 220, 0);
+
+        /* Buttons */
+        for (int i = 0; i < NUM_BUTTONS; i++) {
+            draw_button(panel->render, &panel->buttons[i], pressed_btn == i);
+            draw_text_centered(panel->render, font, btn_labels[i],
+                               &panel->buttons[i], 200, 200, 200);
+        }
+
+        SDL_RenderPresent(panel->render);
+
+        /* --- Events --- */
         SDL_Event event;
-        while( SDL_PollEvent( &event ) ){
-            switch( event.type ){
-                /* Look for a keypress */
-                case SDL_KEYDOWN:
-                    /* Check the SDLKey values and move change the coords */
-                    switch( event.key.keysym.scancode ){
-                        /*
-                        case SDLK_LEFT:
-                            alien_x -= 1;
-                            break;
-                        case SDLK_RIGHT:
-                            alien_x += 1;
-                            break;
-                        */
-                        case SDL_SCANCODE_UP:
-                            if (selection < 15) selection++;
-                            break;
-                        case SDL_SCANCODE_T:
-                            panel_ctx->cpu->throttle ^= 1;
-                            break;
-                        case SDL_SCANCODE_DOWN:
-                            if (selection > 0) selection--;
-                            break;
-                        default:
-                            break;
+        while (SDL_PollEvent(&event)) {
+            switch (event.type) {
+            case SDL_MOUSEBUTTONDOWN:
+                for (int i = 0; i < NUM_BUTTONS; i++) {
+                    if (point_in_rect(event.button.x, event.button.y,
+                                      &panel->buttons[i])) {
+                        pressed_btn = i;
+                        if (i < 8) {
+                            panel->data_reg =
+                                ((panel->data_reg << 3) | i) & MASK_36;
+                        } else if (i == 8) {
+                            panel->addr_reg =
+                                panel->data_reg & MASK_ADDR;
+                        } else {
+                            panel->data_reg = 0;
+                        }
+                        break;
                     }
+                }
+                break;
+
+            case SDL_MOUSEBUTTONUP:
+                pressed_btn = -1;
+                break;
+
+            case SDL_KEYDOWN:
+                switch (event.key.keysym.sym) {
+                case SDLK_0: case SDLK_1: case SDLK_2: case SDLK_3:
+                case SDLK_4: case SDLK_5: case SDLK_6: case SDLK_7: {
+                    int digit = event.key.keysym.sym - SDLK_0;
+                    panel->data_reg =
+                        ((panel->data_reg << 3) | digit) & MASK_36;
                     break;
-                case SDL_QUIT:
-                    panel_ctx->running = 0;
+                }
+                case SDLK_KP_0: case SDLK_KP_1: case SDLK_KP_2:
+                case SDLK_KP_3: case SDLK_KP_4: case SDLK_KP_5:
+                case SDLK_KP_6: case SDLK_KP_7: {
+                    int digit = event.key.keysym.sym - SDLK_KP_0;
+                    panel->data_reg =
+                        ((panel->data_reg << 3) | digit) & MASK_36;
                     break;
+                }
+                case SDLK_a:
+                    panel->addr_reg = panel->data_reg & MASK_ADDR;
+                    break;
+                case SDLK_c:
+                    panel->data_reg = 0;
+                    break;
+                default:
+                    break;
+                }
+                break;
+
+            case SDL_QUIT:
+                panel->running = 0;
+                break;
             }
         }
     }
 
-    SDL_DestroyRenderer(panel_ctx->render);    
-    SDL_DestroyWindow(panel_ctx->window);
-    
+    TTF_CloseFont(font);
+    TTF_Quit();
+    SDL_DestroyRenderer(panel->render);
+    SDL_DestroyWindow(panel->window);
+
     return NULL;
 }
 
+/* --- Init / destroy --- */
+
 void destroy_panel(ist66_cu_t *cpu, int id) {
-    panel_ctx_t *panel_ctx = (panel_ctx_t *) cpu->ioctx[id];
-    panel_ctx->running = 0;
-    pthread_join(panel_ctx->thread, NULL);
-    free(panel_ctx);
+    panel_ctx_t *panel = (panel_ctx_t *) cpu->ioctx[id];
+    panel->running = 0;
+    pthread_join(panel->thread, NULL);
+    free(panel);
 }
 
 void init_panel(ist66_cu_t *cpu, int id) {
@@ -158,12 +364,11 @@ void init_panel(ist66_cu_t *cpu, int id) {
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_panel;
     cpu->io[id] = NULL;
-    
 
     ctx->running = 1;
-    
     ctx->cpu = cpu;
-    
+    ctx->addr_reg = 0;
+    ctx->data_reg = 0;
 
     pthread_create(&(ctx->thread), NULL, panel_thread, ctx);
 }
