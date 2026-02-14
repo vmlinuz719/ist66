@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
+#include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -83,6 +84,98 @@ static const char *btn_labels[NUM_BUTTONS] = {
     "Run", "Halt", "Step", "StPC"
 };
 
+typedef struct {
+    SDL_Rect box;
+    const char *label;
+    TTF_Font *font;
+    void (*action_callback)(void *, int);
+    void *instance_data;
+
+    int color[3];
+    int pressed_color[3];
+    int text_color[3];
+    int border_color[3];
+    int id, hotkey, pressed;
+} button_t;
+
+button_t *make_button(
+    const char *label,
+    char *font_name,
+    int font_size,
+    int id,
+    int x, int y, int width, int height,
+    int color[3],
+    int pressed_color[3],
+    int text_color[3],
+    int border_color[3],
+    int hotkey,
+    void (*action_callback)(void *, int),
+    void *instance_data
+) {
+    TTF_Font *font = TTF_OpenFont(font_name, font_size);
+    if (!font) {
+        fprintf(stderr, "Panel: font load failed: %s\n", TTF_GetError());
+        return NULL;
+    }
+
+    button_t *button = malloc(sizeof(button_t));
+    button->id = id;
+    button->label = label;
+    button->font = font;
+    button->box = (SDL_Rect) {x, y, width, height};
+
+    memcpy(button->color, color, 3 * sizeof(int));
+    memcpy(button->pressed_color, pressed_color, 3 * sizeof(int));
+    memcpy(button->text_color, text_color, 3 * sizeof(int));
+    memcpy(button->border_color, border_color, 3 * sizeof(int));
+
+    button->action_callback = action_callback;
+    button->instance_data = instance_data;
+
+    button->hotkey = hotkey;
+    button->pressed = 0;
+
+    return button;
+}
+
+button_t *make_button_default(
+    const char *label,
+    int id,
+    int x, int y, int width, int height,
+    int hotkey,
+    void (*action_callback)(void *, int),
+    void *instance_data
+) {
+    int default_color[3] = {50, 50, 50};
+    int default_pressed[3] = {80, 80, 80};
+    int default_foreground[3] = {140, 140, 140};
+
+    return make_button(
+        label,
+        FONT_PATH,
+        FONT_SIZE,
+        id,
+        x,
+        y,
+        width,
+        height,
+        default_color,
+        default_pressed,
+        default_foreground,
+        default_foreground,
+        hotkey,
+        action_callback,
+        instance_data
+    );
+}
+
+void destroy_button(button_t *button) {
+    TTF_CloseFont(button->font);
+    free(button);
+}
+
+
+
 /* --- Panel state --- */
 
 typedef struct {
@@ -96,10 +189,65 @@ typedef struct {
     uint32_t addr_reg;   /* 27-bit address */
     uint64_t data_reg;   /* 36-bit data */
 
-    SDL_Rect buttons[NUM_BUTTONS];
+    button_t *new_buttons[NUM_BUTTONS];
 } panel_ctx_t;
 
 /* --- Drawing helpers --- */
+
+static void draw_text_centered(SDL_Renderer *r, TTF_Font *font,
+                                const char *text, SDL_Rect *rect,
+                                int cr, int cg, int cb) {
+    SDL_Color color = {cr, cg, cb, 255};
+    SDL_Surface *surf = TTF_RenderText_Blended(font, text, color);
+    if (!surf) return;
+    SDL_Texture *tex = SDL_CreateTextureFromSurface(r, surf);
+    if (!tex) { SDL_FreeSurface(surf); return; }
+    SDL_Rect dst = {
+        rect->x + (rect->w - surf->w) / 2,
+        rect->y + (rect->h - surf->h) / 2,
+        surf->w, surf->h
+    };
+    SDL_RenderCopy(r, tex, NULL, &dst);
+    SDL_DestroyTexture(tex);
+    SDL_FreeSurface(surf);
+}
+
+static void draw_button(SDL_Renderer *r, button_t *button) {
+    if (button->pressed) {
+        SDL_SetRenderDrawColor(
+            r,
+            button->pressed_color[0],
+            button->pressed_color[1],
+            button->pressed_color[2],
+            255
+        );
+    } else {
+        SDL_SetRenderDrawColor(
+            r,
+            button->color[0],
+            button->color[1],
+            button->color[2],
+            255
+        );
+    }
+    SDL_RenderFillRect(r, &button->box);
+
+    SDL_SetRenderDrawColor(
+        r,
+        button->border_color[0],
+        button->border_color[1],
+        button->border_color[2],
+        255
+    );
+    SDL_RenderDrawRect(r, &button->box);
+
+    draw_text_centered(r, button->font, button->label,
+        &button->box,
+        button->text_color[0],
+        button->text_color[1],
+        button->text_color[2]
+    );
+}
 
 static void draw_segment(SDL_Renderer *r, int x, int y, uint8_t segs,
                           int sr, int sg, int sb) {
@@ -168,44 +316,13 @@ static void draw_octal_row(SDL_Renderer *r, int x, int y, int ndigits,
     }
 }
 
-static void draw_text_centered(SDL_Renderer *r, TTF_Font *font,
-                                const char *text, SDL_Rect *rect,
-                                int cr, int cg, int cb) {
-    SDL_Color color = {cr, cg, cb, 255};
-    SDL_Surface *surf = TTF_RenderText_Blended(font, text, color);
-    if (!surf) return;
-    SDL_Texture *tex = SDL_CreateTextureFromSurface(r, surf);
-    if (!tex) { SDL_FreeSurface(surf); return; }
-    SDL_Rect dst = {
-        rect->x + (rect->w - surf->w) / 2,
-        rect->y + (rect->h - surf->h) / 2,
-        surf->w, surf->h
-    };
-    SDL_RenderCopy(r, tex, NULL, &dst);
-    SDL_DestroyTexture(tex);
-    SDL_FreeSurface(surf);
-}
-
-static void draw_button(SDL_Renderer *r, SDL_Rect *rect, int pressed) {
-    /* button background */
-    if (pressed) {
-        SDL_SetRenderDrawColor(r, 80, 80, 80, 255);
-    } else {
-        SDL_SetRenderDrawColor(r, 50, 50, 50, 255);
-    }
-    SDL_RenderFillRect(r, rect);
-
-    /* button border */
-    SDL_SetRenderDrawColor(r, 140, 140, 140, 255);
-    SDL_RenderDrawRect(r, rect);
-}
-
 static int point_in_rect(int px, int py, SDL_Rect *r) {
     return px >= r->x && px < r->x + r->w &&
            py >= r->y && py < r->y + r->h;
 }
 
-static void do_button_action(panel_ctx_t *panel, int i) {
+void do_button_action(void *vpanel, int i) {
+    panel_ctx_t *panel = (panel_ctx_t *) vpanel;
     if (i < 8) {
         panel->data_reg = ((panel->data_reg << 3) | i) & MASK_36;
     } else if (i == 8) {
@@ -256,28 +373,6 @@ static void do_button_action(panel_ctx_t *panel, int i) {
     }
 }
 
-/* Map key sym to button index, or -1 */
-static int key_to_button(SDL_Keycode sym) {
-    if (sym >= SDLK_0 && sym <= SDLK_7) return sym - SDLK_0;
-    switch (sym) {
-    case SDLK_a:         return 8;   /* Addr */
-    case SDLK_c:         return 9;   /* Clr */
-    case SDLK_l:         return 10;  /* Load */
-    case SDLK_SEMICOLON: return 11;  /* Ld + */
-    case SDLK_s:         return 12;  /* Str */
-    case SDLK_d:         return 13;  /* St + */
-    case SDLK_COMMA:     return 14;  /* Ld AC */
-    case SDLK_z:         return 15;  /* St AC */
-    case SDLK_PERIOD:    return 16;  /* Ld Ct */
-    case SDLK_x:         return 17;  /* St Ct */
-    case SDLK_r:         return 18;  /* Run */
-    case SDLK_h:         return 19;  /* Halt */
-    case SDLK_t:         return 20;  /* Step */
-    case SDLK_p:         return 21;  /* St Pc */
-    default:             return -1;
-    }
-}
-
 /* --- Main panel thread --- */
 
 void *panel_thread(void *ctx) {
@@ -324,50 +419,102 @@ void *panel_thread(void *ctx) {
     for (int i = 0; i < 8; i++) {
         int col = i % BTN_COLS;
         int row = i / BTN_COLS;
-        panel->buttons[i] = (SDL_Rect){
+
+        panel->new_buttons[i] = make_button_default(
+            btn_labels[i],
+            i,
             BTN_X + col * (BTN_W + BTN_GAP),
             BTN_Y + row * (BTN_H + BTN_GAP),
-            BTN_W, BTN_H
-        };
+            BTN_W, BTN_H,
+            SDLK_0 + i,
+            do_button_action,
+            panel
+        );
+
     }
     /* Addr button — row 2, cols 0-1 */
-    panel->buttons[8] = (SDL_Rect){
+    panel->new_buttons[8] = make_button_default(
+        btn_labels[8],
+        8,
         BTN_X,
         BTN_Y + 2 * (BTN_H + BTN_GAP),
-        2 * BTN_W + BTN_GAP, BTN_H
-    };
+        2 * BTN_W + BTN_GAP, BTN_H,
+        SDLK_a,
+        do_button_action,
+        panel
+    );
+
     /* Clr button — row 3, cols 0-1 */
-    panel->buttons[9] = (SDL_Rect){
+    panel->new_buttons[9] = make_button_default(
+        btn_labels[9],
+        9,
         BTN_X,
         BTN_Y + 3 * (BTN_H + BTN_GAP),
-        2 * BTN_W + BTN_GAP, BTN_H
-    };
+        2 * BTN_W + BTN_GAP, BTN_H,
+        SDLK_c,
+        do_button_action,
+        panel
+    );
+
     /* Memory operation buttons — block of four next to Addr,Clr */
+    int mem_op_key[4] = {
+        SDLK_l,
+        SDLK_SEMICOLON,
+        SDLK_s,
+        SDLK_d
+    };
     for (int i = 0; i < 4; i++) {
-        panel->buttons[10 + i] = (SDL_Rect){
+        panel->new_buttons[10 + i] = make_button_default(
+            btn_labels[10 + i],
+            i,
             BTN_X + (2 + (i % 2)) * (BTN_W + BTN_GAP),
             BTN_Y + (2 + (i / 2)) * (BTN_H + BTN_GAP),
-            BTN_W, BTN_H
-        };
-    }
-    /* Register buttons — right-side column, rows 0-3 */
-    for (int i = 0; i < 4; i++) {
-        panel->buttons[14 + i] = (SDL_Rect){
-            BTN_RX,
-            BTN_Y + i * (BTN_H + BTN_GAP),
-            BTN_W, BTN_H
-        };
-    }
-    /* CPU control buttons — second right-side column, rows 0-3 */
-    for (int i = 0; i < 4; i++) {
-        panel->buttons[18 + i] = (SDL_Rect){
-            BTN_RX2,
-            BTN_Y + i * (BTN_H + BTN_GAP),
-            BTN_W, BTN_H
-        };
+            BTN_W, BTN_H,
+            mem_op_key[i],
+            do_button_action,
+            panel
+        );
     }
 
-    int pressed_btn = -1;
+    /* Register buttons — right-side column, rows 0-3 */
+    int reg_op_key[4] = {
+        SDLK_COMMA,
+        SDLK_z,
+        SDLK_PERIOD,
+        SDLK_x
+    };
+    for (int i = 0; i < 4; i++) {
+        panel->new_buttons[14 + i] = make_button_default(
+            btn_labels[14 + i],
+            i,
+            BTN_RX,
+            BTN_Y + i * (BTN_H + BTN_GAP),
+            BTN_W, BTN_H,
+            reg_op_key[i],
+            do_button_action,
+            panel
+        );
+    }
+
+    /* CPU control buttons — second right-side column, rows 0-3 */
+    int ctl_op_key[4] = {
+        SDLK_r,
+        SDLK_h,
+        SDLK_t,
+        SDLK_p
+    };
+    for (int i = 0; i < 4; i++) {
+        panel->new_buttons[18 + i] = make_button_default(
+            btn_labels[18 + i],
+            i,
+            BTN_RX2,
+            BTN_Y + i * (BTN_H + BTN_GAP),
+            BTN_W, BTN_H,
+            ctl_op_key[i],
+            do_button_action,
+            panel
+        );
+    }
 
     while (panel->running) {
         /* --- Render --- */
@@ -392,9 +539,7 @@ void *panel_thread(void *ctx) {
 
         /* Buttons */
         for (int i = 0; i < NUM_BUTTONS; i++) {
-            draw_button(panel->render, &panel->buttons[i], pressed_btn == i);
-            draw_text_centered(panel->render, font, btn_labels[i],
-                               &panel->buttons[i], 200, 200, 200);
+            draw_button(panel->render, panel->new_buttons[i]);
         }
 
         SDL_RenderPresent(panel->render);
@@ -406,33 +551,35 @@ void *panel_thread(void *ctx) {
             case SDL_MOUSEBUTTONDOWN:
                 for (int i = 0; i < NUM_BUTTONS; i++) {
                     if (point_in_rect(event.button.x, event.button.y,
-                                      &panel->buttons[i])) {
-                        pressed_btn = i;
-                        do_button_action(panel, i);
-                        break;
+                        &panel->new_buttons[i]->box)) {
+                        panel->new_buttons[i]->pressed = 1;
+                        panel->new_buttons[i]->action_callback(panel, i);
                     }
                 }
                 break;
 
             case SDL_MOUSEBUTTONUP:
-                pressed_btn = -1;
+                for (int i = 0; i < NUM_BUTTONS; i++) {
+                    panel->new_buttons[i]->pressed = 0;
+                }
                 break;
 
             case SDL_KEYDOWN: {
-                int btn = key_to_button(event.key.keysym.sym);
-                if (btn >= 0) {
-                    pressed_btn = btn;
-                    do_button_action(panel, btn);
+                for (int i = 0; i < NUM_BUTTONS; i++) {
+                    if (panel->new_buttons[i]->hotkey == event.key.keysym.sym) {
+                        panel->new_buttons[i]->pressed = 1;
+                        panel->new_buttons[i]->action_callback(panel, i);
+                    }
                 }
-                break;
-            }
+            } break;
 
             case SDL_KEYUP: {
-                int btn = key_to_button(event.key.keysym.sym);
-                if (btn >= 0 && pressed_btn == btn)
-                    pressed_btn = -1;
-                break;
-            }
+                for (int i = 0; i < NUM_BUTTONS; i++) {
+                    if (panel->new_buttons[i]->hotkey == event.key.keysym.sym) {
+                        panel->new_buttons[i]->pressed = 0;
+                    }
+                }
+            } break;
 
             case SDL_QUIT:
                 panel->running = 0;
@@ -453,6 +600,9 @@ void *panel_thread(void *ctx) {
 
 void destroy_panel(ist66_cu_t *cpu, int id) {
     panel_ctx_t *panel = (panel_ctx_t *) cpu->ioctx[id];
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        destroy_button(panel->new_buttons[i]);
+    }
     panel->running = 0;
     pthread_join(panel->thread, NULL);
     free(panel);
