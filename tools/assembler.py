@@ -216,7 +216,7 @@ class AssembleAM(AssemblerModule):
             "LXRT": 0o076,
         }
 
-class AssembleFPM(AssemblerModule):
+class AssembleFM(AssemblerModule):
     def size(self, card: Card) -> int:
         return 1
     
@@ -750,7 +750,7 @@ class Assembler:
             AssembleAM(),
             AssembleAA(),
             AssembleBX(),
-            AssembleFPM(),
+            AssembleFM(),
             AssembleFR(),
             AssembleHelper0(),
             AssembleIO(),

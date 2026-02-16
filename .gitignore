@@ -58,6 +58,7 @@ dkms.conf
 # generated documentation
 docs/html/
 docs/latex/
+*.html
 
 compile_commands.json
 
