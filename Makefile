@@ -24,9 +24,19 @@ $(TARGET): $(OBJS)
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Test
+test: tests/test_fpu
+	./tests/test_fpu
+
+tests/test_fpu: tests/test_fpu.o fpu.o
+	$(CC) $(CFLAGS) -o $@ $^ -lcunit
+
+tests/%.o: tests/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
 # Clean up build artifacts
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(TARGET) tests/*.o tests/test_fpu
 
-.PHONY: all clean
+.PHONY: all clean test
 

@@ -64,5 +64,8 @@ compile_commands.json
 
 .cache/
 
+# Test binaries
+tests/test_fpu
+
 # Python
 __pycache__/
