@@ -15,7 +15,7 @@
 #include "alu.h"
 #include "panel.h"
 
-#define FONT_PATH "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Bold.ttf"
+#define FONT_PATH "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf"
 #define FONT_SIZE 18
 
 /* --- Seven-segment display geometry --- */
@@ -589,7 +589,6 @@ void *panel_thread(void *ctx) {
     }
 
     TTF_CloseFont(font);
-    TTF_Quit();
     SDL_DestroyRenderer(panel->render);
     SDL_DestroyWindow(panel->window);
 
@@ -600,11 +599,12 @@ void *panel_thread(void *ctx) {
 
 void destroy_panel(ist66_cu_t *cpu, int id) {
     panel_ctx_t *panel = (panel_ctx_t *) cpu->ioctx[id];
+    panel->running = 0;
+    pthread_join(panel->thread, NULL);
     for (int i = 0; i < NUM_BUTTONS; i++) {
         destroy_button(panel->new_buttons[i]);
     }
-    panel->running = 0;
-    pthread_join(panel->thread, NULL);
+    TTF_Quit();
     free(panel);
 }
 
