@@ -25,10 +25,15 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Test
-test: tests/test_fpu
-	./tests/test_fpu
+TEST_BINS = tests/test_fpu tests/test_cpu
+
+test: $(TEST_BINS)
+	@fail=0; for t in $(TEST_BINS); do echo "=== $$t ==="; ./$$t || fail=1; done; exit $$fail
 
 tests/test_fpu: tests/test_fpu.o fpu.o
+	$(CC) $(CFLAGS) -o $@ $^ -lcunit
+
+tests/test_cpu: tests/test_cpu.o
 	$(CC) $(CFLAGS) -o $@ $^ -lcunit
 
 tests/%.o: tests/%.c
@@ -36,7 +41,7 @@ tests/%.o: tests/%.c
 
 # Clean up build artifacts
 clean:
-	rm -f $(OBJS) $(TARGET) tests/*.o tests/test_fpu
+	rm -f $(OBJS) $(TARGET) tests/*.o $(TEST_BINS)
 
 .PHONY: all clean test
 
