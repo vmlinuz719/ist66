@@ -63,3 +63,6 @@ docs/latex/
 compile_commands.json
 
 .cache/
+
+# Python
+__pycache__/
