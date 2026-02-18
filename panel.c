@@ -16,7 +16,7 @@
 #include "alu.h"
 #include "panel.h"
 
-#define FONT_PATH "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Bold.ttf"
+#define FONT_PATH "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf"
 #define FONT_SIZE 16
 #define FONT_SIZE_SMALL 12
 
@@ -345,7 +345,7 @@ static void draw_button(SDL_Renderer *r, button_t *button) {
 static void draw_indicator(SDL_Renderer *r, button_t *button) {
     int *color;
 
-    if (((*(uint64_t *)button->instance_data) >> button->id) & 1) {
+    if (((*(int *)button->instance_data) >> button->id) & 1) {
         color = button->pressed_color;
     } else {
         color = button->color;
@@ -499,7 +499,7 @@ void do_button_action(void *vpanel, int i) {
         if (panel->cpu->running)
             stop_cpu(panel->cpu);
     } else if (i == 20 && !(panel->locked)) { /* Step */
-        if (!panel->cpu->running)
+        if (panel->cpu->exit)
             start_cpu(panel->cpu, 1);
     } else if (i == 21 && !(panel->locked)) { /* StPC */
         set_pc(panel->cpu, panel->addr_reg & MASK_ADDR);

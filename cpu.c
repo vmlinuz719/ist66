@@ -2385,10 +2385,13 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
-    if (!(cpu->running) && cpu->exit) {
+    if (cpu->exit) {
         cpu->running = 1;
         cpu->exit = do_step;
         pthread_create(&cpu->thread, NULL, run, cpu);
+        if (do_step) {
+            pthread_join(cpu->thread, NULL);
+        }
     } else if (!(cpu->running)) {
         cpu->running = 1;
         pthread_cond_signal(&cpu->intr_cond);
@@ -2443,49 +2446,38 @@ int main(int argc, char *argv[]) {
     if (do_sdl)
         init_panel(&cpu, 0);
 
-    init_ppt(&cpu, 012, 9);
+    init_ppt_ex(&cpu, 012, 9, "monitor.ppt");
     init_lpt(&cpu, 013, 8, stdout);
     // init_iocpu(&cpu, 020, 8, 1024, 512);
     // init_pch(&cpu, 014, 6);
     init_tty(&cpu, 060, 10, 8080);
     
     cpu.memory[512] = 0640000370012;
-    cpu.memory[513] = 0743170000000;
-    cpu.memory[514] = 0742130000000;
-    cpu.memory[515] = 0640000560012;
-    cpu.memory[516] = 0000002777777;
-    cpu.memory[517] = 0640000200012;
-    cpu.memory[518] = 0700010500000;
-    cpu.memory[519] = 0000002777774;
-    cpu.memory[520] = 0700011004100;
-    cpu.memory[521] = 0703150000003;
-    cpu.memory[522] = 0740150000000;
-    cpu.memory[523] = 0045102000021;
-    cpu.memory[524] = 0000002777767;
-    cpu.memory[525] = 0043043777777;
-    cpu.memory[526] = 0640000560012;
-    cpu.memory[527] = 0000002777777;
-    cpu.memory[528] = 0640140200012;
-    cpu.memory[529] = 0723010500000;
-    cpu.memory[530] = 0000002777774;
-    cpu.memory[531] = 0043103777736;
-    cpu.memory[532] = 0045102000011;
-    cpu.memory[533] = 0700010100000;
-    cpu.memory[534] = 0000002777753;
-    cpu.memory[535] = 0045102000007;
-    cpu.memory[536] = 0700010100000;
-    cpu.memory[537] = 0070002000001;
-    cpu.memory[538] = 0104101000006;
-    cpu.memory[539] = 0000002777763;
-    cpu.memory[540] = 0000000000011;
-    cpu.memory[541] = 0000000000133;
-    cpu.memory[542] = 0000000000136;
+    cpu.memory[513] = 0740032020012;
+    cpu.memory[514] = 0640000560012;
+    cpu.memory[515] = 0000002777777;
+    cpu.memory[516] = 0640100200012;
+    cpu.memory[517] = 0722130577620;
+    cpu.memory[518] = 0000002777774;
+    cpu.memory[519] = 0702111004100;
+    cpu.memory[520] = 0700011020003;
+    cpu.memory[521] = 0742010300000;
+    cpu.memory[522] = 0000002777770;
+    cpu.memory[523] = 0700170077777;
+    cpu.memory[524] = 0640000560012;
+    cpu.memory[525] = 0000002777777;
+    cpu.memory[526] = 0640000200012;
+    cpu.memory[527] = 0720030577604;
+    cpu.memory[528] = 0000002777761;
+    cpu.memory[529] = 0700030077740;
+    cpu.memory[530] = 0104003000006;
+    cpu.memory[531] = 0000002777771;
     
     char cmd[512];
     int running = 1;
     uint64_t ptr = 0;
     
-    printf("Ready. Note: use command /1000GW for PPT loader\n");
+    printf("Ready. Note: use panel command 1000APR for PPT loader\n");
     
     while (running) {
         printf("> ");
