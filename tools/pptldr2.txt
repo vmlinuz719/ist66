@@ -1,0 +1,32 @@
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+        
+         ORIGIN  512
+
+         NIOS    10                             Init ppt
+         
+GET_ADDR XA      0,0,SC,RC(10)                  Init AC to get addr
+
+A_WAIT   TIOND   10                             wait for tape
+         B       .A_WAIT
+         
+RD_ADDR  RIOS    10,2,0
+         AA      2,2,I(-112),NL,TRZ             consume leader
+         B       .A_WAIT
+         
+         LA      2,2,CC,M(33)                   get octal digit
+         LA      0,0,CC,RC(3)
+         OA      2,0,TCZ
+         B       .A_WAIT
+         
+         AA      0,3,I(-1)                      init byte ptr
+         
+D_WAIT   TIOND   10                             wait for tape
+         B       .D_WAIT
+         
+         RIOS    10,0,0
+         AA      0,0,I(-124),NL,TRZ              end record
+         B       .GET_ADDR
+         
+         AA      0,0,I(-32)
+         ISTC    0,3,6
+         B       .D_WAIT
