@@ -1,6 +1,6 @@
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
         
-         ORIGIN  512
+         ORIGIN  512                            position independent
 
          NIOS    10                             Init ppt
          
@@ -24,7 +24,7 @@ D_WAIT   TIOND   10                             wait for tape
          B       .D_WAIT
          
          RIOS    10,0,0
-         AA      0,0,I(-124),NL,TRZ              end record
+         AA      0,0,I(-124),NL,TRZ             end record with pipe
          B       .GET_ADDR
          
          AA      0,0,I(-32)
