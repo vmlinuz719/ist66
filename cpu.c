@@ -2452,32 +2452,31 @@ int main(int argc, char *argv[]) {
     // init_pch(&cpu, 014, 6);
     init_tty(&cpu, 060, 10, 8080);
     
-    cpu.memory[512] = 0640000370012;
-    cpu.memory[513] = 0740032020012;
-    cpu.memory[514] = 0640000560012;
-    cpu.memory[515] = 0000002777777;
-    cpu.memory[516] = 0640100200012;
-    cpu.memory[517] = 0722130577620;
-    cpu.memory[518] = 0000002777774;
-    cpu.memory[519] = 0702111004100;
-    cpu.memory[520] = 0700011020003;
-    cpu.memory[521] = 0742010300000;
-    cpu.memory[522] = 0000002777770;
-    cpu.memory[523] = 0700170077777;
-    cpu.memory[524] = 0640000560012;
-    cpu.memory[525] = 0000002777777;
-    cpu.memory[526] = 0640000200012;
-    cpu.memory[527] = 0720030577604;
-    cpu.memory[528] = 0000002777761;
-    cpu.memory[529] = 0700030077740;
-    cpu.memory[530] = 0104003000006;
-    cpu.memory[531] = 0000002777771;
-    
     char cmd[512];
     int running = 1;
     uint64_t ptr = 0;
     
-    printf("Ready. Note: use panel command 1000APR for PPT loader\n");
+    printf("Ready. PRF loader:\n");
+    printf("    640000 370012\n");
+    printf("    740032 020012\n");
+    printf("    640000 560012\n");
+    printf("    000002 777777\n");
+    printf("    640100 200012\n");
+    printf("    722130 577620\n");
+    printf("    000002 777774\n");
+    printf("    702111 004100\n");
+    printf("    700011 020003\n");
+    printf("    742010 300000\n");
+    printf("    000002 777770\n");
+    printf("    700170 077777\n");
+    printf("    640000 560012\n");
+    printf("    000002 777777\n");
+    printf("    640000 200012\n");
+    printf("    720030 577604\n");
+    printf("    000002 777761\n");
+    printf("    700030 077740\n");
+    printf("    104003 000006\n");
+    printf("    000002 777771\n");
     
     while (running) {
         printf("> ");
