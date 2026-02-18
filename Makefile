@@ -18,7 +18,7 @@ all: $(TARGET)
 
 # Link the object files into the executable
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -flto -o $@ $^ -lSDL2 -lSDL2_ttf
+	$(CC) $(CFLAGS) -flto -o $@ $^ -lSDL2 -lSDL2_ttf -lSDL2_gfx
 
 # Compile each .c into a .o
 %.o: %.c
