@@ -23,4 +23,3 @@ RD_ADDR  RIOS    10,2,0
          ST      0,0(3)                         then store
          LA      0,3                            set address
          B       GET_ADDR(4)
-         

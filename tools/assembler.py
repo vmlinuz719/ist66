@@ -835,12 +835,28 @@ class Assembler:
                 print(f"    cpu.memory[{pc}] = 0{i:0{12}o};")
                 pc += 1
 
+    def print_rim(self):
+        keys = list(self.output.keys())
+        for k in range(0, len(keys)):
+            blk = keys[k]
+            pc = blk
+            for i in self.output[blk]:
+                for sh in range(12, -1, -6):
+                    c = ((pc >> sh) & 0o77)
+                    sys.stdout.buffer.write(bytes([c]))
+                pc += 1
+                for sh in range(30, -1, -6):
+                    c = ((i >> sh) & 0o77)
+                    sys.stdout.buffer.write(bytes([c]))
+
 if __name__ == "__main__":
     assembler = Assembler(sys.argv[1])
     assembler.get_syms()
     assembler.assemble()
     if "-c" in sys.argv:
         assembler.print_c()
+    elif "-r" in sys.argv:
+        assembler.print_rim()
     else:
         assembler.print_ppt()
     
