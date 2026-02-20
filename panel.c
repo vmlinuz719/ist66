@@ -16,7 +16,7 @@
 #include "alu.h"
 #include "panel.h"
 
-#define FONT_PATH "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf"
+#define FONT_PATH "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
 #define FONT_SIZE 16
 #define FONT_SIZE_SMALL 12
 
@@ -684,10 +684,10 @@ void *panel_thread(void *ctx) {
         /* Row labels */
         SDL_Rect addr_label = {LABEL_X, ADDR_Y, LABEL_W - 5, SEG_H};
         draw_text_centered(panel->render, font, "Addr",
-                           &addr_label, 255, 255, 255);
+                           &addr_label, 140, 140, 140);
         SDL_Rect data_label = {LABEL_X, DATA_Y, LABEL_W - 5, SEG_H};
         draw_text_centered(panel->render, font, "Data",
-                           &data_label, 255, 255, 255);
+                           &data_label, 140, 140, 140);
 
         /* Address display (amber) */
         draw_octal_row(panel->render, DISPLAY_X + 78, ADDR_Y,
