@@ -2456,7 +2456,24 @@ int main(int argc, char *argv[]) {
     int running = 1;
     uint64_t ptr = 0;
     
-    printf("Ready. RIM loader at 01000\n");
+    printf("Ready. Relocatable loader at 01000:\n");
+    
+    printf("    640000,370012\n");
+    printf("    744232,004400\n");
+    printf("    740032,120023\n");
+    printf("    740032,020001\n");
+    printf("    640000,560012\n");
+    printf("    000002,777777\n");
+    printf("    640100,200012\n");
+    printf("    722130,577600\n");
+    printf("    000002,777771\n");
+    printf("    700011,020006\n");
+    printf("    742010,300000\n");
+    printf("    000002,777771\n");
+    printf("    704214,500000\n");
+    printf("    700650,100000\n");
+    printf("    053016,000001\n");
+    printf("    000002,777764\n");
     
     cpu.memory[512] = 0640000370012;
     cpu.memory[513] = 0744232004400;
