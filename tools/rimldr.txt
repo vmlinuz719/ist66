@@ -11,7 +11,7 @@ GET_DATA XA      0,0,SC,RC(1)                   or data
 RD_WAIT  TIOND   10                             wait for tape
          B       RD_WAIT
          
-RD_ADDR  RIOS    10,2,0
+         RIOS    10,2,0
          AA      2,2,I(-128),NL,TRZ             consume leader
          B       GET_ADDR
          
