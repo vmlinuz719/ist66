@@ -2463,17 +2463,17 @@ int main(int argc, char *argv[]) {
     cpu.memory[514] = 0740032120023;
     cpu.memory[515] = 0740032020001;
     cpu.memory[516] = 0640000560012;
-    cpu.memory[517] = 0000000001004;
+    cpu.memory[517] = 0000002777777;
     cpu.memory[518] = 0640100200012;
     cpu.memory[519] = 0722130577600;
-    cpu.memory[520] = 0000000001001;
+    cpu.memory[520] = 0000002777771;
     cpu.memory[521] = 0700011020006;
     cpu.memory[522] = 0742010300000;
-    cpu.memory[523] = 0000000001004;
+    cpu.memory[523] = 0000002777771;
     cpu.memory[524] = 0704214500000;
     cpu.memory[525] = 0700650100000;
     cpu.memory[526] = 0053016000001;
-    cpu.memory[527] = 0000000001003;
+    cpu.memory[527] = 0000002777764;
     
     while (running) {
         printf("> ");
