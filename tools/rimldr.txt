@@ -4,7 +4,7 @@
 
          NIOS    10                             Init ppt
          
-GET_ADDR XA      4,4,SC,M(36)                   Address/data toggle
+GET_ADDR LA      4,4,SC,M(36)                   Address/data toggle
          XA      0,0,SC,RC(19),TNV              Init AC to get addr
 GET_DATA XA      0,0,SC,RC(1)                   or data
 

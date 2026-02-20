@@ -2459,7 +2459,7 @@ int main(int argc, char *argv[]) {
     printf("Ready. Relocatable loader at 01000:\n");
     
     printf("    640000,370012\n");
-    printf("    744232,004400\n");
+    printf("    704212,004400\n");
     printf("    740032,120023\n");
     printf("    740032,020001\n");
     printf("    640000,560012\n");
@@ -2476,7 +2476,7 @@ int main(int argc, char *argv[]) {
     printf("    000002,777764\n");
     
     cpu.memory[512] = 0640000370012;
-    cpu.memory[513] = 0744232004400;
+    cpu.memory[513] = 0704212004400;
     cpu.memory[514] = 0740032120023;
     cpu.memory[515] = 0740032020001;
     cpu.memory[516] = 0640000560012;
