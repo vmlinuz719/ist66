@@ -839,15 +839,15 @@ class Assembler:
         keys = list(self.output.keys())
         for k in range(0, len(keys)):
             blk = keys[k]
-            pc = blk
+            for sh in range(12, -1, -6):
+                c = ((blk >> sh) & 0o77)
+                sys.stdout.buffer.write(bytes([c]))
             for i in self.output[blk]:
-                for sh in range(12, -1, -6):
-                    c = ((pc >> sh) & 0o77)
-                    sys.stdout.buffer.write(bytes([c]))
-                pc += 1
                 for sh in range(30, -1, -6):
                     c = ((i >> sh) & 0o77)
                     sys.stdout.buffer.write(bytes([c]))
+            sys.stdout.buffer.write(bytes([128]))
+                    
 
 if __name__ == "__main__":
     assembler = Assembler(sys.argv[1])

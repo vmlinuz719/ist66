@@ -2456,40 +2456,24 @@ int main(int argc, char *argv[]) {
     int running = 1;
     uint64_t ptr = 0;
     
-    printf("Ready. RIM loader at 01000:\n");
-    printf("    640000,370012\n");
-    printf("    744230,000000\n");
-    printf("    740032,120023\n");
-    printf("    740032,020001\n");
-    printf("    640000,560012\n");
-    printf("    000000,001004\n");
-    printf("    640100,200012\n");
-    printf("    722130,577600\n");
-    printf("    000000,001004\n");
-    printf("    700011,020006\n");
-    printf("    742010,300000\n");
-    printf("    000000,001004\n");
-    printf("    744230,560001\n");
-    printf("    053003,000000\n");
-    printf("    700150,000000\n");
-    printf("    000004,001002\n");
+    printf("Ready. RIM loader at 01000\n");
     
     cpu.memory[512] = 0640000370012;
-    cpu.memory[513] = 0744230000000;
+    cpu.memory[513] = 0744232004400;
     cpu.memory[514] = 0740032120023;
     cpu.memory[515] = 0740032020001;
     cpu.memory[516] = 0640000560012;
     cpu.memory[517] = 0000000001004;
     cpu.memory[518] = 0640100200012;
     cpu.memory[519] = 0722130577600;
-    cpu.memory[520] = 0000000001004;
+    cpu.memory[520] = 0000000001001;
     cpu.memory[521] = 0700011020006;
     cpu.memory[522] = 0742010300000;
     cpu.memory[523] = 0000000001004;
-    cpu.memory[524] = 0744230560001;
-    cpu.memory[525] = 0053003000000;
-    cpu.memory[526] = 0700150000000;
-    cpu.memory[527] = 0000004001002;
+    cpu.memory[524] = 0704214500000;
+    cpu.memory[525] = 0700650100000;
+    cpu.memory[526] = 0053016000001;
+    cpu.memory[527] = 0000000001003;
     
     while (running) {
         printf("> ");
