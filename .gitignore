@@ -67,6 +67,7 @@ compile_commands.json
 # Test binaries
 tests/test_fpu
 tests/test_cpu
+vibe_code/bcd_test
 
 # Python
 __pycache__/
