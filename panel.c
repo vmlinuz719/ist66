@@ -16,7 +16,7 @@
 #include "alu.h"
 #include "panel.h"
 
-#define FONT_PATH "/usr/share/fonts/truetype/noto/NotoSansMono-Bold.ttf"
+#define FONT_PATH "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
 #define FONT_SIZE 16
 #define FONT_SIZE_SMALL 12
 
