@@ -461,14 +461,44 @@ ENUMDONE DW      0
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-PRIVHDLR USING   3
+PRIVHDLR DW      0
+         LA      3,8
+         
          LX      3,.PRIV
          BSM     .WRITELD
+         
+         AX      13,-6                          Num buf 3(13)
+         LX      9
+         ST      0(13)                          Pad buf 0(13)
+         
+         LX      3,3(13)
+         STCTL   1,1-
+         L       4,1+
+         LA      4,4,CC,R(9),M(31)
+         L       4,32(4)
+         LA      4,4,CC,M(9)
+         L       4,0(4)
+         LX      5,16
+         BSM     .NUM2LD
+
+         LX      3,3(13)
+         LX      4,0(13)
+         LX      5,060
+         BSM     .LEFT_PAD
+
+         LX      3,0(13)
+         BSM     .WRITELD
+         
+         AX      13,6
+         
+         LX      3,.CRLF
+         BSM     .WRITELD
+         
          XA      0,0,SC,RC(1)
          BRM
 
-PRIV     DW      24
-         ASCII   Privileged instruction\015\012
+PRIV     DW      23
+         ASCII   Privileged instruction\040
 
         ****************************************************************
 
@@ -550,3 +580,5 @@ STACK    BSS     0
          ORIGIN  8192
 
 USRSTART RIOS    10,0,0
+         SLR
+         
