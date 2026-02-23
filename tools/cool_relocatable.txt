@@ -1,0 +1,41 @@
+         ORIGIN  512                            position independent
+
+        ****************************************************************
+        * Record-oriented Read-In-Mode loader
+        *
+        *INSTR.  ARGUMENTS                      REMARKS
+
+RIMLDR   NIOS    10                             Init ppt
+         
+GET_ADDR LA      4,4,SC,M(36)                   Address/data toggle
+         XA      0,0,SC,RC(19),TNV              Init AC to get addr
+GET_DATA XA      0,0,SC,RC(1)                   or data
+
+RD_WAIT  TIOND   10                             wait for tape
+         B       .RD_WAIT
+         
+         RIOS    10,2,0
+         AA      2,2,I(-128),NL,TRZ             consume leader
+         B       .GET_ADDR
+         
+         LA      0,0,CC,RC(6)                   get bytes until done
+         OA      2,0,TCZ
+         B       .RD_WAIT
+         
+         IA      4,4,TRZ                        got address?
+         LA      0,13,TNV                       then set address
+         ST      0,1+                           store word
+         B       .GET_DATA
+
+        ****************************************************************
+        * 29-bit byte address in AC -> bit slice index in MQ
+        *
+        *INSTR.  ARGUMENTS                      REMARKS
+
+XTRB9    LA      0,1,CC,R(29),MR(9)
+         LA      0,2,CC,RC(36),TCZ
+         AA      1,1,I(9)
+         LA      2,2,CC,RC(36),TCZ
+         AA      1,1,I(18)
+         LA      1,1,R(27)
+         B       0(12)
