@@ -1952,14 +1952,21 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
 
 void exec_local_trap(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t opcode = ((inst >> 27) & 0x1FF);
-    set_pc(cpu, get_pc(cpu) + 1);
     if (opcode >= 0300) { // SLT, set key to 0 and save full PSW
+        if (!((cpu->c[C_SLT] >> 27) & 1)) {
+            do_except(cpu, X_USER);
+            return;
+        }
         cpu->a[15] = cpu->c[C_PSW];
         cpu->c[C_PSW] &= (1 << 27);
-        set_pc(cpu, cpu->c[C_SLT] + (opcode & 077));
+        set_pc(cpu, (cpu->c[C_SLT] + (opcode & 077)) & MASK_ADDR);
     } else { // PLT, preserve key and save only program counter
+        if (!((cpu->c[C_PLT] >> 27) & 1)) {
+            do_except(cpu, X_USER);
+            return;
+        }
         cpu->a[15] = get_pc(cpu);
-        set_pc(cpu, cpu->c[C_PLT] + (opcode & 077));
+        set_pc(cpu, (cpu->c[C_PLT] + (opcode & 077)) & MASK_ADDR);
     }
     cpu->a[14] = inst;
 }
@@ -2042,7 +2049,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                     } break;
                     case 7: { // SLR
                         cpu->c[C_PSW] = cpu->a[15];
-                    }
+                    } break;
                     default: {
                         // Illegal
                         do_except(cpu, X_INST);

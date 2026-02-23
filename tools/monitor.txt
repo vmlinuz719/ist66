@@ -10,7 +10,7 @@ TTY_VEC  DW      TTY_INTR,0
 
          ORIGIN  62                             USER SAVE
 
-USR_SAVE DW      START,0740000000000
+USR_SAVE BSS     2
 
          ORIGIN  1024
 
@@ -457,6 +457,20 @@ ENUMDONE DW      0
          BRM
 
         ****************************************************************
+        * PRIVHDLR - handle privileged instruction from user mode
+        *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+PRIVHDLR USING   3
+         LX      3,.PRIV
+         BSM     .WRITELD
+         XA      0,0,SC,RC(1)
+         BRM
+
+PRIV     DW      24
+         ASCII   Privileged instruction\015\012
+
+        ****************************************************************
 
 START    LX      13,STACK
 
@@ -505,36 +519,17 @@ MEMTEST  XA      0,0
         ****************************************************************
         * Self-test complete, start the MCL interpreter (TODO)
         *
-         
-         AX      13,4
 
-         RIO     48,0,1                         Enable keyboard
-         AX      0,256
-         WIO     48,0,1
+         LX      3,.EXTAB
+         LX      4,.PRIVHDLR
+         ST      4,6(3)
+         
+         XA      15,15,SC,RC(29)
+         AX      15,.USRSTART
+         XA      0,0,SC,RC(1)
+         STSK    .USRSTART
+         SLR
 
-         AX      13,-35
-
-LOOP     LX      3,.PROMPT
-         BSM     .WRITELD
-         
-         LA      13,3
-         LX      4,170
-         BSM     .READLD
-         
-         SA      0,0,I(2),NL,TRZ
-         B       .DIE
-         
-         LA      13,3
-         BSM     .WRITELD
-         
-         B       .LOOP
-
-DIE      AX      13,35
-
-         RIO     48,0,1                         Disable keyboard
-         AX      0,-256
-         WIO     48,0,1
-         
          L       .OK
          B       -1
 
@@ -553,3 +548,5 @@ BANNER2  DW      12
 STACK    BSS     0
 
          ORIGIN  8192
+
+USRSTART RIOS    10,0,0
