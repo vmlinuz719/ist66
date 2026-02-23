@@ -505,6 +505,7 @@ class AssembleHelper0(AssemblerModule):
     def __init__(self):
         self.opcodes = {
             "HLT": 0o070002000001,
+            "BLR": 0o000014000000
         }
 
 def ascii7(string: str) -> list[int]:

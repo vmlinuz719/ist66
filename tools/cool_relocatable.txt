@@ -38,4 +38,4 @@ XTRB9    LA      0,1,CC,R(29),MR(9)
          LA      2,2,CC,RC(36),TCZ
          AA      1,1,I(18)
          LA      1,1,R(27)
-         B       0(12)
+         BLR
