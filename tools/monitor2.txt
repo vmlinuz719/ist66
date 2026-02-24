@@ -12,6 +12,24 @@ TTY_VEC  DW      TTY_INTR,0
 
 USR_SAVE BSS     2
 
+EXC_SPSV BSS     1
+EXC_TOP  BSS     2
+EXC_SAVE BSS     13
+EXC_OLDS BSS     3
+EXC_STK0 BSS     0
+         BSS     128
+EXC_STK1 BSS     0
+
+EXTAB    BSS     16  
+
+MEM_SIZE BSS     1                              Size of memory in words
+
+PCORETAB BSS     1                              address of core table
+SZCORTAB BSS     1                              num entries
+
+TTY_STAT BSS     1
+TTY_ACSV BSS     1
+
          ORIGIN  1024
 
 IPL      LX      3,.USR_RST
@@ -22,6 +40,9 @@ IPL      LX      3,.USR_RST
          ST      1(4)
          LCTL    1,.CW
          RLMSK   .MASK
+
+CW       DW      0036000000000                  RETURN TO IRQL 15
+MASK     DW      02000                          ENABLE CONSOLE IRQ
 
 USR_RST  DW      START,0740000000000
 
@@ -112,21 +133,7 @@ NO_RETRY LX      .RFI_1
          BRM
 RFI_1    RFI     1
 
-HALT     DW      0
-
-EXC_SPSV BSS     1
-EXC_TOP  BSS     2
-EXC_SAVE BSS     13
-EXC_OLDS BSS     3
-EXC_STK0 BSS     0
-         BSS     128
-EXC_STK1 BSS     0
-
-EXTAB    BSS     16   
-
-CW       DW      0036000000000                  RETURN TO IRQL 15
-MASK     DW      02000                          ENABLE CONSOLE IRQ
-TTY_STAT DW      0
+HALT     DW      0 
 
 TTY_INTR NIOC    48                             CLEAR INTR
          ST      0,.TTY_ACSV
@@ -134,10 +141,6 @@ TTY_INTR NIOC    48                             CLEAR INTR
          ST      0,.TTY_STAT
          L       0,.TTY_ACSV
          RFI     0
-
-TTY_ACSV DW      0
-
-DEADBEEF DW      3735928559
 
 CRLF     DW      2
          ASCII   \015\012
@@ -182,25 +185,9 @@ EXC_PFIX DW      7
 PSL      DW      5
          ASCII   \040PSL\040
 
-PROMPT   DW      4
-         ASCII   MCL>
-
-MEM_SIZE DW      0
-
         ****************************************************************
         * Fastcall: X0-X3 for first args, caller saved
         *
-
-        ****************************************************************
-        * DUMPNOW - print current register contents
-        *
-        *INSTR.  ARGUMENTS                      REMARKS                 SORT
-
-DUMPNOW  USING   0-15
-
-         LX      3,2(13)
-         BSM     .DUMPREGS
-         BRM
 
         ****************************************************************
         * DUMPREGS - print register contents
@@ -457,52 +444,6 @@ ENUMDONE DW      0
          BRM
 
         ****************************************************************
-        * PRIVHDLR - handle privileged instruction from user mode
-        *
-        *INSTR.  ARGUMENTS                      REMARKS                 SORT
-
-PRIVHDLR DW      0
-         LA      3,8
-         
-         LX      3,.PRIV
-         BSM     .WRITELD
-         
-         AX      13,-6                          Num buf 3(13)
-         LX      9
-         ST      0(13)                          Pad buf 0(13)
-         
-         LX      3,3(13)
-         
-         STCTL   1,1-
-         L       4,1+
-         LA      4,4,CC,R(9),M(31)
-         L       4,32(4)                        inc this for skip
-         
-         LA      4,4,CC,M(9)
-         L       4,0(4)
-         LX      5,16
-         BSM     .NUM2LD
-
-         LX      3,3(13)
-         LX      4,0(13)
-         LX      5,060
-         BSM     .LEFT_PAD
-
-         LX      3,0(13)
-         BSM     .WRITELD
-         
-         AX      13,6
-         
-         LX      3,.CRLF
-         BSM     .WRITELD
-         
-         XA      0,0,SC,RC(1)
-         BRM
-
-PRIV     DW      23
-         ASCII   Privileged instruction\040
-
-        ****************************************************************
 
 START    LX      13,STACK
 
@@ -552,18 +493,8 @@ MEMTEST  XA      0,0
         * Self-test complete, start the MCL interpreter (TODO)
         *
 
-         LX      3,.EXTAB
-         LX      4,.PRIVHDLR
-         ST      4,6(3)
-         
-         XA      15,15,SC,RC(29)
-         AX      15,.USRSTART
-         XA      0,0,SC,RC(1)
-         STSK    .USRSTART
-         SLR
-
          L       .OK
-         B       -1
+         HLT
 
 OK       DW      0631463146314
 ZERO     DW      0
@@ -578,9 +509,3 @@ BANNER2  DW      12
          ORIGIN  4096
 
 STACK    BSS     0
-
-         ORIGIN  8192
-
-USRSTART RIOS    10,0,0
-         SLR
-         
