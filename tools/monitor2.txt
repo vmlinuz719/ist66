@@ -490,8 +490,29 @@ MEMTEST  XA      0,0
          BSM     .WRITELD
          
         ****************************************************************
-        * Self-test complete, start the MCL interpreter (TODO)
+        * Self-test complete, set up CORETAB
         *
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+
+         L       4,.MEM_SIZE
+         LA      4,4,CC,R(26),M(10)             frame size 1024W
+         ST      4,.SZCORTAB                    save num frames
+         LX      3,.CORETAB
+         ST      3,.PCORETAB                    save addr of first entry
+         XA      2,2                            prev entry
+
+ICORETAB TRN     2
+         ST      2,-2(3)                        set up linked list
+         
+         XA      0,0
+         ST      0(3)
+         ST      1(3)
+         
+         AA      3,3,I(2)
+         LA      3,2
+         
+         AA      4,4,I(-1),TRN
+         B       .ICORETAB
 
          L       .OK
          HLT
@@ -509,3 +530,4 @@ BANNER2  DW      12
          ORIGIN  4096
 
 STACK    BSS     0
+CORETAB  BSS     0
