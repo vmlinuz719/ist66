@@ -27,9 +27,6 @@ MEM_SIZE BSS     1                              Size of memory in words
 PCORETAB BSS     1                              address of core table
 SZCORTAB BSS     1                              num entries
 
-TTY_STAT BSS     1
-TTY_ACSV BSS     1
-
          ORIGIN  1024
 
 IPL      LX      3,.USR_RST
@@ -141,6 +138,9 @@ TTY_INTR NIOC    48                             CLEAR INTR
          ST      0,.TTY_STAT
          L       0,.TTY_ACSV
          RFI     0
+
+TTY_STAT BSS     1
+TTY_ACSV BSS     1
 
 CRLF     DW      2
          ASCII   \015\012
