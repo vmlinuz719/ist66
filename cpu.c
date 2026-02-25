@@ -63,9 +63,9 @@ seg_cache_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pts) {
         (cpu->tlb[cache_row].key != cache_key) || // not cached
         (!(cpu->tlb[cache_row].tag & (1 << 27))) // not present
     ) { // go fish
-        if (selector > 511) return NULL; // no such page
+        int pte_index = selector & 0x1FF;
         
-        uint64_t descriptor_addr = pts->base + selector;
+        uint64_t descriptor_addr = pts->base + pte_index;
         
         if (descriptor_addr >= cpu->mem_size) return NULL;
         
