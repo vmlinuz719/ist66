@@ -40,7 +40,7 @@ typedef void (*ist66_io_dtor_t) (
 typedef struct {
     uint64_t base;
     uint64_t tag;
-    uint8_t key;
+    uint16_t key;
 } seg_cache_t;
 
 struct ist66_cu {
