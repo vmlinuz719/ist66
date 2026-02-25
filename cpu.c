@@ -55,33 +55,6 @@ void seg_invalidate_all(ist66_cu_t *cpu) {
     }
 }
 
-seg_cache_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pts) {
-    uint8_t cache_row = selector & 0x1F;
-    uint16_t cache_key = selector >> 5;
-    
-    if (
-        (cpu->tlb[cache_row].key != cache_key) || // not cached
-        (!(cpu->tlb[cache_row].tag & (1 << 27))) // not present
-    ) { // go fish
-        int pte_index = selector & 0x1FF;
-        
-        uint64_t descriptor_addr = pts->base + pte_index;
-        
-        if (descriptor_addr >= cpu->mem_size) return NULL;
-        
-        uint64_t tag = (cpu->memory[descriptor_addr] & 0x1E0) << 19;
-        tag |= (pts->tag & 0776000000000) | 0777;
-        if (!(tag & (1 << 27))) return NULL; // still not present
-        
-        cpu->tlb[cache_row].base =
-            cpu->memory[descriptor_addr] & 0777777777000;
-        cpu->tlb[cache_row].tag = tag;
-        cpu->tlb[cache_row].key = cache_key;
-    }
-    
-    return &(cpu->tlb[cache_row]);
-}
-
 void tlb_invalidate(ist66_cu_t *cpu, int selector) {
     cpu->tlb[selector & 0x1F].tag = 0;
 }
@@ -197,11 +170,7 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
     }
     
     if (((seg->tag >> 27) & 1)) {
-        seg = tlb_lookup(cpu, (vaddress >> 9), seg);
-        if (seg == NULL) {
-            cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
-            return KEY_FAULT;
-        }
+        // do paging
     }
     
     uint64_t address = (seg->base + offset) & MASK_36;
@@ -285,15 +254,7 @@ uint64_t write_vmem(
     }
     
     if (((seg->tag >> 27) & 1)) {
-        seg = tlb_lookup(cpu, (vaddress >> 9), seg);
-        if (seg == NULL) {
-            cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE | SEG_FAULT_WRITE;
-            return KEY_FAULT;
-        }
-        if (!((seg->tag >> 26) & 1)) {
-            cpu->c[C_SF] = vaddress | SEG_FAULT_RIGHTS | SEG_FAULT_WRITE | SEG_FAULT_PAGE;
-            return KEY_FAULT;
-        }
+        // do paging
     }
     
     uint64_t address = (seg->base + offset) & MASK_36;
@@ -2114,12 +2075,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 
                 if (((seg->tag >> 27) & 1)) {
-                    seg = tlb_lookup(cpu, (vaddress >> 9) & 0x1F, seg);
-                    if (seg == NULL) {
-                        cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
-                        set_pc(cpu, get_pc(cpu) + 1);
-                        return;
-                    }
+                    // do paging
                 }
                 
                 uint64_t address = (seg->base + offset) & MASK_36;
