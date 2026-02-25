@@ -43,26 +43,27 @@ seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
     return &(cpu->seg_cache[cache_row]);
 }
 
+void tlb_invalidate(ist66_cu_t *cpu, int selector) {
+    cpu->tlb[selector & 0x1F].rights = 0;
+}
+
+void tlb_invalidate_all(ist66_cu_t *cpu) {
+    for (int i = 0; i < 32; i++) {
+        if (!(cpu->tlb[i].rights & TLB_GLOBAL)) {
+            cpu->tlb[i].rights = 0;
+        }
+    }
+}
+
 void seg_invalidate(ist66_cu_t *cpu, int selector) {
     cpu->seg_cache[selector & 0x1F].tag = 0;
+    tlb_invalidate_all(cpu);
 }
 
 void seg_invalidate_all(ist66_cu_t *cpu) {
     for (int i = 0; i < 32; i++) {
         if (!(cpu->seg_cache[i].tag & (1 << 25))) {
             cpu->seg_cache[i].tag = 0;
-        }
-    }
-}
-
-void tlb_invalidate(ist66_cu_t *cpu, int selector) {
-    cpu->tlb[selector & 0x1F].tag = 0;
-}
-
-void tlb_invalidate_all(ist66_cu_t *cpu) {
-    for (int i = 0; i < 32; i++) {
-        if (!(cpu->tlb[i].tag & (1 << 25))) {
-            cpu->tlb[i].tag = 0;
         }
     }
 }
