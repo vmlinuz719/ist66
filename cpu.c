@@ -195,11 +195,18 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
         return KEY_FAULT;
     }
     
+    uint64_t address = (seg->base + offset) & MASK_36;
+    
     if (((seg->tag >> 27) & 1)) {
-        // do paging
+        tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
+        if (entry == NULL) {
+            cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
+            return KEY_FAULT;
+        }
+        address = entry->pg_base + (vaddress & 0x1FF);
     }
     
-    uint64_t address = (seg->base + offset) & MASK_36;
+    
     if (address >= cpu->mem_size) return MEM_FAULT;
     
     return cpu->memory[address] & MASK_36;
@@ -279,11 +286,21 @@ uint64_t write_vmem(
         return KEY_FAULT;
     }
     
+    uint64_t address = (seg->base + offset) & MASK_36;
+    
     if (((seg->tag >> 27) & 1)) {
-        // do paging
+        tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
+        if (entry == NULL) {
+            cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
+            return KEY_FAULT;
+        }
+        if (!(entry->rights & TLB_WRITE)) {
+            cpu->c[C_SF] = vaddress | SEG_FAULT_RIGHTS | SEG_FAULT_WRITE | SEG_FAULT_PAGE;
+            return KEY_FAULT;
+        }
+        address = entry->pg_base + (vaddress & 0x1FF);
     }
     
-    uint64_t address = (seg->base + offset) & MASK_36;
     if (address >= cpu->mem_size) return MEM_FAULT;
     
     uint64_t old_tag = cpu->memory[address] & ~(MASK_36);
