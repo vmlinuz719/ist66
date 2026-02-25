@@ -49,7 +49,7 @@ typedef struct {
 #define TLB_NOCACHE 1
 
 typedef struct {
-    uint64_t pg_base;
+    uint64_t pg_base;   // 512W aligned
     uint16_t key;       // high 9+4=13 bits of virtual address
                         // segment selector + high 4 bits of page selector
     uint8_t rights;     // present, writable, global, nocache

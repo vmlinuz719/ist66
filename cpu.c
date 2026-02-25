@@ -43,6 +43,31 @@ seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
     return &(cpu->seg_cache[cache_row]);
 }
 
+tlb_entry_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pg_table) {
+    uint8_t cache_row = selector & 0x1F;
+    uint16_t cache_key = selector >> 5;
+    uint16_t page_select = selector & 0x1FF;
+    
+    if (
+        (cpu->tlb[cache_row].key != cache_key) || // not cached
+        (!(cpu->tlb[cache_row].rights & TLB_PRESENT)) // not present
+    ) { // go fish
+        uint64_t descriptor_addr = pg_table->base + page_select;
+        
+        if (descriptor_addr >= cpu->mem_size) return NULL;
+        
+        uint8_t rights = (cpu->memory[descriptor_addr] & 0x1E0) >> 5;
+        if (!(rights & TLB_PRESENT)) return NULL; // still not present
+        
+        cpu->tlb[cache_row].pg_base =
+            cpu->memory[descriptor_addr] & 0777777777000;
+        cpu->tlb[cache_row].rights = rights;
+        cpu->tlb[cache_row].key = cache_key;
+    }
+    
+    return &(cpu->tlb[cache_row]);
+}
+
 void tlb_invalidate(ist66_cu_t *cpu, int selector) {
     cpu->tlb[selector & 0x1F].rights = 0;
 }
