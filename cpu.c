@@ -15,6 +15,7 @@
 #include "lpt.h"
 #include "tty.h"
 #include "panel.h"
+#include "bishop.h"
 
 seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
     uint8_t cache_row = selector & 0x1F;
@@ -2456,8 +2457,10 @@ int main(int argc, char *argv[]) {
     
     init_cpu(&cpu, 262144, 512);
 
-    if (do_sdl)
-        init_panel(&cpu, 0);
+    if (do_sdl) {
+        // init_panel(&cpu, 0);
+        init_bishop(&cpu, 32);
+    }
 
     init_ppt_ex(&cpu, 012, 9, "monitor.ppt");
     init_lpt(&cpu, 013, 8, stdout);
