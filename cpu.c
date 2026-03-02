@@ -2117,11 +2117,18 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                     return;
                 }
                 
+                uint64_t address = (seg->base + offset) & MASK_36;
+                
                 if (((seg->tag >> 27) & 1)) {
-                    // do paging
+                    tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
+                    if (entry == NULL) {
+                        cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
+                        set_pc(cpu, get_pc(cpu) + 1);
+                        return;
+                    }
+                    address = entry->pg_base + (vaddress & 0x1FF);
                 }
                 
-                uint64_t address = (seg->base + offset) & MASK_36;
                 cpu->c[ac] = address;
                 set_pc(cpu, get_pc(cpu) + 2);
             } break;
