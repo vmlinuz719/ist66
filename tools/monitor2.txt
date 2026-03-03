@@ -494,10 +494,19 @@ MEMTEST  XA      0,0
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-         L       .PATTERN
-         WIO     32,0,1
-         L       .TILE
+         L       .BG_DIM
          WIO     32,0,2
+         XA      0,0
+         WIO     32,0,3
+         L       .BACKGRND
+         WIOS    32,0,1
+         TIOND   32
+         B       .-1
+
+         L       .PATTERN
+         WIO     32,0,2
+         L       .TILE
+         WIO     32,0,3
          LX      3,.PATTERN
          WIOS    32,3,0
          TIOND   32
@@ -509,11 +518,11 @@ MEMTEST  XA      0,0
          TIOND   32
          B       .-1
          LX      72
-         WIO     32,0,3
+         WIO     32,0,4
          L       .PATTERN
-         WIO     32,0,1
-         L       .TILE
          WIO     32,0,2
+         L       .TILE
+         WIO     32,0,3
          LX      3,.PATTERN
          WIOS    32,3,0
 
@@ -536,6 +545,9 @@ PATTERN  DW      0000000006044
          DW      0666706666661
          DW      0666166666752
          DW      0746746674604
+
+BG_DIM   DW      0777777
+BACKGRND DW      0100010001000
          
 
         ****************************************************************

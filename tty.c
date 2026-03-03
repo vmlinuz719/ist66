@@ -332,10 +332,20 @@ void destroy_tty(ist66_cu_t *cpu, int id) {
 }
 
 void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
+    int opt = 1;
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (server_sock == -1) {
         fprintf(stderr, "TTY: %04o init failed\n", id);
         return;
+    }
+    
+    if (
+        setsockopt(
+            server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)
+        ) < 0
+    ) {
+        fprintf(stderr, "TTY: %04o setsockopt(SO_REUSEADDR) failed", id);
+        exit(EXIT_FAILURE);
     }
     
     struct sockaddr_in server_in;

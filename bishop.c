@@ -30,6 +30,7 @@ typedef struct {
     ist66_cu_t *cpu;
     
     uint64_t dma_addr;
+    uint64_t pattern;
     uint64_t rect; // y, x, w, h (9 bits each)
     uint64_t base; // iy, ix, y0, x0 (9 bits each)
     uint64_t scroll;
@@ -97,6 +98,40 @@ uint64_t bishop_dma_read(
     return ea | (sh << 27);
 }
 
+void bishop_dma_pattern(
+    bishop_ctx_t *bishop, uint64_t pattern,
+    int x, int y, int w, int h
+) {
+    uint64_t sh = 36;
+
+    for (int cur_y = y; cur_y < y + h; cur_y++) {
+        for (int cur_x = x; cur_x < x + w; cur_x++) {
+            sh -= 1;
+            if (sh > 35) {
+                sh = 35;
+            }
+
+            uint64_t data = (pattern >> sh) & 1;
+
+            bishop->pixels[
+                ((cur_y + (bishop->scroll & 0x1FF))
+                    % (BISHOP_HEIGHT + BISHOP_OVERSCAN)) * BISHOP_WIDTH
+                + (cur_x % BISHOP_WIDTH)
+            ] = data;
+        }
+    }
+
+    pthread_mutex_lock(&bishop->update_lock);
+    
+    bishop->updated = 1;
+    if (x < bishop->x) bishop->x = x;
+    if (y < bishop->y) bishop->y = y;
+    if (x + w - 1 > bishop->x1) bishop->x1 = x + w - 1;
+    if (y + h - 1 > bishop->y1) bishop->y1 = y + h - 1;
+
+    pthread_mutex_unlock(&bishop->update_lock);
+}
+
 void bishop_scroll(bishop_ctx_t *bishop, uint64_t new_scroll) {
     pthread_mutex_lock(&bishop->update_lock);
     bishop->scroll = new_scroll;
@@ -125,7 +160,7 @@ void *bishop_dma(void *vctx) {
             ctx->running = 0;
         }
         
-        else if (command == 1) {
+        else if (command == 1 || command == 2) {
             uint64_t rect = ctx->rect;
             uint64_t base = ctx->base;
             
@@ -138,25 +173,36 @@ void *bishop_dma(void *vctx) {
             base >>= 9;
             int read_y = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
             
-            uint64_t new_addr = 
-                bishop_dma_read(
+            if (command == 1) {
+                uint64_t new_addr = 
+                    bishop_dma_read(
+                        ctx,
+                        ctx->dma_addr,
+                        read_x,
+                        read_y,
+                        read_w,
+                        read_h
+                    );
+                if (new_addr == MASK_36) {
+                    // error
+                    pthread_mutex_lock(&ctx->cmd_lock);
+                    ctx->command = 0;
+                    ctx->done = 1;
+                    pthread_mutex_unlock(&ctx->cmd_lock);
+                    continue;
+                }
+                
+                ctx->dma_addr = new_addr;
+            } else if (command == 2) {
+                bishop_dma_pattern(
                     ctx,
-                    ctx->dma_addr,
+                    ctx->pattern,
                     read_x,
                     read_y,
                     read_w,
                     read_h
                 );
-            if (new_addr == MASK_36) {
-                // error
-                pthread_mutex_lock(&ctx->cmd_lock);
-                ctx->command = 0;
-                ctx->done = 1;
-                pthread_mutex_unlock(&ctx->cmd_lock);
-                continue;
             }
-            
-            ctx->dma_addr = new_addr;
             
             base = ctx->base;
             uint64_t new_x0 = 
@@ -186,22 +232,34 @@ uint64_t bishop_io(
     
     switch (transfer) {
         case 1: ctx->dma_addr = data & MASK_36; break;
-        case 3: ctx->rect = data & MASK_36; break;
-        case 5: ctx->base = data & MASK_36; break;
-        case 7: bishop_scroll(ctx, data & MASK_36); break;
+        case 3: ctx->pattern = data & MASK_36; break;
+        case 5: ctx->rect = data & MASK_36; break;
+        case 7: ctx->base = data & MASK_36; break;
+        case 9: bishop_scroll(ctx, data & MASK_36); break;
     }
     
     if (transfer != 14) {
         switch (ctl) {
             case 1: {
-                pthread_mutex_lock(&ctx->cmd_lock);
-                ctx->command = (transfer & 1) || (transfer == 15);
-                if (ctx->done) {
-                    ctx->done = 0;
-                    // intr_release(cpu, ctx->irq);
+                if (transfer == 1) {
+                    pthread_mutex_lock(&ctx->cmd_lock);
+                    ctx->command = 1;
+                    if (ctx->done) {
+                        ctx->done = 0;
+                        // intr_release(cpu, ctx->irq);
+                    }
+                    pthread_cond_signal(&ctx->cmd_cond);
+                    pthread_mutex_unlock(&ctx->cmd_lock);
+                } else if (transfer == 3) {
+                    pthread_mutex_lock(&ctx->cmd_lock);
+                    ctx->command = 2;
+                    if (ctx->done) {
+                        ctx->done = 0;
+                        // intr_release(cpu, ctx->irq);
+                    }
+                    pthread_cond_signal(&ctx->cmd_cond);
+                    pthread_mutex_unlock(&ctx->cmd_lock);
                 }
-                pthread_cond_signal(&ctx->cmd_cond);
-                pthread_mutex_unlock(&ctx->cmd_lock);
             } break;
             case 2: {
                 pthread_mutex_lock(&ctx->cmd_lock);
@@ -230,9 +288,10 @@ uint64_t bishop_io(
     
     switch (transfer) {
         case 0: return ctx->dma_addr;
-        case 2: return ctx->rect;
-        case 4: return ctx->base;
-        case 6: return ctx->scroll;
+        case 2: return ctx->pattern;
+        case 4: return ctx->rect;
+        case 6: return ctx->base;
+        case 8: return ctx->scroll;
         default: return 0;
     }
     
