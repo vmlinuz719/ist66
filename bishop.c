@@ -57,7 +57,16 @@ uint64_t bishop_dma_read(
                 (ea >= bishop->cpu->mem_size)
                 || ((cur_y * BISHOP_WIDTH + cur_x)
                 >= (BISHOP_WIDTH * (BISHOP_HEIGHT + BISHOP_OVERSCAN)))
-            ) return MASK_36;
+            ) {
+                pthread_mutex_lock(&bishop->update_lock);
+                bishop->updated = 1;
+                bishop->x = 0;
+                bishop->y = 0;
+                bishop->x1 = BISHOP_WIDTH - 1;
+                bishop->y1 = BISHOP_HEIGHT - 1;
+                pthread_mutex_unlock(&bishop->update_lock);
+                return MASK_36;
+            }
 
             uint64_t data = bishop->cpu->memory[ea];
             data &= MASK_36;
@@ -321,8 +330,8 @@ void init_bishop(ist66_cu_t *cpu, int id) {
 
     ctx->cpu = cpu;
     
-    ctx->x1 = BISHOP_WIDTH;
-    ctx->y1 = BISHOP_HEIGHT;
+    ctx->x1 = BISHOP_WIDTH - 1;
+    ctx->y1 = BISHOP_HEIGHT - 1;
     pthread_mutex_init(&ctx->update_lock, NULL);
     pthread_mutex_init(&ctx->cmd_lock, NULL);
     pthread_cond_init(&ctx->cmd_cond, NULL);
