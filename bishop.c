@@ -21,12 +21,17 @@ typedef struct {
     uint8_t pixels[BISHOP_WIDTH * (BISHOP_HEIGHT + BISHOP_OVERSCAN)];
     
     int x, y, x1, y1, updated, command;
-    pthread_mutex_t update_lock;
+    pthread_mutex_t update_lock, cmd_lock;
     pthread_cond_t cmd_cond;
+
 
     int running, done;
     pthread_t thread, dma_thread;
     ist66_cu_t *cpu;
+    
+    uint64_t rect; // h, w, y, x (9 bits each)
+    uint64_t base; // iy, ix, y0, x0 (9 bits each)
+    uint64_t dma_addr;
 
     SDL_Window *window;
     SDL_Renderer *render;
@@ -63,13 +68,86 @@ uint64_t bishop_dma_read(
         }
     }
 
+    pthread_mutex_lock(&bishop->update_lock);
+    
     bishop->updated = 1;
     if (x < bishop->x) bishop->x = x;
     if (y < bishop->y) bishop->y = y;
     if (x + w - 1 > bishop->x1) bishop->x1 = x + w - 1;
     if (y + h - 1 > bishop->y1) bishop->y1 = y + h - 1;
 
+    pthread_mutex_unlock(&bishop->update_lock);
+
     return ea | (sh << 27);
+}
+
+void *bishop_dma(void *vctx) {
+    bishop_ctx_t *ctx = (bishop_ctx_t *) vctx;
+    
+    while (ctx->running) {
+        pthread_mutex_lock(&ctx->cmd_lock);
+        while (!ctx->command) {
+            pthread_cond_wait(&ctx->cmd_cond, &ctx->cmd_lock);
+            
+        }
+        
+        int command = ctx->command;
+        pthread_mutex_unlock(&ctx->cmd_lock);
+        
+        if (command == -1) {
+            ctx->running = 0;
+        }
+        
+        else if (command == 1) {
+            uint64_t rect = ctx->rect;
+            uint64_t base = ctx->base;
+            
+            int read_x = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
+            rect >>= 9;
+            base >>= 9;
+            int read_y = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
+            rect >>= 9;
+            base >>= 9;
+            int read_w = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
+            rect >>= 9;
+            base >>= 9;
+            int read_h = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
+            
+            uint64_t new_addr = 
+                bishop_dma_read(
+                    ctx,
+                    ctx->dma_addr,
+                    read_x,
+                    read_y,
+                    read_w,
+                    read_h
+                );
+            if (new_addr == MASK_36) {
+                // error
+                pthread_mutex_lock(&ctx->cmd_lock);
+                ctx->command = 0;
+                ctx->done = 1;
+                pthread_mutex_unlock(&ctx->cmd_lock);
+                continue;
+            }
+            
+            ctx->dma_addr = new_addr;
+            
+            base = ctx->base;
+            uint64_t new_x0 = 
+                ((base & 0x1FF) + ((base >> 18) & 0x1FF)) & 0x1FF;
+            uint64_t new_y0 = 
+                (((base >> 9) & 0x1FF) + ((base >> 27) & 0x1FF)) & 0x1FF;
+            ctx->base = (ctx->base & 0777777000000) | (new_y0 << 9) | new_x0;
+            
+            pthread_mutex_lock(&ctx->cmd_lock);
+            ctx->command = 0;
+            ctx->done = 1;
+            pthread_mutex_unlock(&ctx->cmd_lock);
+        }
+    }
+    
+    return NULL;
 }
 
 void *bishop_thread(void *ctx) {
@@ -107,14 +185,6 @@ void *bishop_thread(void *ctx) {
     int pixbuf[BISHOP_WIDTH * BISHOP_HEIGHT];
 
     while(bishop->running) {
-
-        // test
-        bishop_dma_read(
-            bishop, 511, 64, 64, 36, 16
-        );
-        bishop_dma_read(
-            bishop, 1023, 256, 64, 144, 256
-        );
 
         if (bishop->updated) {
             pthread_mutex_lock(&bishop->update_lock);
@@ -178,7 +248,11 @@ void destroy_bishop(ist66_cu_t *cpu, int id) {
     bishop_ctx_t *bishop = cpu->ioctx[id];
     bishop->running = 0;
     pthread_join(bishop->thread, NULL);
+    bishop->command = -1;
+    pthread_cond_signal(&bishop->cmd_cond);
+    pthread_join(bishop->dma_thread, NULL);
     pthread_cond_destroy(&bishop->cmd_cond);
+    pthread_mutex_destroy(&bishop->cmd_lock);
     pthread_mutex_destroy(&bishop->update_lock);
 
     free(bishop);
@@ -197,11 +271,13 @@ void init_bishop(ist66_cu_t *cpu, int id) {
     ctx->x1 = BISHOP_WIDTH;
     ctx->y1 = BISHOP_HEIGHT;
     pthread_mutex_init(&ctx->update_lock, NULL);
+    pthread_mutex_init(&ctx->cmd_lock, NULL);
     pthread_cond_init(&ctx->cmd_cond, NULL);
 
     ctx->running = 1;
     ctx->updated = 1;
     ctx->done = 1;
     pthread_create(&(ctx->thread), NULL, bishop_thread, ctx);
+    pthread_create(&(ctx->dma_thread), NULL, bishop_dma, ctx);
     fprintf(stderr, "TV2: %04o\n", id);
 }
