@@ -2507,6 +2507,7 @@ int main(int argc, char *argv[]) {
     cpu.memory[525] = 0700650100000;
     cpu.memory[526] = 0053016000001;
     cpu.memory[527] = 0000002777764;
+
     
     while (running) {
         printf("> ");
