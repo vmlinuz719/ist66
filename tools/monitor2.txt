@@ -490,29 +490,27 @@ MEMTEST  XA      0,0
          BSM     .WRITELD
          
         ****************************************************************
-        * Self-test complete, set up CORETAB
+        * Self-test complete, set up CORETAB (TODO)
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-         L       4,.MEM_SIZE
-         LA      4,4,CC,R(26),M(10)             frame size 1024W
-         ST      4,.SZCORTAB                    save num frames
-         LX      3,.CORETAB
-         ST      3,.PCORETAB                    save addr of first entry
-         XA      2,2                            prev entry
-
-ICORETAB TRN     2
-         ST      2,-2(3)                        set up linked list
-         
-         XA      0,0
-         ST      0(3)
-         ST      1(3)
-         
-         AA      3,3,I(2)
-         LA      3,2
-         
-         AA      4,4,I(-1),TRN
-         B       .ICORETAB
+         L       .PATTERN
+         WIO     32,0,1
+         L       .TILE
+         WIO     32,0,2
+         LX      3,.PATTERN
+         WIOS    32,3,0
+         TIOND   32
+         B       .-1
+         WIOS    32,3,0
+         TIOND   32
+         B       .-1
+         WIOS    32,3,0
+         TIOND   32
+         B       .-1
+         WIOS    32,3,0
+         TIOND   32
+         B       .-1
 
          L       .OK
          HLT
@@ -524,6 +522,46 @@ BANNER1  DW      11
          ASCII   RDC-700/E1\040
 BANNER2  DW      12
          ASCII   W ONLINE\015\012\015\012
+
+TILE     DW      0044044000000
+PATTERN  DW      0000000044044
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         DW      0707070707070
+         DW      0070707070707
+         
 
         ****************************************************************
 

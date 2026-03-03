@@ -30,7 +30,7 @@ typedef struct {
     ist66_cu_t *cpu;
     
     uint64_t dma_addr;
-    uint64_t rect; // h, w, y, x (9 bits each)
+    uint64_t rect; // y, x, w, h (9 bits each)
     uint64_t base; // iy, ix, y0, x0 (9 bits each)
 
     SDL_Window *window;
@@ -102,16 +102,14 @@ void *bishop_dma(void *vctx) {
             uint64_t rect = ctx->rect;
             uint64_t base = ctx->base;
             
+            int read_w = (rect & 0x1FF);
+            rect >>= 9;
+            int read_h = (rect & 0x1FF);
+            rect >>= 9;
             int read_x = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
             rect >>= 9;
             base >>= 9;
             int read_y = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
-            rect >>= 9;
-            base >>= 9;
-            int read_w = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
-            rect >>= 9;
-            base >>= 9;
-            int read_h = ((rect & 0x1FF) + (base & 0x1FF)) & 0x1FF;
             
             uint64_t new_addr = 
                 bishop_dma_read(
@@ -148,6 +146,59 @@ void *bishop_dma(void *vctx) {
     }
     
     return NULL;
+}
+
+uint64_t bishop_io(
+    void *vctx,
+    uint64_t data,
+    int ctl,
+    int transfer
+) {
+    bishop_ctx_t *ctx = (bishop_ctx_t *) vctx;
+    // ist66_cu_t *cpu = ctx->cpu;
+    
+    switch (transfer) {
+        case 1: ctx->dma_addr = data & MASK_36; break;
+        case 3: ctx->rect = data & MASK_36; break;
+        case 5: ctx->base = data & MASK_36; break;
+    }
+    
+    if (transfer != 14) {
+        switch (ctl) {
+            case 1: {
+                pthread_mutex_lock(&ctx->cmd_lock);
+                ctx->command = (transfer & 1) || (transfer == 15);
+                if (ctx->done) {
+                    ctx->done = 0;
+                    // intr_release(cpu, ctx->irq);
+                }
+                pthread_cond_signal(&ctx->cmd_cond);
+                pthread_mutex_unlock(&ctx->cmd_lock);
+            } break;
+            case 2: {
+                pthread_mutex_lock(&ctx->cmd_lock);
+                ctx->command = 0;
+                if (ctx->done) {
+                    ctx->done = 0;
+                    // intr_release(cpu, ctx->irq);
+                }
+                pthread_mutex_unlock(&ctx->cmd_lock);
+            } break;
+        }
+    }
+    
+    if (transfer == 14) {
+        int status = (ctx->done << 1) | ((!!(ctx->command)) & 1);
+        return (uint64_t) status;
+    }
+    
+    switch (transfer) {
+        case 0: return ctx->dma_addr;
+        case 2: return ctx->rect;
+        case 4: return ctx->base;
+        default: return 0;
+    }
+    
 }
 
 void *bishop_thread(void *ctx) {
@@ -264,7 +315,7 @@ void init_bishop(ist66_cu_t *cpu, int id) {
     
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_bishop;
-    cpu->io[id] = NULL;
+    cpu->io[id] = bishop_io;
 
     ctx->cpu = cpu;
     
