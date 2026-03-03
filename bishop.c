@@ -32,6 +32,7 @@ typedef struct {
     uint64_t dma_addr;
     uint64_t rect; // y, x, w, h (9 bits each)
     uint64_t base; // iy, ix, y0, x0 (9 bits each)
+    uint64_t scroll;
 
     SDL_Window *window;
     SDL_Renderer *render;
@@ -55,8 +56,10 @@ uint64_t bishop_dma_read(
 
             if (
                 (ea >= bishop->cpu->mem_size)
+                /*
                 || ((cur_y * BISHOP_WIDTH + cur_x)
                 >= (BISHOP_WIDTH * (BISHOP_HEIGHT + BISHOP_OVERSCAN)))
+                */
             ) {
                 pthread_mutex_lock(&bishop->update_lock);
                 bishop->updated = 1;
@@ -73,7 +76,11 @@ uint64_t bishop_dma_read(
             data >>= sh;
             data &= (1L << bs) - 1;
 
-            bishop->pixels[cur_y * BISHOP_WIDTH + cur_x] = data;
+            bishop->pixels[
+                ((cur_y + (bishop->scroll & 0x1FF))
+                    % (BISHOP_HEIGHT + BISHOP_OVERSCAN)) * BISHOP_WIDTH
+                + (cur_x % BISHOP_WIDTH)
+            ] = data;
         }
     }
 
@@ -88,6 +95,17 @@ uint64_t bishop_dma_read(
     pthread_mutex_unlock(&bishop->update_lock);
 
     return ea | (sh << 27);
+}
+
+void bishop_scroll(bishop_ctx_t *bishop, uint64_t new_scroll) {
+    pthread_mutex_lock(&bishop->update_lock);
+    bishop->scroll = new_scroll;
+    bishop->updated = 1;
+    bishop->x = 0;
+    bishop->y = 0;
+    bishop->x1 = BISHOP_WIDTH - 1;
+    bishop->y1 = BISHOP_HEIGHT - 1;
+    pthread_mutex_unlock(&bishop->update_lock);
 }
 
 void *bishop_dma(void *vctx) {
@@ -170,6 +188,7 @@ uint64_t bishop_io(
         case 1: ctx->dma_addr = data & MASK_36; break;
         case 3: ctx->rect = data & MASK_36; break;
         case 5: ctx->base = data & MASK_36; break;
+        case 7: bishop_scroll(ctx, data & MASK_36); break;
     }
     
     if (transfer != 14) {
@@ -193,6 +212,14 @@ uint64_t bishop_io(
                 }
                 pthread_mutex_unlock(&ctx->cmd_lock);
             } break;
+            case 3: {
+                uint64_t new_scroll =
+                    ((ctx->scroll & 0x1FF)
+                    + ((ctx->scroll >> 9) & 0x1FF))
+                    & 0x1FF;
+                new_scroll |= ctx->scroll & 0x3FE00;
+                bishop_scroll(ctx, new_scroll);
+            } break;
         }
     }
     
@@ -205,6 +232,7 @@ uint64_t bishop_io(
         case 0: return ctx->dma_addr;
         case 2: return ctx->rect;
         case 4: return ctx->base;
+        case 6: return ctx->scroll;
         default: return 0;
     }
     
@@ -253,6 +281,7 @@ void *bishop_thread(void *ctx) {
             
             int captured_x = bishop->x;
             int captured_y = bishop->y;
+            int captured_scroll = bishop->scroll & 0x1FF;
             int captured_x1 = MIN(bishop->x1, BISHOP_WIDTH - 1);
             int captured_y1 = MIN(bishop->y1, BISHOP_HEIGHT - 1);
             
@@ -273,17 +302,20 @@ void *bishop_thread(void *ctx) {
                 .h = height
             };
             
-            int write_base = (captured_y * BISHOP_WIDTH) + captured_x;
+            int write_y = ((captured_y + captured_scroll)
+                % (BISHOP_HEIGHT + BISHOP_OVERSCAN));
             int write_offset = 0;
             
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
+                    int write_base = write_y * BISHOP_WIDTH + captured_x;
                     int pixel = (bishop->pixels[write_base + x])
                         ? RGBA_GREEN
                         : RGBA_BLACK;
                     pixbuf[write_offset++] = pixel;
                 }
-                write_base += BISHOP_WIDTH;
+                write_y += 1;
+                write_y %= (BISHOP_HEIGHT + BISHOP_OVERSCAN);
             }
             
             SDL_UpdateTexture(

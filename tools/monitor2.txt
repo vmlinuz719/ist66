@@ -508,6 +508,14 @@ MEMTEST  XA      0,0
          WIOS    32,3,0
          TIOND   32
          B       .-1
+         LX      72
+         WIO     32,0,3
+         L       .PATTERN
+         WIO     32,0,1
+         L       .TILE
+         WIO     32,0,2
+         LX      3,.PATTERN
+         WIOS    32,3,0
 
          L       .OK
          HLT
