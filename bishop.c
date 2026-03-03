@@ -111,6 +111,9 @@ void *bishop_thread(void *ctx) {
         SDL_RenderClear(bishop->render);
         SDL_RenderCopy(bishop->render, tex, NULL, NULL);
         SDL_RenderPresent(bishop->render);
+
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {};
     }
     
     SDL_DestroyTexture(tex);
