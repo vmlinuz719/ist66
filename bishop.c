@@ -29,9 +29,9 @@ typedef struct {
     pthread_t thread, dma_thread;
     ist66_cu_t *cpu;
     
+    uint64_t dma_addr;
     uint64_t rect; // h, w, y, x (9 bits each)
     uint64_t base; // iy, ix, y0, x0 (9 bits each)
-    uint64_t dma_addr;
 
     SDL_Window *window;
     SDL_Renderer *render;
@@ -135,10 +135,10 @@ void *bishop_dma(void *vctx) {
             
             base = ctx->base;
             uint64_t new_x0 = 
-                ((base & 0x1FF) + ((base >> 18) & 0x1FF)) & 0x1FF;
+                ((base & 0x1FF) + ((base >> 18) & 0x1FF));
             uint64_t new_y0 = 
                 (((base >> 9) & 0x1FF) + ((base >> 27) & 0x1FF)) & 0x1FF;
-            ctx->base = (ctx->base & 0777777000000) | (new_y0 << 9) | new_x0;
+            ctx->base = ((ctx->base & 0777777000000) | (new_y0 << 9)) + new_x0;
             
             pthread_mutex_lock(&ctx->cmd_lock);
             ctx->command = 0;
