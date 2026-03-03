@@ -207,7 +207,7 @@ void *bishop_thread(void *ctx) {
     bishop->window = SDL_CreateWindow(
         "You're watching Bishop TV",
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        BISHOP_WIDTH, BISHOP_HEIGHT,
+        2 * BISHOP_WIDTH, 2 * BISHOP_HEIGHT,
         SDL_WINDOW_SHOWN
     );
     if (!bishop->window) {
@@ -224,6 +224,8 @@ void *bishop_thread(void *ctx) {
         fprintf(stderr, "Bishop: renderer creation failed: %s\n", SDL_GetError());
         return NULL;
     }
+    
+    SDL_RenderSetLogicalSize(bishop->render, BISHOP_WIDTH, BISHOP_HEIGHT);
     
     SDL_Texture *tex = SDL_CreateTexture(
         bishop->render,
