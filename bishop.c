@@ -113,7 +113,7 @@ void *bishop_thread(void *ctx) {
             bishop, 511, 64, 64, 36, 16
         );
         bishop_dma_read(
-            bishop, 1023, 256, 64, 36, 256
+            bishop, 1023, 256, 64, 144, 256
         );
 
         if (bishop->updated) {
