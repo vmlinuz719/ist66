@@ -208,3 +208,6 @@ STACK    BSS     0
 
 BMPM1    BSS     1
 BITMAP   BSS     0
+
+        * No PGO: 62.22 MIPS
+        *    PGO: 89.32 MIPS

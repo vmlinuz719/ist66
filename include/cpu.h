@@ -64,7 +64,7 @@ struct ist66_cu {
     rdc700_float_t f[16];
     seg_cache_t seg_cache[32];
     tlb_entry_t tlb[32];
-    uint64_t stop_code;
+    uint64_t stop_code, cycles;
     
     uint64_t xeq_inst, inc_addr, inc_data, next_stack;
     int do_edit, do_edsk, do_inc, do_stack;

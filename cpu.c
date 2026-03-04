@@ -2373,10 +2373,13 @@ void *run(void *vctx) {
             cpu->a[13] = cpu->next_stack;
             cpu->do_stack = 0;
         }
+        cpu->cycles++;
     } while (!cpu->exit || cpu->do_edit);
     
     cpu->running = 0;
-    fprintf(stderr, "CPU: halted, code %012lo\n", cpu->stop_code);
+    fprintf(stderr, "CPU: halted, code %012lo after %ld instructions\n", 
+        cpu->stop_code, cpu->cycles);
+    cpu->cycles = 0;
     return NULL;
 }
 
