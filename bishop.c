@@ -31,7 +31,7 @@ typedef struct {
     
     uint64_t dma_addr;
     uint64_t pattern;
-    uint64_t rect; // y, x, w, h (9 bits each)
+    uint64_t rect; // y, x, h-1, w-1 (9 bits each)
     uint64_t base; // iy, ix, y0, x0 (9 bits each)
     uint64_t scroll;
 
@@ -47,8 +47,13 @@ uint64_t bishop_dma_read(
     uint64_t sh = address >> 27;
     uint64_t bs = 1;
 
-    for (int cur_y = y; cur_y < y + h; cur_y++) {
-        for (int cur_x = x; cur_x < x + w; cur_x++) {
+    int min_x = BISHOP_WIDTH;
+    int min_y = BISHOP_HEIGHT + BISHOP_OVERSCAN;
+    int max_x = -1;
+    int max_y = -1;
+
+    for (int cur_y = y; cur_y <= y + h; cur_y++) {
+        for (int cur_x = x; cur_x <= x + w; cur_x++) {
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -77,10 +82,17 @@ uint64_t bishop_dma_read(
             data >>= sh;
             data &= (1L << bs) - 1;
 
+            int write_y = (cur_y % (BISHOP_HEIGHT + BISHOP_OVERSCAN));
+            if (write_y < min_y) min_y = write_y;
+            if (write_y > max_y) max_y = write_y;
+
+            int write_x = (cur_x % BISHOP_WIDTH);
+            if (write_x < min_x) min_x = write_x;
+            if (write_x > max_x) max_x = write_x;
+
             bishop->pixels[
-                ((cur_y + (bishop->scroll & 0x1FF))
-                    % (BISHOP_HEIGHT + BISHOP_OVERSCAN)) * BISHOP_WIDTH
-                + (cur_x % BISHOP_WIDTH)
+                ((write_y + (bishop->scroll & 0x1FF)) % (BISHOP_HEIGHT + BISHOP_OVERSCAN)) * BISHOP_WIDTH
+                + write_x
             ] = data;
         }
     }
@@ -88,10 +100,10 @@ uint64_t bishop_dma_read(
     pthread_mutex_lock(&bishop->update_lock);
     
     bishop->updated = 1;
-    if (x < bishop->x) bishop->x = x;
-    if (y < bishop->y) bishop->y = y;
-    if (x + w - 1 > bishop->x1) bishop->x1 = x + w - 1;
-    if (y + h - 1 > bishop->y1) bishop->y1 = y + h - 1;
+    if (min_x < bishop->x) bishop->x = min_x;
+    if (min_y < bishop->y) bishop->y = min_y;
+    if (max_x > bishop->x1) bishop->x1 = max_x;
+    if (max_y > bishop->y1) bishop->y1 = max_y;
 
     pthread_mutex_unlock(&bishop->update_lock);
 
@@ -104,8 +116,13 @@ void bishop_dma_pattern(
 ) {
     uint64_t sh = 36;
 
-    for (int cur_y = y; cur_y < y + h; cur_y++) {
-        for (int cur_x = x; cur_x < x + w; cur_x++) {
+    int min_x = BISHOP_WIDTH;
+    int min_y = BISHOP_HEIGHT + BISHOP_OVERSCAN;
+    int max_x = -1;
+    int max_y = -1;
+
+    for (int cur_y = y; cur_y <= y + h; cur_y++) {
+        for (int cur_x = x; cur_x <= x + w; cur_x++) {
             sh -= 1;
             if (sh > 35) {
                 sh = 35;
@@ -113,10 +130,17 @@ void bishop_dma_pattern(
 
             uint64_t data = (pattern >> sh) & 1;
 
+            int write_y = (cur_y % (BISHOP_HEIGHT + BISHOP_OVERSCAN));
+            if (write_y < min_y) min_y = write_y;
+            if (write_y > max_y) max_y = write_y;
+
+            int write_x = (cur_x % BISHOP_WIDTH);
+            if (write_x < min_x) min_x = write_x;
+            if (write_x > max_x) max_x = write_x;
+
             bishop->pixels[
-                ((cur_y + (bishop->scroll & 0x1FF))
-                    % (BISHOP_HEIGHT + BISHOP_OVERSCAN)) * BISHOP_WIDTH
-                + (cur_x % BISHOP_WIDTH)
+                ((write_y + (bishop->scroll & 0x1FF)) % (BISHOP_HEIGHT + BISHOP_OVERSCAN)) * BISHOP_WIDTH
+                + write_x
             ] = data;
         }
     }
@@ -124,10 +148,10 @@ void bishop_dma_pattern(
     pthread_mutex_lock(&bishop->update_lock);
     
     bishop->updated = 1;
-    if (x < bishop->x) bishop->x = x;
-    if (y < bishop->y) bishop->y = y;
-    if (x + w - 1 > bishop->x1) bishop->x1 = x + w - 1;
-    if (y + h - 1 > bishop->y1) bishop->y1 = y + h - 1;
+    if (min_x < bishop->x) bishop->x = min_x;
+    if (min_y < bishop->y) bishop->y = min_y;
+    if (max_x > bishop->x1) bishop->x1 = max_x;
+    if (max_y > bishop->y1) bishop->y1 = max_y;
 
     pthread_mutex_unlock(&bishop->update_lock);
 }

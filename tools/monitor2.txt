@@ -446,6 +446,8 @@ ENUMDONE DW      0
         ****************************************************************
 
 START    LX      13,STACK
+         B       .DRAW                          Skip self test
+                                                whilst debugging BTV
 
         ****************************************************************
         * Set up memory count. Also consider this a self-test of the
@@ -494,11 +496,23 @@ MEMTEST  XA      0,0
         *
         *INSTR.  ARGUMENTS                      REMARKS                 SORT
 
-         L       .BG_DIM
+DRAW     L       .LINE_DIM
          WIO     32,0,2
          XA      0,0
          WIO     32,0,3
-         L       .BACKGRND
+         L       .LINE
+         WIOS    32,0,1
+         TIOND   32
+         B       .-1
+
+         LX      16
+         WIO     32,0,4
+
+         L       .LINE_DIM
+         WIO     32,0,2
+         XA      0,0
+         WIO     32,0,3
+         L       .LINE
          WIOS    32,0,1
          TIOND   32
          B       .-1
@@ -511,20 +525,9 @@ MEMTEST  XA      0,0
          WIOS    32,3,0
          TIOND   32
          B       .-1
-         WIOS    32,3,0
-         TIOND   32
-         B       .-1
-         WIOS    32,3,0
-         TIOND   32
-         B       .-1
-         LX      72
+
+         LX      0
          WIO     32,0,4
-         L       .PATTERN
-         WIO     32,0,2
-         L       .TILE
-         WIO     32,0,3
-         LX      3,.PATTERN
-         WIOS    32,3,0
 
          L       .OK
          HLT
@@ -538,7 +541,7 @@ BANNER2  DW      12
          ASCII   W ONLINE\015\012\015\012
 
 TILE     DW      0007022006044
-PATTERN  DW      0000000006044
+PATTERN  DW      0000000005043
          DW      0746006000016
          DW      0660006000004
          DW      0746367436764
@@ -546,8 +549,11 @@ PATTERN  DW      0000000006044
          DW      0666166666752
          DW      0746746674604
 
-BG_DIM   DW      0400400020020
+BG_DIM   DW      0400400017017
 BACKGRND DW      0101010101010
+
+LINE_DIM DW      0410577000377
+LINE     DW      0777777777777
          
 
         ****************************************************************
