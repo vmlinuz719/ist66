@@ -23,38 +23,19 @@ HALT     DW      0
 CW       DW      0036000000000                  RETURN TO IRQL 15
 
         ****************************************************************
-        * WRITELD - write a length-data string to the support console
-        *
-        *       X0 -> buffer address
-        *
-        *INSTR.  ARGUMENTS                      REMARKS                 SORT
-
-WRITELD  DW      0
-
-         LN      4,0(3)
-         TRZ     4
-         BRM
-
-WRT_LOOP TIOBZ   48
-         B       .WRT_LOOP
-
-         ILC     0,3,7
-         WIOS    48,0,0
-         
-         IA      4,4,TRN
-         B       .WRT_LOOP
-         
-         BRM
-
-        ****************************************************************
 
 START    LX      13,STACK
          LCTL    2,.FPU_ON
 
-         LX      6,.BITMAP
-         AX      6,-1
+         LX      6,.BMPM1
          L       7,.X_RES
          L       8,.Y_RES
+         
+         AA      7,0,I(-1)                      Set line length
+         WIO     32,0,2
+         
+         XA      0,0,SC,RC(28)                  Set display base /
+         WIO     32,0,3                         increment
          
          XA      5,5,SC,RC(1)                   Y
          XA      4,4,SC,RC(1)                   X
@@ -65,35 +46,26 @@ LOOP_X   BL      .MB_XYL
          TRLE    4,7
          B       .LOOP_X
          
+         LX      6,.BMPM1
+         TIOND   32
+         B       .-1
+         WIOS    32,6,0
+         
          IA      5,5
          XA      4,4,SC,RC(1)
          TRLE    5,8
          B       .LOOP_X
+         
+         TIOND   32
+         B       .-1
+         L       .PATTERN
+         WIO     32,0,2
+         L       .TILE
+         WIO     32,0,3
+         LX      3,.PATTERN
+         WIOS    32,3,0
 
-         LX      3,.FORMAT
-         BSM     .WRITELD
-
-         L       1,.X_RES
-         M       .Y_RES
-         LA      0,7
-         LX      8,.BITMAP
-         AX      8,-1
-
-PRT_LOOP ILC     0,8,1
-         TACZ
-         B       .PRT_BLK
-
-PRT_WHT  LX      3,.WHITE
-         BSM     .WRITELD
-         B       .PRT_NEXT
-
-PRT_BLK  LX      3,.BLACK
-         BSM     .WRITELD
-
-PRT_NEXT AA      7,7,I(-1),TRN
-         B       .PRT_LOOP
-
-EXIT     IA      13,13
+         IA      13,13
          LCTL    2,.FPU_OFF
          B       .DO_HALT
 
@@ -156,7 +128,7 @@ MB_XYL   AX      13,-10
          ST      3(3)
          IA      0,0                            C version starts at 1
 
-         LX      1,500                          max iterations
+         LX      1,100                          max iterations
 
 MB_XYL0  LG      0,0(3)                         xx = x^2 - y^2 + cx
          MGN     0,0(3)
@@ -211,17 +183,20 @@ F_3      DW      0200600000000
 F_100    DW      0205620000000
 BIG      DW      999999
 
-F_MAG    DW      0205400000000
-F_XPAN   DW      0174740000000
-F_YPAN   DW      0176600000000
-X_RES    DW      2048
-Y_RES    DW      2048
-FORMAT   DW      17
-         ASCII   P6\0122048 2048\012127\012
-WHITE    DW      3
-         ASCII   \177\177\177
-BLACK    DW      3
-         ASCII   \000\000\000
+F_MAG    DW      0177400000000
+F_XPAN   DW      0176546314631
+F_YPAN   DW      0
+X_RES    DW      512
+Y_RES    DW      480
+
+TILE     DW      0000000006006
+PATTERN  DW      0000000005043
+         DW      0746006000016
+         DW      0660006000004
+         DW      0746367436764
+         DW      0666706666661
+         DW      0666166666752
+         DW      0746746674604
 
         ****************************************************************
 
@@ -229,6 +204,7 @@ BLACK    DW      3
 
 STACK    BSS     0
 
-         ORIGIN  8192
+         ORIGIN  8191
 
+BMPM1    BSS     1
 BITMAP   BSS     0
