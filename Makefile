@@ -2,7 +2,7 @@
 
 # Compiler and flags
 CC = gcc
-CFLAGS = -O3 -Wall -Iinclude
+CFLAGS = -Wall -Iinclude -O3 
 
 # Source files
 SRCS = alu.c fpu.c cpu.c lpt.c pch.c ppt.c tty.c panel.c bishop.c
@@ -18,7 +18,7 @@ all: $(TARGET)
 
 # Link the object files into the executable
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -flto -o $@ $^ -lSDL2 -lSDL2_ttf -lSDL2_gfx
+	$(CC) $(CFLAGS) -o $@ $^ -lSDL2 -lSDL2_ttf -lSDL2_gfx -flto
 
 # Compile each .c into a .o
 %.o: %.c
