@@ -128,7 +128,7 @@ MB_XYL   AX      13,-10
          ST      3(3)
          IA      0,0                            C version starts at 1
 
-         LX      1,100                          max iterations
+         LX      1,275                          max iterations
 
 MB_XYL0  LG      0,0(3)                         xx = x^2 - y^2 + cx
          MGN     0,0(3)
@@ -183,9 +183,9 @@ F_3      DW      0200600000000
 F_100    DW      0205620000000
 BIG      DW      999999
 
-F_MAG    DW      0177400000000
-F_XPAN   DW      0176546314631
-F_YPAN   DW      0
+F_MAG    DW      0206400000000
+F_XPAN   DW      0176574575620
+F_YPAN   DW      0174415765370
 X_RES    DW      512
 Y_RES    DW      480
 

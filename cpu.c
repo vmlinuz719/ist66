@@ -2602,7 +2602,7 @@ int main(int argc, char *argv[]) {
     cpu.memory[1108] = 0053003000002;
     cpu.memory[1109] = 0053003000003;
     cpu.memory[1110] = 0700014000000;
-    cpu.memory[1111] = 0043040000144;
+    cpu.memory[1111] = 0043040000423;
     cpu.memory[1112] = 0406003000000;
     cpu.memory[1113] = 0412403000000;
     cpu.memory[1114] = 0406043000002;
@@ -2644,9 +2644,9 @@ int main(int argc, char *argv[]) {
     cpu.memory[1150] = 0200600000000;
     cpu.memory[1151] = 0205620000000;
     cpu.memory[1152] = 0000003641077;
-    cpu.memory[1153] = 0177400000000;
-    cpu.memory[1154] = 0176546314631;
-    cpu.memory[1155] = 0000000000000;
+    cpu.memory[1153] = 0206400000000;
+    cpu.memory[1154] = 0176574575620;
+    cpu.memory[1155] = 0174415765370;
     cpu.memory[1156] = 0000000001000;
     cpu.memory[1157] = 0000000000740;
     cpu.memory[1158] = 0000000006006;
