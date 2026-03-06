@@ -2459,9 +2459,8 @@ int main(int argc, char *argv[]) {
     
     init_cpu(&cpu, 262144, 512);
 
-
-    init_panel(&cpu, 0);
     init_bishop(&cpu, 32);
+    init_panel(&cpu, 0);
 
 
     init_ppt_ex(&cpu, 012, 9, "monitor.ppt");
