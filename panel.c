@@ -271,6 +271,8 @@ void destroy_button(button_t *button) {
 typedef struct {
     int running;
     pthread_t thread;
+    int updated;
+    pthread_mutex_t update_lock;
     ist66_cu_t *cpu;
 
     SDL_Window *window;
@@ -343,10 +345,16 @@ static void draw_button(SDL_Renderer *r, button_t *button) {
     );
 }
 
+int get_indicator_state(button_t *button) {
+    int old_pressed = button->pressed;
+    button->pressed = (((*(int *)button->instance_data) >> button->id) & 1);
+    return button->pressed != old_pressed;
+}
+
 static void draw_indicator(SDL_Renderer *r, button_t *button) {
     int *color;
 
-    if (((*(int *)button->instance_data) >> button->id) & 1) {
+    if (button->pressed) {
         color = button->pressed_color;
     } else {
         color = button->color;
@@ -525,7 +533,7 @@ int panel_do_init(void *ctx) {
 
     panel->render = SDL_CreateRenderer(
         panel->window, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
+        SDL_RENDERER_ACCELERATED
     );
     if (!panel->render) {
         SDL_DestroyWindow(panel->window);
@@ -683,37 +691,47 @@ int panel_do_init(void *ctx) {
 void panel_do_render(void *ctx) {
     panel_ctx_t *panel = (panel_ctx_t *) ctx;
     
-    /* --- Render --- */
-    SDL_SetRenderDrawColor(panel->render, 0x1a, 0x1a, 0x1a, 255);
-    SDL_RenderClear(panel->render);
-
-    /* Row labels */
-    SDL_Rect addr_label = {LABEL_X, ADDR_Y, LABEL_W - 5, SEG_H};
-    draw_text_centered(panel->render, panel->font, "Addr",
-                       &addr_label, 140, 140, 140);
-    SDL_Rect data_label = {LABEL_X, DATA_Y, LABEL_W - 5, SEG_H};
-    draw_text_centered(panel->render, panel->font, "Data",
-                       &data_label, 140, 140, 140);
-
-    /* Address display (amber) */
-    draw_octal_row(panel->render, DISPLAY_X + 78, ADDR_Y,
-                   ADDR_DIGITS, panel->addr_reg, 255, 170, 0);
-
-    /* Data display (green) */
-    draw_octal_row(panel->render, DISPLAY_X, DATA_Y,
-                   DATA_DIGITS, panel->data_reg, 0, 220, 0);
-
-    /* Buttons */
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-        draw_button(panel->render, panel->new_buttons[i]);
-    }
-
-    /* Indicators */
+    pthread_mutex_lock(&panel->update_lock);
+    
     for (int i = 0; i < NUM_INDICATORS; i++) {
-        draw_indicator(panel->render, panel->indicators[i]);
+        if (get_indicator_state(panel->indicators[i])) panel->updated = 1;
     }
+    
+    if (panel->updated) {
+        /* --- Render --- */
+        SDL_SetRenderDrawColor(panel->render, 0x1a, 0x1a, 0x1a, 255);
+        SDL_RenderClear(panel->render);
 
-    SDL_RenderPresent(panel->render);
+        /* Row labels */
+        SDL_Rect addr_label = {LABEL_X, ADDR_Y, LABEL_W - 5, SEG_H};
+        draw_text_centered(panel->render, panel->font, "Addr",
+                           &addr_label, 140, 140, 140);
+        SDL_Rect data_label = {LABEL_X, DATA_Y, LABEL_W - 5, SEG_H};
+        draw_text_centered(panel->render, panel->font, "Data",
+                           &data_label, 140, 140, 140);
+
+        /* Address display (amber) */
+        draw_octal_row(panel->render, DISPLAY_X + 78, ADDR_Y,
+                       ADDR_DIGITS, panel->addr_reg, 255, 170, 0);
+
+        /* Data display (green) */
+        draw_octal_row(panel->render, DISPLAY_X, DATA_Y,
+                       DATA_DIGITS, panel->data_reg, 0, 220, 0);
+
+        /* Buttons */
+        for (int i = 0; i < NUM_BUTTONS; i++) {
+            draw_button(panel->render, panel->new_buttons[i]);
+        }
+
+        /* Indicators */
+        for (int i = 0; i < NUM_INDICATORS; i++) {
+            draw_indicator(panel->render, panel->indicators[i]);
+        }
+
+        SDL_RenderPresent(panel->render);
+        panel->updated = 0;
+    }
+    pthread_mutex_unlock(&panel->update_lock);
 }
 
 void panel_do_event(void *ctx, SDL_Event *event) {
@@ -721,6 +739,10 @@ void panel_do_event(void *ctx, SDL_Event *event) {
     /* --- Events --- */
     if (event->key.windowID == SDL_GetWindowID(panel->window) ||
         event->button.windowID == SDL_GetWindowID(panel->window)) {
+        pthread_mutex_lock(&panel->update_lock);
+        panel->updated = 1;
+        pthread_mutex_unlock(&panel->update_lock);
+        
         switch (event->type) {
             case SDL_MOUSEBUTTONDOWN:
                 for (int i = 0; i < NUM_BUTTONS; i++) {
@@ -778,6 +800,7 @@ void destroy_panel(ist66_cu_t *cpu, int id) {
         destroy_button(panel->indicators[i]);
     }
     TTF_Quit();
+    pthread_mutex_destroy(&panel->update_lock);
     free(panel);
 }
 
@@ -797,6 +820,8 @@ void init_panel(ist66_cu_t *cpu, int id) {
         free(ctx);
         return;
     }
+    
+    pthread_mutex_init(&ctx->update_lock, NULL);
     
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_panel;
