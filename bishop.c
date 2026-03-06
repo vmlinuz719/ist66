@@ -428,7 +428,7 @@ void bishop_do_destroy(void *ctx) {
 void destroy_bishop(ist66_cu_t *cpu, int id) {
     bishop_ctx_t *bishop = cpu->ioctx[id];
     bishop->running = 0;
-    pthread_join(bishop->thread, NULL);
+    // pthread_join(bishop->thread, NULL);
     bishop->command = -1;
     pthread_cond_signal(&bishop->cmd_cond);
     pthread_join(bishop->dma_thread, NULL);

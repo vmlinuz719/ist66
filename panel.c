@@ -792,7 +792,7 @@ void panel_do_destroy(void *ctx) {
 void destroy_panel(ist66_cu_t *cpu, int id) {
     panel_ctx_t *panel = (panel_ctx_t *) cpu->ioctx[id];
     panel->running = 0;
-    pthread_join(panel->thread, NULL);
+    // pthread_join(panel->thread, NULL);
     for (int i = 0; i < NUM_BUTTONS; i++) {
         destroy_button(panel->new_buttons[i]);
     }
