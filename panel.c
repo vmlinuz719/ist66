@@ -283,6 +283,7 @@ typedef struct {
 
     button_t *new_buttons[NUM_BUTTONS];
     button_t *indicators[NUM_INDICATORS];
+    TTF_Font *font;
 } panel_ctx_t;
 
 /* --- Drawing helpers --- */
@@ -508,7 +509,7 @@ void do_button_action(void *vpanel, int i) {
 
 /* --- Main panel thread --- */
 
-void *panel_thread(void *ctx) {
+int panel_do_init(void *ctx) {
     panel_ctx_t *panel = (panel_ctx_t *) ctx;
 
     panel->window = SDL_CreateWindow(
@@ -519,7 +520,7 @@ void *panel_thread(void *ctx) {
     );
     if (!panel->window) {
         fprintf(stderr, "Panel: window creation failed: %s\n", SDL_GetError());
-        return NULL;
+        return -1;
     }
 
     panel->render = SDL_CreateRenderer(
@@ -529,7 +530,7 @@ void *panel_thread(void *ctx) {
     if (!panel->render) {
         SDL_DestroyWindow(panel->window);
         fprintf(stderr, "Panel: renderer creation failed: %s\n", SDL_GetError());
-        return NULL;
+        return -1;
     }
 
     /* Load font */
@@ -537,15 +538,15 @@ void *panel_thread(void *ctx) {
         fprintf(stderr, "Panel: TTF_Init failed: %s\n", TTF_GetError());
         SDL_DestroyRenderer(panel->render);
         SDL_DestroyWindow(panel->window);
-        return NULL;
+        return -1;
     }
-    TTF_Font *font = TTF_OpenFont(FONT_PATH, FONT_SIZE);
-    if (!font) {
+    panel->font = TTF_OpenFont(FONT_PATH, FONT_SIZE);
+    if (!(panel->font)) {
         fprintf(stderr, "Panel: font load failed: %s\n", TTF_GetError());
         TTF_Quit();
         SDL_DestroyRenderer(panel->render);
         SDL_DestroyWindow(panel->window);
-        return NULL;
+        return -1;
     }
 
     /* Set up button positions: 4-column grid */
@@ -675,47 +676,55 @@ void *panel_thread(void *ctx) {
         BTN_Y + 2 * (BTN_GAP + BTN_H),
         &panel->locked
     );
+    
+    return 0;
+}
 
-    while (panel->running) {
-        /* --- Render --- */
-        SDL_SetRenderDrawColor(panel->render, 0x1a, 0x1a, 0x1a, 255);
-        SDL_RenderClear(panel->render);
+void panel_do_render(void *ctx) {
+    panel_ctx_t *panel = (panel_ctx_t *) ctx;
+    
+    /* --- Render --- */
+    SDL_SetRenderDrawColor(panel->render, 0x1a, 0x1a, 0x1a, 255);
+    SDL_RenderClear(panel->render);
 
-        /* Row labels */
-        SDL_Rect addr_label = {LABEL_X, ADDR_Y, LABEL_W - 5, SEG_H};
-        draw_text_centered(panel->render, font, "Addr",
-                           &addr_label, 140, 140, 140);
-        SDL_Rect data_label = {LABEL_X, DATA_Y, LABEL_W - 5, SEG_H};
-        draw_text_centered(panel->render, font, "Data",
-                           &data_label, 140, 140, 140);
+    /* Row labels */
+    SDL_Rect addr_label = {LABEL_X, ADDR_Y, LABEL_W - 5, SEG_H};
+    draw_text_centered(panel->render, panel->font, "Addr",
+                       &addr_label, 140, 140, 140);
+    SDL_Rect data_label = {LABEL_X, DATA_Y, LABEL_W - 5, SEG_H};
+    draw_text_centered(panel->render, panel->font, "Data",
+                       &data_label, 140, 140, 140);
 
-        /* Address display (amber) */
-        draw_octal_row(panel->render, DISPLAY_X + 78, ADDR_Y,
-                       ADDR_DIGITS, panel->addr_reg, 255, 170, 0);
+    /* Address display (amber) */
+    draw_octal_row(panel->render, DISPLAY_X + 78, ADDR_Y,
+                   ADDR_DIGITS, panel->addr_reg, 255, 170, 0);
 
-        /* Data display (green) */
-        draw_octal_row(panel->render, DISPLAY_X, DATA_Y,
-                       DATA_DIGITS, panel->data_reg, 0, 220, 0);
+    /* Data display (green) */
+    draw_octal_row(panel->render, DISPLAY_X, DATA_Y,
+                   DATA_DIGITS, panel->data_reg, 0, 220, 0);
 
-        /* Buttons */
-        for (int i = 0; i < NUM_BUTTONS; i++) {
-            draw_button(panel->render, panel->new_buttons[i]);
-        }
+    /* Buttons */
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        draw_button(panel->render, panel->new_buttons[i]);
+    }
 
-        /* Indicators */
-        for (int i = 0; i < NUM_INDICATORS; i++) {
-            draw_indicator(panel->render, panel->indicators[i]);
-        }
+    /* Indicators */
+    for (int i = 0; i < NUM_INDICATORS; i++) {
+        draw_indicator(panel->render, panel->indicators[i]);
+    }
 
-        SDL_RenderPresent(panel->render);
+    SDL_RenderPresent(panel->render);
+}
 
-        /* --- Events --- */
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
+void panel_do_event(void *ctx, SDL_Event *event) {
+    panel_ctx_t *panel = (panel_ctx_t *) ctx;
+    /* --- Events --- */
+    if (event->key.windowID == SDL_GetWindowID(panel->window) ||
+        event->button.windowID == SDL_GetWindowID(panel->window)) {
+        switch (event->type) {
             case SDL_MOUSEBUTTONDOWN:
                 for (int i = 0; i < NUM_BUTTONS; i++) {
-                    if (point_in_rect(event.button.x, event.button.y,
+                    if (point_in_rect(event->button.x, event->button.y,
                         &panel->new_buttons[i]->box)) {
                         panel->new_buttons[i]->pressed = 1;
                         panel->new_buttons[i]->action_callback(panel, i);
@@ -731,7 +740,7 @@ void *panel_thread(void *ctx) {
 
             case SDL_KEYDOWN: {
                 for (int i = 0; i < NUM_BUTTONS; i++) {
-                    if (panel->new_buttons[i]->hotkey == event.key.keysym.sym) {
+                    if (panel->new_buttons[i]->hotkey == event->key.keysym.sym) {
                         panel->new_buttons[i]->pressed = 1;
                         panel->new_buttons[i]->action_callback(panel, i);
                     }
@@ -740,24 +749,20 @@ void *panel_thread(void *ctx) {
 
             case SDL_KEYUP: {
                 for (int i = 0; i < NUM_BUTTONS; i++) {
-                    if (panel->new_buttons[i]->hotkey == event.key.keysym.sym) {
+                    if (panel->new_buttons[i]->hotkey == event->key.keysym.sym) {
                         panel->new_buttons[i]->pressed = 0;
                     }
                 }
             } break;
-
-            case SDL_QUIT:
-                panel->running = 0;
-                break;
-            }
         }
     }
+}
 
-    TTF_CloseFont(font);
+void panel_do_destroy(void *ctx) {
+    panel_ctx_t *panel = (panel_ctx_t *) ctx;
+    TTF_CloseFont(panel->font);
     SDL_DestroyRenderer(panel->render);
     SDL_DestroyWindow(panel->window);
-
-    return NULL;
 }
 
 /* --- Init / destroy --- */
@@ -778,6 +783,21 @@ void destroy_panel(ist66_cu_t *cpu, int id) {
 
 void init_panel(ist66_cu_t *cpu, int id) {
     panel_ctx_t *ctx = calloc(sizeof(panel_ctx_t), 1);
+    
+    window_ctx_t panel_window = {
+        .ctx = (void *) ctx,
+        .do_init = panel_do_init,
+        .do_render = panel_do_render,
+        .do_event = panel_do_event,
+        .do_destroy = panel_do_destroy
+    };
+    
+    if (register_window(&(cpu->render_ctx), &panel_window)) {
+        fprintf(stderr, "Panel: no windows left\n");
+        free(ctx);
+        return;
+    }
+    
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_panel;
     cpu->io[id] = NULL;
@@ -788,7 +808,7 @@ void init_panel(ist66_cu_t *cpu, int id) {
     ctx->data_reg = 0;
     ctx->locked = 0;
 
-    pthread_create(&(ctx->thread), NULL, panel_thread, ctx);
+    // pthread_create(&(ctx->thread), NULL, panel_thread, ctx);
 }
 
 /*

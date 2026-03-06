@@ -5,6 +5,7 @@
 #include <pthread.h>
 
 #include "fpu.h"
+#include "sdlctx.h"
 
 #define MASK_ADDR 0x7FFFFFFL
 #define C_PSW 0
@@ -84,6 +85,8 @@ struct ist66_cu {
     int min_pending;
     uint16_t mask;
     int running, throttle, exit;
+    
+    render_loop_ctx_t render_ctx;
 };
 
 static inline void halt(ist66_cu_t *cpu) {

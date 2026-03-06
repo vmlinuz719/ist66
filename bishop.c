@@ -19,6 +19,7 @@
 
 typedef struct {
     uint8_t pixels[BISHOP_WIDTH * (BISHOP_HEIGHT + BISHOP_OVERSCAN)];
+    int pixbuf[BISHOP_WIDTH * BISHOP_HEIGHT];
     
     int x, y, x1, y1, updated, command;
     pthread_mutex_t update_lock, cmd_lock;
@@ -37,6 +38,7 @@ typedef struct {
 
     SDL_Window *window;
     SDL_Renderer *render;
+    SDL_Texture *tex;
 } bishop_ctx_t;
 
 uint64_t bishop_dma_read(
@@ -321,7 +323,7 @@ uint64_t bishop_io(
     
 }
 
-void *bishop_thread(void *ctx) {
+int bishop_do_init(void *ctx) {
     bishop_ctx_t *bishop = (bishop_ctx_t *) ctx;
     
     bishop->window = SDL_CreateWindow(
@@ -332,7 +334,7 @@ void *bishop_thread(void *ctx) {
     );
     if (!bishop->window) {
         fprintf(stderr, "Bishop: window creation failed: %s\n", SDL_GetError());
-        return NULL;
+        return -1;
     }
 
     bishop->render = SDL_CreateRenderer(
@@ -342,12 +344,12 @@ void *bishop_thread(void *ctx) {
     if (!bishop->render) {
         SDL_DestroyWindow(bishop->window);
         fprintf(stderr, "Bishop: renderer creation failed: %s\n", SDL_GetError());
-        return NULL;
+        return -1;
     }
     
     SDL_RenderSetLogicalSize(bishop->render, BISHOP_WIDTH, BISHOP_HEIGHT);
     
-    SDL_Texture *tex = SDL_CreateTexture(
+    bishop->tex = SDL_CreateTexture(
         bishop->render,
         SDL_PIXELFORMAT_RGBA8888,
         SDL_TEXTUREACCESS_STREAMING,
@@ -355,70 +357,72 @@ void *bishop_thread(void *ctx) {
         BISHOP_HEIGHT
     );
     
-    int pixbuf[BISHOP_WIDTH * BISHOP_HEIGHT];
+    return 0;
+}
 
-    while(bishop->running) {
-
-        if (bishop->updated) {
-            pthread_mutex_lock(&bishop->update_lock);
-            
-            int captured_x = bishop->x;
-            int captured_y = bishop->y;
-            int captured_scroll = bishop->scroll & 0x1FF;
-            int captured_x1 = MIN(bishop->x1, BISHOP_WIDTH - 1);
-            int captured_y1 = MIN(bishop->y1, BISHOP_HEIGHT - 1);
-            
-            bishop->x = BISHOP_WIDTH;
-            bishop->y = BISHOP_HEIGHT;
-            bishop->x1 = -1;
-            bishop->y1 = -1;
-            bishop->updated = 0;
-            
-            pthread_mutex_unlock(&bishop->update_lock);
-            
-            int width = captured_x1 - captured_x + 1;
-            int height = captured_y1 - captured_y + 1;
-            SDL_Rect updated_rect = {
-                .x = captured_x,
-                .y = captured_y,
-                .w = width,
-                .h = height
-            };
-            
-            int write_y = ((captured_y + captured_scroll)
-                % (BISHOP_HEIGHT + BISHOP_OVERSCAN));
-            int write_offset = 0;
-            
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    int write_base = write_y * BISHOP_WIDTH + captured_x;
-                    int pixel = (bishop->pixels[write_base + x])
-                        ? RGBA_GREEN
-                        : RGBA_BLACK;
-                    pixbuf[write_offset++] = pixel;
-                }
-                write_y += 1;
-                write_y %= (BISHOP_HEIGHT + BISHOP_OVERSCAN);
-            }
-            
-            SDL_UpdateTexture(
-                tex, &updated_rect, pixbuf, updated_rect.w * 4
-            );
-        }
-
-        SDL_RenderClear(bishop->render);
-        SDL_RenderCopy(bishop->render, tex, NULL, NULL);
-        // vblank here
-        SDL_RenderPresent(bishop->render);
-
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {};
-    }
+void bishop_do_render(void *ctx) {
+    bishop_ctx_t *bishop = (bishop_ctx_t *) ctx;
+    int *pixbuf = bishop->pixbuf;
     
-    SDL_DestroyTexture(tex);
+    if (bishop->updated) {
+        pthread_mutex_lock(&bishop->update_lock);
+        
+        int captured_x = bishop->x;
+        int captured_y = bishop->y;
+        int captured_scroll = bishop->scroll & 0x1FF;
+        int captured_x1 = MIN(bishop->x1, BISHOP_WIDTH - 1);
+        int captured_y1 = MIN(bishop->y1, BISHOP_HEIGHT - 1);
+        
+        bishop->x = BISHOP_WIDTH;
+        bishop->y = BISHOP_HEIGHT;
+        bishop->x1 = -1;
+        bishop->y1 = -1;
+        bishop->updated = 0;
+        
+        pthread_mutex_unlock(&bishop->update_lock);
+        
+        int width = captured_x1 - captured_x + 1;
+        int height = captured_y1 - captured_y + 1;
+        SDL_Rect updated_rect = {
+            .x = captured_x,
+            .y = captured_y,
+            .w = width,
+            .h = height
+        };
+        
+        int write_y = ((captured_y + captured_scroll)
+            % (BISHOP_HEIGHT + BISHOP_OVERSCAN));
+        int write_offset = 0;
+        
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int write_base = write_y * BISHOP_WIDTH + captured_x;
+                int pixel = (bishop->pixels[write_base + x])
+                    ? RGBA_GREEN
+                    : RGBA_BLACK;
+                pixbuf[write_offset++] = pixel;
+            }
+            write_y += 1;
+            write_y %= (BISHOP_HEIGHT + BISHOP_OVERSCAN);
+        }
+        
+        SDL_UpdateTexture(
+            bishop->tex, &updated_rect, pixbuf, updated_rect.w * 4
+        );
+    }
+
+    SDL_RenderClear(bishop->render);
+    SDL_RenderCopy(bishop->render, bishop->tex, NULL, NULL);
+    // vblank here
+    SDL_RenderPresent(bishop->render);
+}
+    
+void bishop_do_destroy(void *ctx) {
+    bishop_ctx_t *bishop = (bishop_ctx_t *) ctx;
+    
+    SDL_DestroyTexture(bishop->tex);
     SDL_DestroyRenderer(bishop->render);
     SDL_DestroyWindow(bishop->window);
-    return NULL;
 }
 
 void destroy_bishop(ist66_cu_t *cpu, int id) {
@@ -439,6 +443,20 @@ void destroy_bishop(ist66_cu_t *cpu, int id) {
 void init_bishop(ist66_cu_t *cpu, int id) {
     bishop_ctx_t *ctx = calloc(sizeof(bishop_ctx_t), 1);
     
+    window_ctx_t bishop_window = {
+        .ctx = (void *) ctx,
+        .do_init = bishop_do_init,
+        .do_render = bishop_do_render,
+        .do_event = NULL,
+        .do_destroy = bishop_do_destroy
+    };
+    
+    if (register_window(&(cpu->render_ctx), &bishop_window)) {
+        fprintf(stderr, "TV2: no windows left\n");
+        free(ctx);
+        return;
+    }
+    
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_bishop;
     cpu->io[id] = bishop_io;
@@ -454,7 +472,7 @@ void init_bishop(ist66_cu_t *cpu, int id) {
     ctx->running = 1;
     ctx->updated = 1;
     ctx->done = 1;
-    pthread_create(&(ctx->thread), NULL, bishop_thread, ctx);
+    
     pthread_create(&(ctx->dma_thread), NULL, bishop_dma, ctx);
     fprintf(stderr, "TV2: %04o\n", id);
 }

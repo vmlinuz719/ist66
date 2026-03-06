@@ -2455,16 +2455,14 @@ void destroy_cpu(ist66_cu_t *cpu) {
 int main(int argc, char *argv[]) {
     ist66_cu_t cpu;
     
-    int do_sdl = (SDL_Init(SDL_INIT_EVERYTHING) == 0);
-    
     
     
     init_cpu(&cpu, 262144, 512);
 
-    if (do_sdl) {
-        // init_panel(&cpu, 0);
-        init_bishop(&cpu, 32);
-    }
+
+    init_panel(&cpu, 0);
+    init_bishop(&cpu, 32);
+
 
     init_ppt_ex(&cpu, 012, 9, "monitor.ppt");
     init_lpt(&cpu, 013, 8, stdout);
@@ -2475,6 +2473,8 @@ int main(int argc, char *argv[]) {
     char cmd[512];
     int running = 1;
     uint64_t ptr = 0;
+    
+    start_render(&(cpu.render_ctx));
     
     printf("Ready. Relocatable loader at 01000:\n");
     
@@ -2646,11 +2646,8 @@ int main(int argc, char *argv[]) {
         }
     }
     
+    kill_render(&(cpu.render_ctx));
     destroy_cpu(&cpu);
-    
-    if (do_sdl) {
-        SDL_Quit();
-    }
     
     return 0;
 }
