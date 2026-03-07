@@ -692,7 +692,7 @@ void panel_do_render(void *ctx) {
     panel_ctx_t *panel = (panel_ctx_t *) ctx;
     
     pthread_mutex_lock(&panel->update_lock);
-    
+
     for (int i = 0; i < NUM_INDICATORS; i++) {
         if (get_indicator_state(panel->indicators[i])) panel->updated = 1;
     }
