@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_LABEL_LEN 12
+
 enum event_type {
     SYMBOL,
     LABEL_DEF,
@@ -13,10 +15,100 @@ enum event_type {
 };
 
 typedef struct {
+    char label[MAX_LABEL_LEN + 1];
+    uint64_t value;
+} label_def_t;
+
+typedef struct {
+    label_def_t *labels;
+    int num_labels, max_labels;
+} label_tab_t;
+
+int insert_label_def(label_tab_t *ltab, char *label, uint64_t value) {
+    if (ltab->num_labels == ltab->max_labels) return -1;
+    
+    strncpy(ltab->labels[ltab->num_labels].label, label, MAX_LABEL_LEN);
+    ltab->labels[ltab->num_labels].label[MAX_LABEL_LEN] = 0;
+    ltab->labels[ltab->num_labels].value = value;
+    
+    return ltab->num_labels++;
+}
+
+typedef struct {
+    char label[MAX_LABEL_LEN + 1];
+    uint64_t address;
+    int is_relative, width, left_shift;
+} label_thunk_t;
+
+typedef struct {
+    label_thunk_t *thunks;
+    int num_thunks, max_thunks;
+} thunk_tab_t;
+
+label_tab_t *new_label_tab(int max_labels) {
+    label_def_t *labels = malloc(sizeof(label_def_t) * max_labels);
+    label_tab_t *result = malloc(sizeof(label_tab_t));
+    result->labels = labels;
+    result->num_labels = 0;
+    result->max_labels = max_labels;
+    return result;
+}
+
+void delete_label_tab(label_tab_t *ltab) {
+    free(ltab->labels);
+    free(ltab);
+}
+
+thunk_tab_t *new_thunk_tab(int max_thunks) {
+    label_thunk_t *thunks = malloc(sizeof(label_thunk_t) * max_thunks);
+    thunk_tab_t *result = malloc(sizeof(thunk_tab_t));
+    result->thunks = thunks;
+    result->num_thunks = 0;
+    result->max_thunks = max_thunks;
+    return result;
+}
+
+void delete_thunk_tab(thunk_tab_t *ttab) {
+    free(ttab->thunks);
+    free(ttab);
+}
+
+int insert_thunk(
+    thunk_tab_t *ttab,
+    char *label,
+    uint64_t address,
+    int is_relative,
+    int width,
+    int left_shift
+) {
+    if (ttab->num_thunks == ttab->max_thunks) return -1;
+    
+    strncpy(ttab->thunks[ttab->num_thunks].label, label, MAX_LABEL_LEN);
+    ttab->thunks[ttab->num_thunks].label[MAX_LABEL_LEN] = 0;
+    
+    ttab->thunks[ttab->num_thunks].address = address;
+    ttab->thunks[ttab->num_thunks].is_relative = is_relative;
+    ttab->thunks[ttab->num_thunks].width = width;
+    ttab->thunks[ttab->num_thunks].left_shift = left_shift;
+    
+    return ttab->num_thunks++;
+}
+
+int remove_thunk(thunk_tab_t *ttab, int index) {
+    if (ttab->num_thunks == 0 || index < 0 || index >= ttab->num_thunks)
+        return -1;
+    
+    ttab->thunks[index] = ttab->thunks[--ttab->num_thunks];
+    return 0;
+}
+
+typedef struct {
     char buf[512];
     int is_label_def, has_comma, is_end_of_list, eof, error;
     
     FILE *file;
+    
+    uint64_t pc;
 } assembler_ctx_t;
 
 assembler_ctx_t *new_assembler(char *fname) {
