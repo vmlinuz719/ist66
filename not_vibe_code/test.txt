@@ -2,5 +2,5 @@ test:	add	2,3
 	sub	4, 5, 6
 	mul     7 ,8    ,9
 	ascii	"String blah blah"
-	bad	6,,,,,7
+	bad	6,7
 
