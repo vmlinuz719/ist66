@@ -102,6 +102,40 @@ int remove_thunk(thunk_tab_t *ttab, int index) {
     return 0;
 }
 
+int get_label(label_tab_t *ltab, char *label) {
+    for (int i = 0; i < ltab->num_labels; i++) {
+        if (!strcmp(label, ltab->labels[i].label)) return i;
+    }
+    
+    return -1;
+}
+
+int register_label_do_thunks(
+    label_tab_t *ltab, char *label, uint64_t value,
+    thunk_tab_t *ttab, uint64_t *work_area
+) {
+    if (insert_label_def(ltab, label, value) == -1) return -1;
+    
+    int thunks_done = 0;
+    int current_thunk = 0;
+    while (current_thunk < ttab->num_thunks) {
+        if (strcmp(label, ttab->thunks[current_thunk].label)) {
+            current_thunk++;
+            continue;
+        }
+        
+        label_thunk_t *thunk = &ttab->thunks[current_thunk];
+        uint64_t v = thunk->is_relative ? value - thunk->address : value;
+        v &= (1L << thunk->width) - 1;
+        v <<= thunk->left_shift;
+        work_area[thunk->address] |= v;
+        thunks_done++;
+        remove_thunk(ttab, current_thunk);
+    }
+    
+    return thunks_done;
+}
+
 typedef struct {
     char buf[512];
     int is_label_def, has_comma, is_end_of_list, eof, error;
