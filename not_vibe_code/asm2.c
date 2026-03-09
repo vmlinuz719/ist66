@@ -7,6 +7,7 @@ enum event_type {
     SYMBOL,
     LABEL_DEF,
     LIST_ITEM,
+    LIST_END,
     ENDFILE,
     ERROR
 };
@@ -63,7 +64,7 @@ enum event_type get_symbol_type(assembler_ctx_t *ctx) {
                             : ctx->eof            ? ENDFILE
                             : ctx->is_label_def   ? LABEL_DEF
                             : ctx->has_comma      ? LIST_ITEM
-                            : ctx->is_end_of_list ? LIST_ITEM
+                            : ctx->is_end_of_list ? LIST_END
                             :                       SYMBOL
     ;
     
@@ -80,6 +81,7 @@ int main(int argc, char *argv[]) {
             case ENDFILE:   printf("ENDFILE"); break;
             case LABEL_DEF: printf("LABEL_DEF"); break;
             case LIST_ITEM: printf("LIST_ITEM"); break;
+            case LIST_END:  printf("LIST_END"); break;
             case SYMBOL:    printf("SYMBOL"); break;
         }
         printf("\n");
