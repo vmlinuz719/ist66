@@ -74,7 +74,7 @@ int main(int argc, char *argv[]) {
     assembler_ctx_t *assembler = new_assembler(argv[1]);
     
     while (!read_symbol(assembler)) {
-        printf("%s\t\tis ", assembler->buf);
+        printf("%-16s is ", assembler->buf);
         switch (get_symbol_type(assembler)) {
             case ERROR:     printf("ERROR"); break;
             case ENDFILE:   printf("ENDFILE"); break;
