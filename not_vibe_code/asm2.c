@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_LABEL_LEN 12
+#define MAX_LABEL_LEN 10
 
 typedef struct {
     char label[MAX_LABEL_LEN + 1];
@@ -277,6 +277,36 @@ int assembler_get_or_thunk(
     *result <<= left_shift;
     
     return 1;
+}
+
+#define ADDR_INDIRECT       (1L << 22)
+
+#define ADDR_IMMEDIATE      (0)
+#define ADDR_DIRECT_PAGE    (1L << 18)
+#define ADDR_PC_RELATIVE    (2L << 18)
+#define ADDR_POST_INCREMENT (14L << 18)
+#define ADDR_PRE_DECREMENT  (15L << 18)
+
+int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
+    int thunked_label = 0;
+    int allow_parens = 0;
+    
+    if (*field == '@') {
+        field++;
+        *out |= ADDR_INDIRECT;
+    }
+    
+    switch (*field) {
+        case '_': {*out |= ADDR_DIRECT_PAGE; field++;} break;
+        case '.': {*out |= ADDR_PC_RELATIVE; field++;} break;
+        case '+': {*out |= ADDR_POST_INCREMENT; field++;} break;
+        case '-': {*out |= ADDR_PRE_DECREMENT; field++;} break;
+        default: allow_parens = 1;
+    }
+    
+    
+    
+    return thunked_label;
 }
 
 int main(int argc, char *argv[]) {
