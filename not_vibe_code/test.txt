@@ -1,7 +1,9 @@
-test:	add	2,3
-	sub	4, 5, 6
-	mul     7 ,8    ,9
-        ld      ac,@blah(x3)
-	ascii	"String blah blah"
-	bad	6,,,,,,,7
-
+test0:		ref		test0
+test1:		foo		bar,baz,quux
+		ref		test0
+		ref		test1
+test2:		ref		test3
+		blah
+		blah
+		blah
+test3:		ref		test2
