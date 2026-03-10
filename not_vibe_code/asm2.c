@@ -247,6 +247,38 @@ int assembler_insert_thunk(
     );
 }
 
+int assembler_get_or_thunk(
+    assembler_ctx_t *ctx,
+    char *label,
+    uint64_t address,
+    int is_relative,
+    int width,
+    int left_shift,
+    uint64_t *result
+) {
+    int label_index = assembler_get_label(
+        ctx, ctx->buf
+    );
+    
+    if (label_index == -1) {
+        int thunk = assembler_insert_thunk(
+            ctx,
+            label,
+            address,
+            is_relative,
+            width,
+            left_shift
+        );
+        if (thunk == -1) return -1;
+        else return 0;
+    }
+    
+    *result = ctx->ltab->labels[label_index].value & ((1L << width) - 1);
+    *result <<= left_shift;
+    
+    return 1;
+}
+
 int main(int argc, char *argv[]) {
     uint64_t work_area[8192];
     assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
@@ -278,32 +310,21 @@ int main(int argc, char *argv[]) {
                     read_symbol(assembler);
                     switch(get_symbol_type(assembler)) {
                         case SYMBOL: {
-                            int label_index = assembler_get_label(
-                                assembler, assembler->buf
+                            uint64_t value = 0;
+                            int status = assembler_get_or_thunk(
+                                assembler, assembler->buf, assembler->pc,
+                                0, 63, 0,
+                                &value
                             );
                             
-                            if (label_index != -1) {
-                                uint64_t label_value =
-                                    assembler->ltab->labels[label_index].value
-                                    & ((1UL << 63) - 1);
-                                assembler->work_area[assembler->pc] =
-                                    label_value;
-                                printf("%lu", label_value);
-                            }
-                            
-                            else {
-                                int thunk = assembler_insert_thunk(
-                                    assembler,
-                                    assembler->buf,
-                                    assembler->pc,
-                                    0,
-                                    63,
-                                    0
-                                );
-                                printf(
-                                    "%s",
-                                    thunk == -1 ? "ERROR" : "THUNK"
-                                );
+                            switch (status) {
+                                case -1: printf("ERROR"); break;
+                                case 0:  printf("thunk"); break;
+                                case 1: {
+                                    printf("%lu", value);
+                                    assembler->work_area[assembler->pc] =
+                                        value;
+                                } break;
                             }
                         } break;
                         

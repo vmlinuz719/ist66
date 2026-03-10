@@ -1,9 +1,7 @@
-test0:		ref		test0
-test1:		foo		bar,baz,quux
-		ref		test0
-		ref		test1
-test2:		ref		test3
-		blah
-		blah
-		blah
+test0:		ref		test5
+test1:		ref		test0
+test2:		ref		test5
 test3:		ref		test2
+test4:		ref		test5
+test5:		ref		test6
+test6:		ref		test5
