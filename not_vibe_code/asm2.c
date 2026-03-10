@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #define MAX_LABEL_LEN 10
 
@@ -123,7 +124,7 @@ int register_label_do_thunks(
         v <<= thunk->left_shift;
         work_area[thunk->address] |= v;
         thunks_done++;
-        printf("\n\tThunked [%lu] = %lu",
+        printf("\n\tThunked [%lu] = %011lo",
             thunk->address, work_area[thunk->address]);
         remove_thunk(ttab, current_thunk);
     }
@@ -257,7 +258,7 @@ int assembler_get_or_thunk(
     uint64_t *result
 ) {
     int label_index = assembler_get_label(
-        ctx, ctx->buf
+        ctx, label
     );
     
     if (label_index == -1) {
@@ -273,7 +274,10 @@ int assembler_get_or_thunk(
         else return 0;
     }
     
-    *result = ctx->ltab->labels[label_index].value & ((1L << width) - 1);
+    uint64_t value = ctx->ltab->labels[label_index].value;
+    if (is_relative) value -= address;
+    
+    *result = value & ((1L << width) - 1);
     *result <<= left_shift;
     
     return 1;
@@ -290,6 +294,7 @@ int assembler_get_or_thunk(
 int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     int thunked_label = 0;
     int allow_parens = 0;
+    int need_relative = 0;
     
     if (*field == '@') {
         field++;
@@ -298,13 +303,55 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     
     switch (*field) {
         case '_': {*out |= ADDR_DIRECT_PAGE; field++;} break;
-        case '.': {*out |= ADDR_PC_RELATIVE; field++;} break;
+        case '.': {
+            *out |= ADDR_PC_RELATIVE;
+            need_relative = 1;
+            field++;
+        } break;
         case '+': {*out |= ADDR_POST_INCREMENT; field++;} break;
-        case '-': {*out |= ADDR_PRE_DECREMENT; field++;} break;
+        case '=': {*out |= ADDR_PRE_DECREMENT; field++;} break;
         default: allow_parens = 1;
     }
     
+    uint64_t displacement;
+
+    if (isdigit(*field) || *field == '-') {
+        displacement = (uint64_t) strtoll(field, &field, 10);
+    } else if (*field == '#') {
+        displacement = (uint64_t) strtoull(field + 1, &field, 16);
+    } else {
+        char label[MAX_LABEL_LEN + 1];
+        for (int i = 0; i < MAX_LABEL_LEN; i++) {
+            if (!(*field) || *field == '(') {
+                label[i] = 0;
+                break;
+            }
+            label[i] = *field++;
+        }
+        label[MAX_LABEL_LEN] = 0;
+        
+        int status = assembler_get_or_thunk(
+            ctx, label, ctx->pc,
+            need_relative, 18, 0,
+            &displacement
+        );
+        
+        if (status == -1) return -1;
+        
+        thunked_label = !status;
+        if (status) {
+            *out |= displacement;
+        }
+    }
     
+    if (*field == '(') {
+        if (!allow_parens) return -1;
+        
+        uint64_t reg = strtoull(field + 1, &field, 10);
+        if (reg < 3 || reg > 13) return -1;
+        if (*field != ')') return -1;
+        *out |= reg << 18;
+    }
     
     return thunked_label;
 }
@@ -341,20 +388,18 @@ int main(int argc, char *argv[]) {
                     switch(get_symbol_type(assembler)) {
                         case SYMBOL: {
                             uint64_t value = 0;
-                            int status = assembler_get_or_thunk(
-                                assembler, assembler->buf, assembler->pc,
-                                0, 63, 0,
-                                &value
+                            int status = parse_address_field(
+                                assembler, assembler->buf, &value
                             );
                             
-                            switch (status) {
-                                case -1: printf("ERROR"); break;
-                                case 0:  printf("thunk"); break;
-                                case 1: {
-                                    printf("%lu", value);
-                                    assembler->work_area[assembler->pc] =
-                                        value;
-                                } break;
+                            if (status == -1) {
+                                printf("ERROR");
+                            } else {
+                                printf(
+                                    "%011lo %s", value,
+                                    status ? "(thunk)" : ""
+                                );
+                                assembler->work_area[assembler->pc] = value;
                             }
                         } break;
                         
