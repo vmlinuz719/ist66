@@ -291,6 +291,45 @@ int assembler_get_or_thunk(
 #define ADDR_POST_INCREMENT (14L << 18)
 #define ADDR_PRE_DECREMENT  (15L << 18)
 
+#define RDC_NUM_GENERAL 16
+
+char *r_general[] = {
+    "ac", 
+    "xy", 
+    "mq", 
+    "x0", 
+    "x1", 
+    "x2", 
+    "x3", 
+    "x4", 
+    "x5", 
+    "x6", 
+    "x7", 
+    "ap", 
+    "lr", 
+    "sp", 
+    "r14",
+    "r15"
+};
+
+int64_t get_reg(char *rtab[], int max, char *label, char **endptr) {
+    if (isdigit(*label)) {
+        int64_t result = (int64_t) strtoull(label, endptr, 10);
+        if (*endptr == label || result == -1 || result >= max) return -1;
+        else return result;
+    } else {
+        for (int i = 0; i < max; i++) {
+            char *p = strstr(label, rtab[i]);
+            if (p == label) {
+                if (endptr != NULL) *endptr = label + strlen(rtab[i]);
+                return i;
+            }
+        }
+        if (endptr != NULL) *endptr = label;
+        return -1;
+    }
+}
+
 int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     int thunked_label = 0;
     int allow_parens = 0;
@@ -317,8 +356,12 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
 
     if (isdigit(*field) || *field == '-') {
         displacement = (uint64_t) strtoll(field, &field, 10);
+        if (displacement <= 0777777) *out |= displacement;
+        else return -1;
     } else if (*field == '#') {
         displacement = (uint64_t) strtoull(field + 1, &field, 16);
+        if (displacement <= 0777777) *out |= displacement;
+        else return -1;
     } else {
         char label[MAX_LABEL_LEN + 1];
         for (int i = 0; i < MAX_LABEL_LEN; i++) {
@@ -347,7 +390,7 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     if (*field == '(') {
         if (!allow_parens) return -1;
         
-        uint64_t reg = strtoull(field + 1, &field, 10);
+        int64_t reg = get_reg(r_general, RDC_NUM_GENERAL, field + 1, &field);
         if (reg < 3 || reg > 13) return -1;
         if (*field != ')') return -1;
         *out |= reg << 18;
