@@ -312,6 +312,19 @@ char *r_general[] = {
     "r15"
 };
 
+#define RDC_NUM_CONTROL 8
+
+char *r_control[] = {
+    "psw0",
+    "psw1",
+    "fpc",
+    "plt",
+    "slt",
+    "sdr",
+    "sflt",
+    "cr8"
+};
+
 int64_t get_reg(char *rtab[], int max, char *label, char **endptr) {
     if (isdigit(*label)) {
         int64_t result = (int64_t) strtoull(label, endptr, 10);
