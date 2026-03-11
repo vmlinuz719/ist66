@@ -325,6 +325,15 @@ char *r_control[] = {
     "cr8"
 };
 
+#define RDC_NUM_FLOAT 4
+
+char *r_float[] = {
+    "f0",
+    "f1",
+    "f2",
+    "f3"
+};
+
 int64_t get_reg(char *rtab[], int max, char *label, char **endptr) {
     if (isdigit(*label)) {
         int64_t result = (int64_t) strtoull(label, endptr, 10);
