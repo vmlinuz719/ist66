@@ -295,8 +295,8 @@ int assembler_get_or_thunk(
 
 char *r_general[] = {
     "ac", 
-    "xy", 
     "mq", 
+    "xy", 
     "x0", 
     "x1", 
     "x2", 
