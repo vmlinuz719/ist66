@@ -648,7 +648,7 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, ea + 1);
         } break;
         case 15: { // RET
-            uint64_t temp_sp = cpu->a[13];
+            uint64_t temp_sp = cpu->a[13] + ea;
             uint64_t last_two[2]; // return addr, mask
             
             for (int i = 0; i < 2; i++) {

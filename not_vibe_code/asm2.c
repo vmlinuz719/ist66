@@ -132,8 +132,8 @@ int register_label_do_thunks(
 }
 
 typedef struct {
-    char buf[512];
-    int is_label_def, has_comma, is_end_of_list, eof, error;
+    char buf[513];
+    int next, is_label_def, has_comma, is_end_of_list, eof, error;
     
     FILE *file;
     
@@ -174,25 +174,81 @@ void delete_assembler(assembler_ctx_t *ctx) {
 }
 
 int read_symbol(assembler_ctx_t *ctx) {
-    if (feof(ctx->file)) {
-        ctx->eof = 1;
-        return -1;
+    while ((isspace(ctx->next) || ctx->next == 0) && ctx->next != EOF) {
+        ctx->next = fgetc(ctx->file);
     }
     
-    char comma;
-    int matches = fscanf(ctx->file, "%511[^ \n\t,] %1[,] ", ctx->buf, &comma);
-    if (ferror(ctx->file) || matches == 0) {
-        ctx->error = 1;
+    if (ctx->next == EOF) {
+        if (feof(ctx->file)) {
+            ctx->eof = 1;
+        }
+        if (ferror(ctx->file)) {
+            ctx->error = 1;
+        }
         return -1;
     }
     
     ctx->is_end_of_list = ctx->has_comma;
-    ctx->has_comma = (matches > 1);
-    ctx->is_label_def = (ctx->buf[strlen(ctx->buf) - 1] == ':');
+    ctx->is_label_def = ctx->has_comma = 0;
     
-    if ((ctx->has_comma || ctx->is_end_of_list) && ctx->is_label_def) {
-        ctx->error = 1;
-        return -1;
+    int i;
+    for (i = 0; i < 512; i++) {
+        ctx->buf[i] = ctx->next;
+        
+        ctx->next = fgetc(ctx->file);
+        
+        if (isspace(ctx->next)) break;
+        
+        if (ctx->next == EOF) {
+            if (ferror(ctx->file)) {
+                ctx->error = 1;
+                return -1;
+            }
+            break;
+        }
+        
+        if (ctx->next == ':') {
+            ctx->is_label_def = 1;
+            break;
+        }
+        
+        if (ctx->next == ',') {
+            ctx->has_comma = 1;
+            break;
+        }
+    }
+    ctx->buf[i + 1] = 0;
+    
+    ctx->next = fgetc(ctx->file);
+    while (isspace(ctx->next) && ctx->next != EOF) {
+        ctx->next = fgetc(ctx->file);
+    }
+    
+    if (ctx->next == EOF) {
+        if (ferror(ctx->file)) {
+            ctx->error = 1;
+            return -1;
+        }
+        return 0;
+    }
+    
+    if (ctx->next == ':') {
+        if (ctx->is_label_def || ctx->has_comma) {
+            ctx->error = 1;
+            return -1;
+        }
+        ctx->is_label_def = 1;
+        ctx->next = fgetc(ctx->file);
+    }
+    
+    if (ctx->next == ',') {
+        if (ctx->is_label_def || ctx->has_comma) {
+            ctx->error = 1;
+            return -1;
+        }
+        
+        ctx->has_comma = 1;
+        ctx->next = fgetc(ctx->file);
     }
     
     return 0;
@@ -434,7 +490,6 @@ int main(int argc, char *argv[]) {
             case LABEL_DEF: {
                 printf("LABEL_DEF@%lu", assembler->pc);
                 
-                assembler->buf[strlen(assembler->buf) - 1] = 0;
                 assembler_register_label(
                     assembler,
                     assembler->buf,
