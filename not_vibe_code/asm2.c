@@ -208,6 +208,10 @@ int read_symbol(assembler_ctx_t *ctx) {
         }
         
         if (ctx->next == ':') {
+            if (ctx->is_end_of_list) {
+                ctx->error = 1;
+                return -1;
+            }
             ctx->is_label_def = 1;
             break;
         }
@@ -233,7 +237,7 @@ int read_symbol(assembler_ctx_t *ctx) {
     }
     
     if (ctx->next == ':') {
-        if (ctx->is_label_def || ctx->has_comma) {
+        if (ctx->is_label_def || ctx->has_comma || ctx->is_end_of_list) {
             ctx->error = 1;
             return -1;
         }
