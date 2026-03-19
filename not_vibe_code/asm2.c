@@ -515,6 +515,47 @@ int assemble_mr(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
+int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
+    read_symbol(ctx);
+    uint64_t value = 0;
+    switch(get_symbol_type(ctx)) {
+        case LIST_ITEM: {
+            int64_t reg = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+            if (reg == -1) {
+                printf("ERROR");
+                return -1;
+            }
+
+            value |= reg << 23;
+            read_symbol(ctx);
+            if (get_symbol_type(ctx) != LIST_END) {
+                printf("ERROR");
+                return -1;
+            }
+        }
+        case SYMBOL: {
+            int status = parse_address_field(
+                ctx, ctx->buf, &value
+            );
+
+            if (status == -1) {
+                printf("ERROR");
+                return -1;
+            } else {
+                printf("AM");
+                ctx->work_area[ctx->pc] = value | opcode;
+            }
+        } break;
+
+        default: {
+            printf("ERROR");
+            return -1;
+        }
+    }
+    ctx->pc++;
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     uint64_t work_area[8192];
     assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
@@ -540,7 +581,7 @@ int main(int argc, char *argv[]) {
             
             case SYMBOL: {
                 if (!strcmp(assembler->buf, "ref")) {
-                    assemble_mr(assembler, 0777000000000);
+                    if (assemble_am(assembler, 0777000000000) == -1) assembler->error = 1;
                 } else {
                     printf("ERROR");
                     assembler->error = 1;

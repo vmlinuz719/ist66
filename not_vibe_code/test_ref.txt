@@ -3,7 +3,7 @@ test1:      ref     test0
 test2:      ref     .test5
 test3:      ref     test2
 test4:      ref     test5
-test5:      ref     test6
+test5:      ref     mq, @test6(x3)
 test6:      ref     .test5
             ref     @test6(x4)
 
