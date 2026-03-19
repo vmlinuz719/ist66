@@ -400,11 +400,15 @@ char *r_float[] = {
     "f3"
 };
 
+int64_t get_num(int max, char *label, char **endptr, int base) {
+    int64_t result = (int64_t) strtoull(label, endptr, base);
+    if (*endptr == label || result == -1 || result >= max) return -1;
+    else return result;
+}
+
 int64_t get_reg(char *rtab[], int max, char *label, char **endptr) {
     if (isdigit(*label)) {
-        int64_t result = (int64_t) strtoull(label, endptr, 10);
-        if (*endptr == label || result == -1 || result >= max) return -1;
-        else return result;
+        return get_num(max, label, endptr, 10);
     } else {
         for (int i = 0; i < max; i++) {
             char *p = strstr(label, rtab[i]);
@@ -558,6 +562,8 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
     ctx->pc++;
     return 0;
 }
+
+
 
 assembler_entry_t instructions[] = {
     {"nop",     0000002000001,  assemble_unary},
