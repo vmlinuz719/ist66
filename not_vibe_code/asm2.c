@@ -124,7 +124,7 @@ int register_label_do_thunks(
         v <<= thunk->left_shift;
         work_area[thunk->address] |= v;
         thunks_done++;
-        printf("\n\tThunked [%lu] = %011lo",
+        printf("\n\tThunked [%09lo] = %012lo",
             thunk->address, work_area[thunk->address]);
         remove_thunk(ttab, current_thunk);
     }
@@ -136,6 +136,7 @@ typedef struct {
     int next, is_label_def, has_comma, is_end_of_list, eof, error;
     
     FILE *file;
+    int line_no;
     
     uint64_t pc;
     
@@ -175,6 +176,7 @@ void delete_assembler(assembler_ctx_t *ctx) {
 
 int read_symbol(assembler_ctx_t *ctx) {
     while ((isspace(ctx->next) || ctx->next == 0) && ctx->next != EOF) {
+        if (ctx->next == '\n') ctx->line_no++;
         ctx->next = fgetc(ctx->file);
     }
     
@@ -197,7 +199,10 @@ int read_symbol(assembler_ctx_t *ctx) {
         
         ctx->next = fgetc(ctx->file);
         
-        if (isspace(ctx->next)) break;
+        if (isspace(ctx->next)) {
+            if (ctx->next == '\n') ctx->line_no++;
+            break;
+        }
         
         if (ctx->next == EOF) {
             if (ferror(ctx->file)) {
@@ -225,6 +230,7 @@ int read_symbol(assembler_ctx_t *ctx) {
     
     ctx->next = fgetc(ctx->file);
     while (isspace(ctx->next) && ctx->next != EOF) {
+        if (ctx->next == '\n') ctx->line_no++;
         ctx->next = fgetc(ctx->file);
     }
     
@@ -481,8 +487,13 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     return thunked_label;
 }
 
+typedef struct {
+    char *mnemonic;
+    uint64_t base;
+    int (*assemble)(assembler_ctx_t *, uint64_t);
+} assembler_entry_t;
+
 int assemble_unary(assembler_ctx_t *ctx, uint64_t opcode) {
-    printf("UNARY");
     ctx->work_area[ctx->pc] = opcode;
     ctx->pc++;
     return 0;
@@ -498,16 +509,13 @@ int assemble_mr(assembler_ctx_t *ctx, uint64_t opcode) {
             );
 
             if (status == -1) {
-                printf("ERROR");
                 return -1;
             } else {
-                printf("MR");
                 ctx->work_area[ctx->pc] = value | opcode;
             }
         } break;
 
         default: {
-            printf("ERROR");
             return -1;
         }
     }
@@ -522,14 +530,12 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
         case LIST_ITEM: {
             int64_t reg = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
             if (reg == -1) {
-                printf("ERROR");
                 return -1;
             }
 
             value |= reg << 23;
             read_symbol(ctx);
             if (get_symbol_type(ctx) != LIST_END) {
-                printf("ERROR");
                 return -1;
             }
         }
@@ -539,22 +545,27 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
             );
 
             if (status == -1) {
-                printf("ERROR");
                 return -1;
             } else {
-                printf("AM");
                 ctx->work_area[ctx->pc] = value | opcode;
             }
         } break;
 
         default: {
-            printf("ERROR");
             return -1;
         }
     }
     ctx->pc++;
     return 0;
 }
+
+assembler_entry_t instructions[] = {
+    {"jmp",     0,              assemble_mr},
+    {"calls",   0000700000000,  assemble_mr},
+    {"rets",    0000740000000,  assemble_unary},
+    {"retsd",   0000740000000,  assemble_mr},
+    {"ld",      0052000000000,  assemble_am}
+};
 
 int main(int argc, char *argv[]) {
     uint64_t work_area[8192];
@@ -567,7 +578,7 @@ int main(int argc, char *argv[]) {
             case FILE_END:  printf("FILE_END"); break;
             
             case LABEL_DEF: {
-                printf("LABEL_DEF@%lu", assembler->pc);
+                printf("LABEL_DEF@%lo", assembler->pc);
                 
                 assembler_register_label(
                     assembler,
@@ -580,11 +591,28 @@ int main(int argc, char *argv[]) {
             case LIST_END:  printf("LIST_END"); break;
             
             case SYMBOL: {
-                if (!strcmp(assembler->buf, "ref")) {
-                    if (assemble_am(assembler, 0777000000000) == -1) assembler->error = 1;
-                } else {
+                int assembled = 0;
+                uint64_t current_pc = assembler->pc;
+                for (
+                    int i = 0;
+                    i < sizeof(instructions) / sizeof(assembler_entry_t);
+                    i++
+                ) {
+                    if (!strcmp(assembler->buf, instructions[i].mnemonic)) {
+                        if (
+                            instructions[i].assemble(
+                                assembler, instructions[i].base
+                            ) == -1
+                        ) assembler->error = 1;
+                        else assembled = 1;
+                        break;
+                    }
+                }
+                if (!assembled) {
                     printf("ERROR");
                     assembler->error = 1;
+                } else {
+                    printf("%012lo", assembler->work_area[current_pc]);
                 }
             } break;
         }
@@ -592,14 +620,9 @@ int main(int argc, char *argv[]) {
         printf("\n");
     }
     
-    printf(
-        "Ended on %s\n", 
-          assembler->eof   ? "EOF"
-        : assembler->error ? "error"
-        :                    "impossible"
-    );
-    
-    if (assembler->ttab->num_thunks == 0) {
+    if (assembler->error) {
+        printf("Error on line %d\n", assembler->line_no);
+    } else if (assembler->ttab->num_thunks == 0) {
         printf("All references resolved\n");
     } else {
         printf("%d unresolved references\n", assembler->ttab->num_thunks);

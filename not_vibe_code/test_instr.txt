@@ -1,0 +1,8 @@
+loop:       ld          x5,@somelabel(x3)
+            calls       .function
+            rets
+            jmp         .loop
+
+function:   retsd       3
+
+somelabel:
