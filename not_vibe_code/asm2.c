@@ -481,11 +481,45 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     return thunked_label;
 }
 
+int assemble_unary(assembler_ctx_t *ctx, uint64_t opcode) {
+    printf("UNARY");
+    ctx->work_area[ctx->pc] = opcode;
+    ctx->pc++;
+    return 0;
+}
+
+int assemble_mr(assembler_ctx_t *ctx, uint64_t opcode) {
+    read_symbol(ctx);
+    switch(get_symbol_type(ctx)) {
+        case SYMBOL: {
+            uint64_t value = 0;
+            int status = parse_address_field(
+                ctx, ctx->buf, &value
+            );
+
+            if (status == -1) {
+                printf("ERROR");
+                return -1;
+            } else {
+                printf("MR");
+                ctx->work_area[ctx->pc] = value | opcode;
+            }
+        } break;
+
+        default: {
+            printf("ERROR");
+            return -1;
+        }
+    }
+    ctx->pc++;
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     uint64_t work_area[8192];
     assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
     
-    while (!read_symbol(assembler)) {
+    while (!assembler->error && !read_symbol(assembler)) {
         printf("%-16s is ", assembler->buf);
         switch (get_symbol_type(assembler)) {
             case ERROR:     printf("ERROR"); break;
@@ -506,33 +540,11 @@ int main(int argc, char *argv[]) {
             
             case SYMBOL: {
                 if (!strcmp(assembler->buf, "ref")) {
-                    printf("LABEL_REF@");
-                    
-                    read_symbol(assembler);
-                    switch(get_symbol_type(assembler)) {
-                        case SYMBOL: {
-                            uint64_t value = 0;
-                            int status = parse_address_field(
-                                assembler, assembler->buf, &value
-                            );
-                            
-                            if (status == -1) {
-                                printf("ERROR");
-                            } else {
-                                printf(
-                                    "%011lo %s", value,
-                                    status ? "(thunk)" : ""
-                                );
-                                assembler->work_area[assembler->pc] = value;
-                            }
-                        } break;
-                        
-                        default: printf("ERROR");
-                    }
+                    assemble_mr(assembler, 0777000000000);
                 } else {
-                    printf("SYMBOL");
+                    printf("ERROR");
+                    assembler->error = 1;
                 }
-                assembler->pc++;
             } break;
         }
         

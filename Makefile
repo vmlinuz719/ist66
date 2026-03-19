@@ -2,7 +2,7 @@
 
 # Compiler and flags
 CC = gcc
-CFLAGS = -Wall -Iinclude -O3 -flto # -fprofile-generate
+CFLAGS = -Wall -Iinclude -O3 -flto -fprofile-use
 
 # Source files
 SRCS = alu.c fpu.c cpu.c lpt.c pch.c ppt.c tty.c panel.c bishop.c render.c
