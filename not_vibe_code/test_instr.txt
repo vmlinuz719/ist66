@@ -1,8 +1,9 @@
-loop:       ld          x5,@somelabel(x3)
+loop:       ld          5,@somelabel(x3)
             calls       .function
             rets
             jmp         .loop
 
 function:   retsd       3
 
-somelabel:
+somelabel:  commz.sk    0,0,5
+            addr        ac,ac

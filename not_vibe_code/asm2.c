@@ -402,7 +402,7 @@ char *r_float[] = {
 
 int64_t get_num(int max, char *label, char **endptr, int base) {
     int64_t result = (int64_t) strtoull(label, endptr, base);
-    if (*endptr == label || result == -1 || result >= max) return -1;
+    if ((endptr != NULL && *endptr == label) || result == -1 || result >= max) return -1;
     else return result;
 }
 
@@ -446,10 +446,13 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     
     uint64_t displacement;
 
-    if (isdigit(*field) || *field == '-') {
-        displacement = (uint64_t) strtoll(field, &field, 10);
+    if (*field == '0') {
+        displacement = (uint64_t) strtoull(field + 1, &field, 8);
         if (displacement <= 0777777) *out |= displacement;
         else return -1;
+    } else if (isdigit(*field) || *field == '-') {
+        displacement = (uint64_t) strtoll(field, &field, 10);
+        *out |= displacement & 0777777;
     } else if (*field == '#') {
         displacement = (uint64_t) strtoull(field + 1, &field, 16);
         if (displacement <= 0777777) *out |= displacement;
@@ -563,12 +566,248 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
+char *tests[] = {
+    "no",
+    "sk",
+    "cn",
+    "cz",
+    "rn",
+    "rz",
+    "bn",
+    "bz"
+};
 
+int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
+    int is_m_type = (tolower(ctx->buf[3]) == 'm');
+    uint64_t value = ((opcode >> 4) << 32) | ((opcode & 7) << 20);
+
+    int index = 4;
+    if (tolower(ctx->buf[index]) == 't') {
+        index++;
+        value |= 1L << 13;
+    }
+    if (tolower(ctx->buf[index]) == 'r') {
+        index++;
+        value |= 1L << 12;
+    }
+    switch (tolower(ctx->buf[index])) {
+        case 'z': {index++; value |= 1L << 18;} break;
+        case 's': {index++; value |= 2L << 18;} break;
+        case 'c': {index++; value |= 3L << 18;} break;
+    }
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        value |= 1L << 31;
+    }
+    if (ctx->buf[index] == '.') {
+        index++;
+        char *test_name = &(ctx->buf[index]);
+        uint64_t test = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!strncmp(test_name, tests[i], 2)) {
+                test = i << 15;
+                break;
+            }
+        }
+        if (!test) return -1;
+        value |= test;
+        index += 2;
+    }
+    if (ctx->buf[index] != 0) return -1;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 27;
+
+    read_symbol(ctx);
+    enum event_type evt = get_symbol_type(ctx);
+    if (evt != LIST_ITEM && evt != LIST_END) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    if (evt == LIST_END) {
+        ctx->work_area[ctx->pc++] = value;
+        return 0;
+    }
+
+    read_symbol(ctx);
+    evt = get_symbol_type(ctx);
+    if (evt != LIST_ITEM && evt != LIST_END) return -1;
+    int64_t arg2 = get_num(37, ctx->buf, NULL, 10);
+    if (arg2 == -1) return -1;
+    value |= arg2 << (is_m_type ? 6 : 0);
+    if (evt == LIST_END) {
+        ctx->work_area[ctx->pc++] = value;
+        return 0;
+    }
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t arg3 = get_num(37, ctx->buf, NULL, 10);
+    if (arg3 == -1) return -1;
+    value |= arg3 << (is_m_type ? 0 : 6);
+    ctx->work_area[ctx->pc++] = value;
+    return 0;
+}
+
+int assemble_aa_s(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = ((opcode >> 4) << 32) | ((opcode & 7) << 20);
+    value |= 1L << 14;
+
+    int index = 4;
+
+    if (tolower(ctx->buf[index]) == 'r') {
+        index++;
+        value |= 1L << 12;
+    }
+    switch (tolower(ctx->buf[index])) {
+        case 'z': {index++; value |= 1L << 18;} break;
+        case 's': {index++; value |= 2L << 18;} break;
+        case 'c': {index++; value |= 3L << 18;} break;
+    }
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        value |= 1L << 31;
+    }
+    if (ctx->buf[index] == '.') {
+        index++;
+        char *test_name = &(ctx->buf[index]);
+        uint64_t test = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!strncmp(test_name, tests[i], 2)) {
+                test = i << 15;
+                break;
+            }
+        }
+        if (!test) return -1;
+        value |= test;
+        index += 2;
+    }
+    if (ctx->buf[index] != 0) return -1;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 27;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+
+    read_symbol(ctx);
+    enum event_type evt = get_symbol_type(ctx);
+    if (evt != LIST_ITEM && evt != LIST_END) return -1;
+    int64_t dst = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (dst == -1) return -1;
+    value |= dst << 6;
+    if (evt == LIST_END) {
+        ctx->work_area[ctx->pc++] = value;
+        return 0;
+    }
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t arg3 = get_num(37, ctx->buf, NULL, 10);
+    if (arg3 == -1) return -1;
+    value |= arg3 << 0;
+    ctx->work_area[ctx->pc++] = value;
+    return 0;
+}
+
+int assemble_aa_i(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = ((opcode >> 4) << 32) | ((opcode & 7) << 20);
+    value |= 3L << 13;
+
+    int index = 4;
+
+    switch (tolower(ctx->buf[index])) {
+        case 'z': {index++; value |= 1L << 18;} break;
+        case 's': {index++; value |= 2L << 18;} break;
+        case 'c': {index++; value |= 3L << 18;} break;
+    }
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        value |= 1L << 31;
+    }
+    if (ctx->buf[index] == '.') {
+        index++;
+        char *test_name = &(ctx->buf[index]);
+        uint64_t test = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!strncmp(test_name, tests[i], 2)) {
+                test = i << 15;
+                break;
+            }
+        }
+        if (!test) return -1;
+        value |= test;
+        index += 2;
+    }
+    if (ctx->buf[index] != 0) return -1;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 27;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    char *field = ctx->buf;
+    uint64_t arg2;
+    if (*field == '0') {
+        arg2 = (uint64_t) strtoull(field + 1, &field, 8);
+        if (arg2 > 017777) return -1;
+    } else if (isdigit(*field) || *field == '-') {
+        arg2 = (uint64_t) strtoll(field, &field, 10);
+    } else if (*field == '#') {
+        arg2 = (uint64_t) strtoull(field + 1, &field, 16);
+        if (arg2 > 017777) return -1;
+    } else return -1;
+    value |= arg2 & 017777;
+    ctx->work_area[ctx->pc++] = value;
+    return 0;
+}
+
+int assemble_aa_var(assembler_ctx_t *ctx, uint64_t opcode) {
+    switch (tolower(ctx->buf[3])) {
+        case 'r':
+        case 'm': return assemble_aa_r(ctx, opcode);
+        case 's': return assemble_aa_s(ctx, opcode);
+        case 'i': return assemble_aa_i(ctx, opcode);
+        default:  return -1;
+    }
+}
+
+assembler_entry_t var_instructions[] = {
+    {"com",     0xE0,           assemble_aa_var},
+    {"ngt",     0xE1,           assemble_aa_var},
+    {"mov",     0xE2,           assemble_aa_var},
+    {"inc",     0xE3,           assemble_aa_var},
+    {"adc",     0xE4,           assemble_aa_var},
+    {"sub",     0xE5,           assemble_aa_var},
+    {"add",     0xE6,           assemble_aa_var},
+    {"and",     0xE7,           assemble_aa_var},
+    {"bis",     0xF2,           assemble_aa_var},
+    {"xor",     0xF6,           assemble_aa_var},
+    {"pct",     0xF7,           assemble_aa_var},
+};
 
 assembler_entry_t instructions[] = {
     {"nop",     0000002000001,  assemble_unary},
     {"retl",    0000014000000,  assemble_unary},
-    {"jmp",     0,              assemble_mr},
+    {"jmp",     0000000000000,  assemble_mr},
     {"callr",   0000040000000,  assemble_mr},
     {"inctnz",  0000100000000,  assemble_mr},
     {"dectnz",  0000140000000,  assemble_mr},
@@ -665,6 +904,29 @@ int main(int argc, char *argv[]) {
                         ) assembler->error = 1;
                         else assembled = 1;
                         break;
+                    }
+                }
+                if (!assembled) {
+                    for (
+                        int i = 0;
+                        i < sizeof(var_instructions) / sizeof(assembler_entry_t);
+                        i++
+                    ) {
+                        if (
+                            !strncmp(
+                                assembler->buf,
+                                var_instructions[i].mnemonic,
+                                3
+                            )
+                        ) {
+                            if (
+                                var_instructions[i].assemble(
+                                    assembler, var_instructions[i].base
+                                ) == -1
+                            ) assembler->error = 1;
+                            else assembled = 1;
+                            break;
+                        }
                     }
                 }
                 if (!assembled) {
