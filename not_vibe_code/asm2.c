@@ -138,7 +138,7 @@ typedef struct {
     FILE *file;
     int line_no;
     
-    uint64_t pc;
+    uint64_t asm_offset, pc;
     
     label_tab_t *ltab;
     thunk_tab_t *ttab;
@@ -147,6 +147,17 @@ typedef struct {
 
 int assembler_get_label(assembler_ctx_t *ctx, char *label) {
     return get_label(ctx->ltab, label);
+}
+
+uint64_t assembler_next(assembler_ctx_t *ctx) {
+    ctx->pc++;
+    return ctx->asm_offset++;
+}
+
+uint64_t assembler_set(assembler_ctx_t *ctx, uint64_t new_pc) {
+    // TODO: somehow indicate new offset for final output
+    ctx->pc = new_pc;
+    return ctx->asm_offset++;
 }
 
 assembler_ctx_t *new_assembler(
@@ -469,7 +480,7 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
         label[MAX_LABEL_LEN] = 0;
         
         int status = assembler_get_or_thunk(
-            ctx, label, ctx->pc,
+            ctx, label, ctx->asm_offset,
             need_relative, 18, 0,
             &displacement
         );
@@ -501,8 +512,7 @@ typedef struct {
 } assembler_entry_t;
 
 int assemble_unary(assembler_ctx_t *ctx, uint64_t opcode) {
-    ctx->work_area[ctx->pc] = opcode;
-    ctx->pc++;
+    ctx->work_area[assembler_next(ctx)] = opcode;
     return 0;
 }
 
@@ -518,7 +528,7 @@ int assemble_mr(assembler_ctx_t *ctx, uint64_t opcode) {
             if (status == -1) {
                 return -1;
             } else {
-                ctx->work_area[ctx->pc] = value | opcode;
+                ctx->work_area[ctx->asm_offset] = value | opcode;
             }
         } break;
 
@@ -526,7 +536,7 @@ int assemble_mr(assembler_ctx_t *ctx, uint64_t opcode) {
             return -1;
         }
     }
-    ctx->pc++;
+    assembler_next(ctx);
     return 0;
 }
 
@@ -554,7 +564,7 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
             if (status == -1) {
                 return -1;
             } else {
-                ctx->work_area[ctx->pc] = value | opcode;
+                ctx->work_area[ctx->asm_offset] = value | opcode;
             }
         } break;
 
@@ -562,7 +572,7 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
             return -1;
         }
     }
-    ctx->pc++;
+    assembler_next(ctx);
     return 0;
 }
 
@@ -628,7 +638,7 @@ int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
     if (tgt == -1) return -1;
     value |= tgt << 23;
     if (evt == LIST_END) {
-        ctx->work_area[ctx->pc++] = value;
+        ctx->work_area[assembler_next(ctx)] = value;
         return 0;
     }
 
@@ -639,7 +649,7 @@ int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
     if (arg2 == -1) return -1;
     value |= arg2 << (is_m_type ? 6 : 0);
     if (evt == LIST_END) {
-        ctx->work_area[ctx->pc++] = value;
+        ctx->work_area[assembler_next(ctx)] = value;
         return 0;
     }
 
@@ -648,7 +658,7 @@ int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
     int64_t arg3 = get_num(37, ctx->buf, NULL, 10);
     if (arg3 == -1) return -1;
     value |= arg3 << (is_m_type ? 0 : 6);
-    ctx->work_area[ctx->pc++] = value;
+    ctx->work_area[assembler_next(ctx)] = value;
     return 0;
 }
 
@@ -706,7 +716,7 @@ int assemble_aa_s(assembler_ctx_t *ctx, uint64_t opcode) {
     if (dst == -1) return -1;
     value |= dst << 6;
     if (evt == LIST_END) {
-        ctx->work_area[ctx->pc++] = value;
+        ctx->work_area[assembler_next(ctx)] = value;
         return 0;
     }
 
@@ -715,7 +725,7 @@ int assemble_aa_s(assembler_ctx_t *ctx, uint64_t opcode) {
     int64_t arg3 = get_num(37, ctx->buf, NULL, 10);
     if (arg3 == -1) return -1;
     value |= arg3 << 0;
-    ctx->work_area[ctx->pc++] = value;
+    ctx->work_area[assembler_next(ctx)] = value;
     return 0;
 }
 
@@ -776,7 +786,7 @@ int assemble_aa_i(assembler_ctx_t *ctx, uint64_t opcode) {
         if (arg2 > 017777) return -1;
     } else return -1;
     value |= arg2 & 017777;
-    ctx->work_area[ctx->pc++] = value;
+    ctx->work_area[assembler_next(ctx)] = value;
     return 0;
 }
 
@@ -876,12 +886,12 @@ int main(int argc, char *argv[]) {
             case FILE_END:  printf("FILE_END"); break;
             
             case LABEL_DEF: {
-                printf("LABEL_DEF@%lo", assembler->pc);
+                printf("LABEL_DEF@%lo", assembler->asm_offset);
                 
                 assembler_register_label(
                     assembler,
                     assembler->buf,
-                    assembler->pc
+                    assembler->asm_offset
                 );
             } break;
             
@@ -890,7 +900,7 @@ int main(int argc, char *argv[]) {
             
             case SYMBOL: {
                 int assembled = 0;
-                uint64_t current_pc = assembler->pc;
+                uint64_t current_pc = assembler->asm_offset;
                 for (
                     int i = 0;
                     i < sizeof(instructions) / sizeof(assembler_entry_t);
