@@ -212,9 +212,21 @@ void delete_assembler(assembler_ctx_t *ctx) {
 }
 
 int read_symbol(assembler_ctx_t *ctx) {
-    while ((isspace(ctx->next) || ctx->next == 0) && ctx->next != EOF) {
-        if (ctx->next == '\n') ctx->line_no++;
+    int is_comment = (ctx->next == ';');
+    while (
+        (isspace(ctx->next) || ctx->next == 0 || is_comment)
+        && ctx->next != EOF
+    ) {
+        if (ctx->next == '\n') {
+            ctx->line_no++;
+            is_comment = 0;
+        }
+        
         ctx->next = fgetc(ctx->file);
+        
+        if (ctx->next == ';') {
+            is_comment = 1;
+        }
     }
     
     if (ctx->next == EOF) {
@@ -266,9 +278,18 @@ int read_symbol(assembler_ctx_t *ctx) {
     ctx->buf[i + 1] = 0;
     
     ctx->next = fgetc(ctx->file);
-    while (isspace(ctx->next) && ctx->next != EOF) {
-        if (ctx->next == '\n') ctx->line_no++;
+    is_comment = (ctx->next == ';');
+    while ((isspace(ctx->next) || is_comment) && ctx->next != EOF) {
+        if (ctx->next == '\n') {
+            ctx->line_no++;
+            is_comment = 0;
+        }
+        
         ctx->next = fgetc(ctx->file);
+        
+        if (ctx->next == ';') {
+            is_comment = 1;
+        }
     }
     
     if (ctx->next == EOF) {

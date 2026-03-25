@@ -1,11 +1,13 @@
+; header comment
+
             origin      512
 
 loop:       ld          5,@somelabel(x3)
             calls       .function
             rets
             jmp         .loop
-            jmp         16
-
+            jmp         16              ; some comment
+                                        ; more comments
 function:   retsd       3
 
             origin      4096
@@ -16,3 +18,5 @@ somelabel:  commz.sk    0,0,5
 anotherlbl: bss         16
 
 data:       dw          0123456712345
+
+; footer comment
