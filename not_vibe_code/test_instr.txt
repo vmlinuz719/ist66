@@ -17,6 +17,7 @@ somelabel:  commz.sk    0,0,5
 
 anotherlbl: bss         16
 
-data:       dw          0123456712345
+data:       dw          0123456712345,1,2,3
+end_data:
 
 ; footer comment

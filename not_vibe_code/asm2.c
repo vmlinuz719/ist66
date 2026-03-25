@@ -617,16 +617,24 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
             assembler_set(ctx, ctx->pc + new_origin);
         } break;
         case 2: { // dw
-            read_symbol(ctx);
-            if (get_symbol_type(ctx) != SYMBOL) return -1;
-            
-            uint64_t value;
-            int status = parse_number_or_label(
-                ctx, ctx->buf, 36, 0, 1, &value
-            );
-            if (status == -1) return -1;
-            
-            ctx->work_area[assembler_next(ctx)] = value;
+            enum event_type evt;
+            do {
+                read_symbol(ctx);
+                evt = get_symbol_type(ctx);
+                if (
+                    evt != SYMBOL
+                    && evt != LIST_ITEM
+                    && evt != LIST_END
+                ) return -1;
+                
+                uint64_t value;
+                int status = parse_number_or_label(
+                    ctx, ctx->buf, 36, 0, 1, &value
+                );
+                if (status == -1) return -1;
+                
+                ctx->work_area[assembler_next(ctx)] = value;
+            } while (evt == LIST_ITEM);
         } break;
     }
     return 0;
