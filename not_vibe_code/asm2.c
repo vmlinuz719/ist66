@@ -86,7 +86,7 @@ int insert_thunk(
 ) {
     if (ttab->num_thunks == ttab->max_thunks) return -1;
     
-    strncpy(ttab->thunks[ttab->num_thunks].label, label, MAX_LABEL_LEN);
+    memcpy(ttab->thunks[ttab->num_thunks].label, label, MAX_LABEL_LEN);
     ttab->thunks[ttab->num_thunks].label[MAX_LABEL_LEN] = 0;
     
     ttab->thunks[ttab->num_thunks].address = address;
@@ -127,7 +127,7 @@ int register_label_do_thunks(
         work_area[thunk->address] |= v;
         thunks_done++;
         printf("\n\tThunked [%09lo] = %012lo",
-            thunk->address, work_area[thunk->address]);
+            thunk->addr_in_place, work_area[thunk->address]);
         remove_thunk(ttab, current_thunk);
     }
     return thunks_done;
@@ -481,8 +481,7 @@ int parse_number_or_label(
         else return -1;
     } else if (isdigit(*field) || *field == '-') {
         result = (uint64_t) strtoll(field, &field, 10);
-        if (!(result & (~mask))) *out = result & mask;
-        else return -1;
+        *out = result & mask;
     } else if (*field == '#') {
         result = (uint64_t) strtoull(field + 1, &field, 16);
         if (result <= mask) *out = result;
@@ -583,6 +582,30 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
             if (status == -1) return -1;
             
             assembler_set(ctx, new_origin);
+        } break;
+        case 1: { // bss
+            read_symbol(ctx);
+            if (get_symbol_type(ctx) != SYMBOL) return -1;
+            
+            uint64_t new_origin;
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 36, 0, 1, &new_origin
+            );
+            if (status == -1) return -1;
+            
+            assembler_set(ctx, ctx->pc + new_origin);
+        } break;
+        case 2: { // dw
+            read_symbol(ctx);
+            if (get_symbol_type(ctx) != SYMBOL) return -1;
+            
+            uint64_t value;
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 36, 0, 1, &value
+            );
+            if (status == -1) return -1;
+            
+            ctx->work_area[assembler_next(ctx)] = value;
         } break;
     }
     return 0;
@@ -888,6 +911,8 @@ assembler_entry_t var_instructions[] = {
 
 assembler_entry_t instructions[] = {
     {"origin",  0,              assemble_directive},
+    {"bss",     1,              assemble_directive},
+    {"dw",      2,              assemble_directive},
     
     {"nop",     0000002000001,  assemble_unary},
     {"retl",    0000014000000,  assemble_unary},

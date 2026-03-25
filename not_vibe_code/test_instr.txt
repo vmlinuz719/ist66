@@ -12,3 +12,7 @@ function:   retsd       3
 
 somelabel:  commz.sk    0,0,5
             addr        ac,ac
+
+anotherlbl: bss         16
+
+data:       dw          0123456712345
