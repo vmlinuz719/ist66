@@ -1,9 +1,14 @@
+            origin      512
+
 loop:       ld          5,@somelabel(x3)
             calls       .function
             rets
             jmp         .loop
+            jmp         16
 
 function:   retsd       3
+
+            origin      4096
 
 somelabel:  commz.sk    0,0,5
             addr        ac,ac

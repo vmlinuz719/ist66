@@ -38,7 +38,7 @@ int insert_label_def(label_tab_t *ltab, char *label, uint64_t value) {
 
 typedef struct {
     char label[MAX_LABEL_LEN + 1];
-    uint64_t address;
+    uint64_t address, addr_in_place;
     int is_relative, width, left_shift;
 } label_thunk_t;
 
@@ -79,6 +79,7 @@ int insert_thunk(
     thunk_tab_t *ttab,
     char *label,
     uint64_t address,
+    uint64_t addr_in_place,
     int is_relative,
     int width,
     int left_shift
@@ -89,6 +90,7 @@ int insert_thunk(
     ttab->thunks[ttab->num_thunks].label[MAX_LABEL_LEN] = 0;
     
     ttab->thunks[ttab->num_thunks].address = address;
+    ttab->thunks[ttab->num_thunks].addr_in_place = addr_in_place;
     ttab->thunks[ttab->num_thunks].is_relative = is_relative;
     ttab->thunks[ttab->num_thunks].width = width;
     ttab->thunks[ttab->num_thunks].left_shift = left_shift;
@@ -119,7 +121,7 @@ int register_label_do_thunks(
         }
         
         label_thunk_t *thunk = &ttab->thunks[current_thunk];
-        uint64_t v = thunk->is_relative ? value - thunk->address : value;
+        uint64_t v = thunk->is_relative ? value - thunk->addr_in_place : value;
         v &= (1L << thunk->width) - 1;
         v <<= thunk->left_shift;
         work_area[thunk->address] |= v;
@@ -139,6 +141,7 @@ typedef struct {
     int line_no;
     
     uint64_t asm_offset, pc;
+    uint64_t current_label, current_size;
     
     label_tab_t *ltab;
     thunk_tab_t *ttab;
@@ -150,14 +153,37 @@ int assembler_get_label(assembler_ctx_t *ctx, char *label) {
 }
 
 uint64_t assembler_next(assembler_ctx_t *ctx) {
+    ctx->current_size++;
     ctx->pc++;
     return ctx->asm_offset++;
 }
 
 uint64_t assembler_set(assembler_ctx_t *ctx, uint64_t new_pc) {
-    // TODO: somehow indicate new offset for final output
-    ctx->pc = new_pc;
-    return ctx->asm_offset++;
+    ctx->work_area[ctx->asm_offset - ctx->current_size - 1]
+        = ctx->current_size;
+    
+    ctx->work_area[++ctx->asm_offset] = new_pc;
+    
+    ctx->pc = ctx->current_label = new_pc;
+    ctx->current_size = 0; // asm_offset - current_size - 2 for label record
+    ctx->asm_offset += 2;
+    return ctx->asm_offset;
+}
+
+uint64_t assembler_open(assembler_ctx_t *ctx, uint64_t start_pc) {
+    ctx->work_area[0] = start_pc;
+    
+    ctx->pc = ctx->current_label = start_pc;
+    ctx->current_size = 0; // asm_offset - current_size - 2 for label record
+    ctx->asm_offset = 2;
+    return ctx->asm_offset;
+}
+
+uint64_t assembler_close(assembler_ctx_t *ctx) {
+    ctx->work_area[ctx->asm_offset - ctx->current_size - 1]
+        = ctx->current_size;
+    
+    return ctx->asm_offset;
 }
 
 assembler_ctx_t *new_assembler(
@@ -311,6 +337,7 @@ int assembler_insert_thunk(
     assembler_ctx_t *ctx,
     char *label,
     uint64_t address,
+    uint64_t addr_in_place,
     int is_relative,
     int width,
     int left_shift
@@ -319,6 +346,7 @@ int assembler_insert_thunk(
         ctx->ttab,
         label,
         address,
+        addr_in_place,
         is_relative,
         width,
         left_shift
@@ -329,6 +357,7 @@ int assembler_get_or_thunk(
     assembler_ctx_t *ctx,
     char *label,
     uint64_t address,
+    uint64_t addr_in_place,
     int is_relative,
     int width,
     int left_shift,
@@ -343,6 +372,7 @@ int assembler_get_or_thunk(
             ctx,
             label,
             address,
+            addr_in_place,
             is_relative,
             width,
             left_shift
@@ -352,7 +382,7 @@ int assembler_get_or_thunk(
     }
     
     uint64_t value = ctx->ltab->labels[label_index].value;
-    if (is_relative) value -= address;
+    if (is_relative) value -= addr_in_place;
     
     *result = value & ((1L << width) - 1);
     *result <<= left_shift;
@@ -433,6 +463,60 @@ int64_t get_reg(char *rtab[], int max, char *label, char **endptr) {
     }
 }
 
+int parse_number_or_label(
+    assembler_ctx_t *ctx,
+    char *field,
+    int bits,
+    int need_relative,
+    int permit_label,
+    uint64_t *out
+) {
+    uint64_t mask = (1L << bits) - 1;
+    
+    uint64_t result;
+
+    if (*field == '0') {
+        result = (uint64_t) strtoull(field + 1, &field, 8);
+        if (result <= mask) *out = result;
+        else return -1;
+    } else if (isdigit(*field) || *field == '-') {
+        result = (uint64_t) strtoll(field, &field, 10);
+        if (!(result & (~mask))) *out = result & mask;
+        else return -1;
+    } else if (*field == '#') {
+        result = (uint64_t) strtoull(field + 1, &field, 16);
+        if (result <= mask) *out = result;
+        else return -1;
+    } else {
+        if (!permit_label) return -1;
+        
+        char label[MAX_LABEL_LEN + 1];
+        for (int i = 0; i < MAX_LABEL_LEN; i++) {
+            if (!(*field) || *field == '(') {
+                label[i] = 0;
+                break;
+            }
+            label[i] = *field++;
+        }
+        label[MAX_LABEL_LEN] = 0;
+        
+        int status = assembler_get_or_thunk(
+            ctx, label, ctx->asm_offset, ctx->pc,
+            need_relative, bits, 0,
+            &result
+        );
+        
+        if (status == -1) return -1;
+        
+        if (status) {
+            *out = result;
+        }
+        return status;
+    }
+    
+    return 1;
+}
+
 int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     int thunked_label = 0;
     int allow_parens = 0;
@@ -456,42 +540,12 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     }
     
     uint64_t displacement;
-
-    if (*field == '0') {
-        displacement = (uint64_t) strtoull(field + 1, &field, 8);
-        if (displacement <= 0777777) *out |= displacement;
-        else return -1;
-    } else if (isdigit(*field) || *field == '-') {
-        displacement = (uint64_t) strtoll(field, &field, 10);
-        *out |= displacement & 0777777;
-    } else if (*field == '#') {
-        displacement = (uint64_t) strtoull(field + 1, &field, 16);
-        if (displacement <= 0777777) *out |= displacement;
-        else return -1;
-    } else {
-        char label[MAX_LABEL_LEN + 1];
-        for (int i = 0; i < MAX_LABEL_LEN; i++) {
-            if (!(*field) || *field == '(') {
-                label[i] = 0;
-                break;
-            }
-            label[i] = *field++;
-        }
-        label[MAX_LABEL_LEN] = 0;
-        
-        int status = assembler_get_or_thunk(
-            ctx, label, ctx->asm_offset,
-            need_relative, 18, 0,
-            &displacement
-        );
-        
-        if (status == -1) return -1;
-        
-        thunked_label = !status;
-        if (status) {
-            *out |= displacement;
-        }
-    }
+    int status = parse_number_or_label(
+        ctx, field, 18, need_relative, 1, &displacement
+    );
+    if (status == -1) return -1;
+    thunked_label = !status;
+    if (status) *out |= displacement;
     
     if (*field == '(') {
         if (!allow_parens) return -1;
@@ -513,6 +567,24 @@ typedef struct {
 
 int assemble_unary(assembler_ctx_t *ctx, uint64_t opcode) {
     ctx->work_area[assembler_next(ctx)] = opcode;
+    return 0;
+}
+
+int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
+    switch (opcode) {
+        case 0: { // origin
+            read_symbol(ctx);
+            if (get_symbol_type(ctx) != SYMBOL) return -1;
+            
+            uint64_t new_origin;
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 36, 0, 1, &new_origin
+            );
+            if (status == -1) return -1;
+            
+            assembler_set(ctx, new_origin);
+        } break;
+    }
     return 0;
 }
 
@@ -815,6 +887,8 @@ assembler_entry_t var_instructions[] = {
 };
 
 assembler_entry_t instructions[] = {
+    {"origin",  0,              assemble_directive},
+    
     {"nop",     0000002000001,  assemble_unary},
     {"retl",    0000014000000,  assemble_unary},
     {"jmp",     0000000000000,  assemble_mr},
@@ -878,6 +952,7 @@ assembler_entry_t instructions[] = {
 int main(int argc, char *argv[]) {
     uint64_t work_area[8192];
     assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
+    assembler_open(assembler, 1024);
     
     while (!assembler->error && !read_symbol(assembler)) {
         printf("%-16s is ", assembler->buf);
@@ -886,12 +961,12 @@ int main(int argc, char *argv[]) {
             case FILE_END:  printf("FILE_END"); break;
             
             case LABEL_DEF: {
-                printf("LABEL_DEF@%lo", assembler->asm_offset);
+                printf("LABEL_DEF@%lo", assembler->pc);
                 
                 assembler_register_label(
                     assembler,
                     assembler->buf,
-                    assembler->asm_offset
+                    assembler->pc
                 );
             } break;
             
@@ -958,6 +1033,8 @@ int main(int argc, char *argv[]) {
     } else {
         printf("%d unresolved references\n", assembler->ttab->num_thunks);
     }
+    
+    assembler_close(assembler);
     
     delete_assembler(assembler);
     return 0;
