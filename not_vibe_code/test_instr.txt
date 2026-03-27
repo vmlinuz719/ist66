@@ -18,8 +18,8 @@ somelabel:  commz.sk    0,0,5
 anotherlbl: bss         16
 
 data:       dw          0123456712345,1,2,3
-string:     str         "Hello World",13,10,0
-            strn        "Blah blah blah"
+string:     ds          "Hello World",13,10,0
+            dsn         "Blah blah blah"
 end_data:
 
 ; footer comment

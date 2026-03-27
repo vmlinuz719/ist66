@@ -1015,8 +1015,8 @@ assembler_entry_t instructions[] = {
     {"origin",  0,              assemble_directive},
     {"bss",     1,              assemble_directive},
     {"dw",      2,              assemble_directive},
-    {"str",     0,              assemble_string},
-    {"strn",    1,              assemble_string},
+    {"ds",      0,              assemble_string},
+    {"dsn",     1,              assemble_string},
     
     {"nop",     0000002000001,  assemble_unary},
     {"retl",    0000014000000,  assemble_unary},
