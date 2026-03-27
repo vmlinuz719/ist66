@@ -135,7 +135,7 @@ int register_label_do_thunks(
 
 typedef struct {
     char buf[513];
-    int next, is_label_def, has_comma, is_end_of_list, eof, error;
+    int next, is_label_def, has_comma, is_end_of_list, is_string, eof, error;
     
     FILE *file;
     int line_no;
@@ -212,6 +212,8 @@ void delete_assembler(assembler_ctx_t *ctx) {
 }
 
 int read_symbol(assembler_ctx_t *ctx) {
+    ctx->is_string = 0;
+    
     int is_comment = (ctx->next == ';');
     while (
         (isspace(ctx->next) || ctx->next == 0 || is_comment)
@@ -242,16 +244,16 @@ int read_symbol(assembler_ctx_t *ctx) {
     ctx->is_end_of_list = ctx->has_comma;
     ctx->is_label_def = ctx->has_comma = 0;
     
+    if (ctx->next == '"') {
+        ctx->is_string = 1;
+        ctx->next = fgetc(ctx->file);
+    }
+    
     int i;
     for (i = 0; i < 512; i++) {
         ctx->buf[i] = ctx->next;
         
         ctx->next = fgetc(ctx->file);
-        
-        if (isspace(ctx->next)) {
-            if (ctx->next == '\n') ctx->line_no++;
-            break;
-        }
         
         if (ctx->next == EOF) {
             if (ferror(ctx->file)) {
@@ -261,18 +263,27 @@ int read_symbol(assembler_ctx_t *ctx) {
             break;
         }
         
-        if (ctx->next == ':') {
-            if (ctx->is_end_of_list) {
-                ctx->error = 1;
-                return -1;
-            }
-            ctx->is_label_def = 1;
-            break;
+        if (isspace(ctx->next)) {
+            if (ctx->next == '\n') ctx->line_no++;
+            if (!ctx->is_string) break;
         }
         
-        if (ctx->next == ',') {
-            ctx->has_comma = 1;
-            break;
+        if (ctx->is_string) {
+            if (ctx->next == '"') break;
+        } else {
+            if (ctx->next == ':') {
+                if (ctx->is_end_of_list) {
+                    ctx->error = 1;
+                    return -1;
+                }
+                ctx->is_label_def = 1;
+                break;
+            }
+            
+            if (ctx->next == ',') {
+                ctx->has_comma = 1;
+                break;
+            }
         }
     }
     ctx->buf[i + 1] = 0;
@@ -604,6 +615,7 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
             
             assembler_set(ctx, new_origin);
         } break;
+
         case 1: { // bss
             read_symbol(ctx);
             if (get_symbol_type(ctx) != SYMBOL) return -1;
@@ -616,6 +628,7 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
             
             assembler_set(ctx, ctx->pc + new_origin);
         } break;
+        
         case 2: { // dw
             enum event_type evt;
             do {
@@ -637,6 +650,66 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
             } while (evt == LIST_ITEM);
         } break;
     }
+    return 0;
+}
+
+int assemble_string(assembler_ctx_t *ctx, uint64_t opcode) {
+    enum event_type evt;
+    int shift = 29;
+    int len = 0;
+    uint64_t write_size_to;
+    
+    if (opcode == 1) {
+        write_size_to = assembler_next(ctx);
+    }
+    
+    do {
+        read_symbol(ctx);
+        evt = get_symbol_type(ctx);
+        if (
+            evt != SYMBOL
+            && evt != LIST_ITEM
+            && evt != LIST_END
+        ) return -1;
+        
+        uint64_t value;
+        
+        if (ctx->is_string) {
+            int index = 0;
+            while ((value = ctx->buf[index++] & 0x7F) != 0) {
+                ctx->work_area[ctx->asm_offset] &= ~(0x7FL << shift);
+                ctx->work_area[ctx->asm_offset] |= value << shift;
+                shift -= 7;
+                if (shift < 1) {
+                    shift = 29;
+                    assembler_next(ctx);
+                }
+                len++;
+            }
+        } else {
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 7, 0, 0, &value
+            );
+            if (status == -1) return -1;
+            
+            ctx->work_area[ctx->asm_offset] &= ~(0x7FL << shift);
+            ctx->work_area[ctx->asm_offset] |= value << shift;
+            shift -= 7;
+            if (shift < 1) {
+                shift = 29;
+                assembler_next(ctx);
+            }
+            len++;
+        }
+        
+    } while (evt == LIST_ITEM);
+    
+    if (shift != 29) assembler_next(ctx);
+    
+    if (opcode == 1) {
+        ctx->work_area[write_size_to] = len;
+    }
+    
     return 0;
 }
 
@@ -942,6 +1015,8 @@ assembler_entry_t instructions[] = {
     {"origin",  0,              assemble_directive},
     {"bss",     1,              assemble_directive},
     {"dw",      2,              assemble_directive},
+    {"str",     0,              assemble_string},
+    {"strn",    1,              assemble_string},
     
     {"nop",     0000002000001,  assemble_unary},
     {"retl",    0000014000000,  assemble_unary},
