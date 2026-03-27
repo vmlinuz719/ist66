@@ -162,11 +162,11 @@ uint64_t assembler_set(assembler_ctx_t *ctx, uint64_t new_pc) {
     ctx->work_area[ctx->asm_offset - ctx->current_size - 1]
         = ctx->current_size;
     
-    ctx->work_area[++ctx->asm_offset] = new_pc;
+    ctx->work_area[ctx->asm_offset++] = new_pc;
     
     ctx->pc = ctx->current_label = new_pc;
     ctx->current_size = 0; // asm_offset - current_size - 2 for label record
-    ctx->asm_offset += 2;
+    ctx->asm_offset++;
     return ctx->asm_offset;
 }
 
@@ -1081,7 +1081,7 @@ assembler_entry_t instructions[] = {
 int main(int argc, char *argv[]) {
     uint64_t work_area[8192];
     assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
-    assembler_open(assembler, 1024);
+    assembler_open(assembler, 0);
     
     while (!assembler->error && !read_symbol(assembler)) {
         printf("%-16s is ", assembler->buf);
@@ -1164,6 +1164,19 @@ int main(int argc, char *argv[]) {
     }
     
     assembler_close(assembler);
+    
+    int index = 0;
+    while (1) {
+        uint64_t base = work_area[index];
+        uint64_t size = work_area[index + 1];
+        index += 2;
+        
+        if (size > 0) {
+            // TODO: write segment
+        }
+        
+        if (base == assembler->current_label) break;
+    }
     
     delete_assembler(assembler);
     return 0;
