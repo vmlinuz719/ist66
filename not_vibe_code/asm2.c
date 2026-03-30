@@ -1173,6 +1173,7 @@ int main(int argc, char *argv[]) {
         
         if (size > 0) {
             // TODO: write segment
+            index += size;
         }
         
         if (base == assembler->current_label) break;
