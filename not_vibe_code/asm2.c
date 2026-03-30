@@ -773,6 +773,56 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
+int assemble_io_var(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = 0640000000000;
+    
+    char ctl = tolower(ctx->buf[3]);
+    switch(ctl) {
+        case '\0': break;
+        case 's': value |= 1L << 16; break;
+        case 'c': value |= 2L << 16; break;
+        case 'p': value |= 3L << 16; break;
+        default: return -1;
+    }
+    
+    if (opcode == 0 || opcode == 1) { // RIO, WIO
+        value |= opcode << 12;
+    } else { // NIO
+        value |= 0xFL << 12;
+    }
+
+    enum event_type evt;
+
+    if (opcode != 2) {
+        read_symbol(ctx);
+        if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+        int64_t src_dst = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+        if (src_dst == -1) return -1;
+        value |= src_dst << 23;
+
+        read_symbol(ctx);
+        evt = get_symbol_type(ctx);
+        if (evt != LIST_ITEM) return -1;
+        int64_t tgt = get_num(7, ctx->buf, NULL, 10);
+        if (tgt == -1) return -1;
+        value |= tgt << 13;
+    }
+
+    read_symbol(ctx);
+    evt = get_symbol_type(ctx);
+    if (evt != SYMBOL && evt != LIST_END) return -1;
+    uint64_t dev;
+    int status = parse_number_or_label(
+        ctx, ctx->buf, 12, 0, 0, &dev
+    );
+    if (status == -1) return -1;
+    if (dev == -1) return -1;
+    value |= dev;
+    
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
 char *tests[] = {
     "no",
     "sk",
@@ -1009,6 +1059,10 @@ assembler_entry_t var_instructions[] = {
     {"bis",     0xF2,           assemble_aa_var},
     {"xor",     0xF6,           assemble_aa_var},
     {"pct",     0xF7,           assemble_aa_var},
+    
+    {"rio",     0,              assemble_io_var},
+    {"wio",     1,              assemble_io_var},
+    {"nio",     2,              assemble_io_var},
 };
 
 assembler_entry_t instructions[] = {
