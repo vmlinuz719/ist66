@@ -1176,7 +1176,7 @@ assembler_entry_t instructions[] = {
     {"intr",    0071000000000,  assemble_am},
     {"ldkey",   0072000000000,  assemble_am},
     {"stkey",   0073000000000,  assemble_am},
-    {"ldctl",   0074000000000,  assemble_am},
+    {"ldctl",   0074000000000,  assemble_am}, // TODO: fix control register instructions
     {"stctl",   0075000000000,  assemble_am},
     {"ldtrt",   0076000000000,  assemble_am},
 
