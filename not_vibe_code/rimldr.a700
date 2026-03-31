@@ -1,0 +1,24 @@
+            origin      512             ; relocatable!
+
+rimldr:     nios        #00a            ; init ppt 00a
+
+get_addr:   movms       x1, x1, 36      ; address/data toggle
+            xorrts.sk   ac, ac, 19      ; init AC to get addr
+
+get_data:   xorrts      ac, ac, 1       ; or data
+
+rd_wait:    tiond       #00a            ; wait for tape
+            jmp         .rd_wait
+
+            rios        xy, 0, #00a
+            addin.rz    xy, xy, -128    ; consume leader
+            jmp         .get_addr
+            
+            movrtz      ac, ac, 6       ; get bytes until done
+            bisr.cz     xy, ac
+            jmp         .rd_wait
+            
+            incr.rz     x1, x1          ; got address?
+            movr.sk     ac, sp          ; then set address
+            st          ac, +1          ; store word
+            jmp         .get_data
