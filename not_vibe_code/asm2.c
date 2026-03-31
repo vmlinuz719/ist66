@@ -126,8 +126,6 @@ int register_label_do_thunks(
         v <<= thunk->left_shift;
         work_area[thunk->address] |= v;
         thunks_done++;
-        printf("\n\tThunked [%09lo] = %012lo",
-            thunk->addr_in_place, work_area[thunk->address]);
         remove_thunk(ttab, current_thunk);
     }
     return thunks_done;
@@ -640,7 +638,7 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
                     && evt != LIST_END
                 ) return -1;
                 
-                uint64_t value;
+                uint64_t value = 0;
                 int status = parse_number_or_label(
                     ctx, ctx->buf, 36, 0, 1, &value
                 );
@@ -1228,20 +1226,41 @@ assembler_entry_t instructions[] = {
     {"cmple",   0720026700000,  assemble_cmp},
 };
 
+void output_c(uint64_t *work_area, uint64_t limit, FILE *out) {
+    int index = 0;
+    while (1) {
+        uint64_t base = work_area[index];
+        uint64_t orig_base = base;
+        uint64_t size = work_area[index + 1];
+        index += 2;
+        
+        if (size > 0) {
+            while (size--) {
+                fprintf(
+                    out,
+                    "    cpu.memory[%lu] = 0%012lo;\n",
+                    base++,
+                    work_area[index++]
+                );
+            }
+        }
+        
+        if (orig_base == limit) break;
+    }
+}
+
 int main(int argc, char *argv[]) {
     uint64_t work_area[8192];
     assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
     assembler_open(assembler, 0);
     
     while (!assembler->error && !read_symbol(assembler)) {
-        printf("%-16s is ", assembler->buf);
         switch (get_symbol_type(assembler)) {
-            case ERROR:     printf("ERROR"); break;
-            case FILE_END:  printf("FILE_END"); break;
+            default: {
+                assembler->error = 1;
+            } break;
             
             case LABEL_DEF: {
-                printf("LABEL_DEF@%lo", assembler->pc);
-                
                 assembler_register_label(
                     assembler,
                     assembler->buf,
@@ -1249,12 +1268,8 @@ int main(int argc, char *argv[]) {
                 );
             } break;
             
-            case LIST_ITEM: printf("LIST_ITEM"); break;
-            case LIST_END:  printf("LIST_END"); break;
-            
             case SYMBOL: {
                 int assembled = 0;
-                uint64_t current_pc = assembler->asm_offset;
                 for (
                     int i = 0;
                     i < sizeof(instructions) / sizeof(assembler_entry_t);
@@ -1294,19 +1309,15 @@ int main(int argc, char *argv[]) {
                     }
                 }
                 if (!assembled) {
-                    printf("ERROR");
                     assembler->error = 1;
-                } else {
-                    printf("%012lo", assembler->work_area[current_pc]);
                 }
             } break;
         }
-        
-        printf("\n");
     }
     
     if (assembler->error) {
         printf("Error on line %d\n", assembler->line_no);
+        exit(EXIT_FAILURE);
     } else if (assembler->ttab->num_thunks == 0) {
         printf("All references resolved\n");
     } else {
@@ -1315,19 +1326,7 @@ int main(int argc, char *argv[]) {
     
     assembler_close(assembler);
     
-    int index = 0;
-    while (1) {
-        uint64_t base = work_area[index];
-        uint64_t size = work_area[index + 1];
-        index += 2;
-        
-        if (size > 0) {
-            // TODO: write segment
-            index += size;
-        }
-        
-        if (base == assembler->current_label) break;
-    }
+    output_c(work_area, assembler->current_label, stdout);
     
     delete_assembler(assembler);
     return 0;
