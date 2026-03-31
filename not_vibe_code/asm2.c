@@ -882,6 +882,25 @@ int assemble_io_test(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
+int assemble_cmp(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 27;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
 char *tests[] = {
     "no",
     "sk",
@@ -1200,6 +1219,13 @@ assembler_entry_t instructions[] = {
     {"tiobz",   0640000360000,  assemble_io_test},
     {"tiond",   0640000560000,  assemble_io_test},
     {"tiodn",   0640000760000,  assemble_io_test},
+    
+    {"cmpne",   0720024400000,  assemble_cmp},
+    {"cmp",     0720024500000,  assemble_cmp},
+    {"cmplt",   0720025600000,  assemble_cmp},
+    {"cmpge",   0720025700000,  assemble_cmp},
+    {"cmpgt",   0720026600000,  assemble_cmp},
+    {"cmple",   0720026700000,  assemble_cmp},
 };
 
 int main(int argc, char *argv[]) {
