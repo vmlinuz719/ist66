@@ -737,12 +737,14 @@ int assemble_mr(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
-int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
+int assemble_am_base
+    (assembler_ctx_t *ctx, uint64_t opcode, char *regs[], int max)
+{
     read_symbol(ctx);
     uint64_t value = 0;
     switch(get_symbol_type(ctx)) {
         case LIST_ITEM: {
-            int64_t reg = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+            int64_t reg = get_reg(regs, max, ctx->buf, NULL);
             if (reg == -1) {
                 return -1;
             }
@@ -771,6 +773,14 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
     }
     assembler_next(ctx);
     return 0;
+}
+
+int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
+    return assemble_am_base(ctx, opcode, r_general, RDC_NUM_GENERAL);
+}
+
+int assemble_ctl(assembler_ctx_t *ctx, uint64_t opcode) {
+    return assemble_am_base(ctx, opcode, r_control, RDC_NUM_CONTROL);
 }
 
 int assemble_bx(assembler_ctx_t *ctx, uint64_t opcode) {
@@ -1176,8 +1186,8 @@ assembler_entry_t instructions[] = {
     {"intr",    0071000000000,  assemble_am},
     {"ldkey",   0072000000000,  assemble_am},
     {"stkey",   0073000000000,  assemble_am},
-    {"ldctl",   0074000000000,  assemble_am}, // TODO: fix control register instructions
-    {"stctl",   0075000000000,  assemble_am},
+    {"ldctl",   0074000000000,  assemble_ctl},
+    {"stctl",   0075000000000,  assemble_ctl},
     {"ldtrt",   0076000000000,  assemble_am},
 
     {"ldb",     0100000000000,  assemble_bx},
