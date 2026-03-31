@@ -1305,6 +1305,30 @@ void output_c(uint64_t *work_area, uint64_t limit, FILE *out) {
     }
 }
 
+void output_r(uint64_t *work_area, uint64_t limit, FILE *out) {
+    int index = 0;
+    while (1) {
+        uint64_t base = work_area[index];
+        uint64_t size = work_area[index + 1];
+        index += 2;
+        
+        if (size > 0) {
+            for (int i = 12; i >= 0; i -= 6)
+                fputc((base >> i) & 077, out);
+            
+            while (size--) {
+                uint64_t data = work_area[index++];
+                for (int i = 30; i >= 0; i -= 6)
+                    fputc((data >> i) & 077, out);
+            }
+            
+            fputc(128, out);
+        }
+        
+        if (base == limit) break;
+    }
+}
+
 int main(int argc, char *argv[]) {
     uint64_t work_area[8192];
     assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
@@ -1372,17 +1396,21 @@ int main(int argc, char *argv[]) {
     }
     
     if (assembler->error) {
-        printf("Error on line %d\n", assembler->line_no);
+        fprintf(stderr, "Error on line %d\n", assembler->line_no);
         exit(EXIT_FAILURE);
     } else if (assembler->ttab->num_thunks == 0) {
-        printf("All references resolved\n");
+        fprintf(stderr, "All references resolved\n");
     } else {
-        printf("%d unresolved references\n", assembler->ttab->num_thunks);
+        fprintf(
+            stderr,
+            "%d unresolved references\n",
+            assembler->ttab->num_thunks
+        );
     }
     
     assembler_close(assembler);
     
-    output_c(work_area, assembler->current_label, stdout);
+    output_r(work_area, assembler->current_label, stdout);
     
     delete_assembler(assembler);
     return 0;
