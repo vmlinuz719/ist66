@@ -773,6 +773,32 @@ int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
+int assemble_bx(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 18;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t size = get_num(37, ctx->buf, NULL, 10);
+    if (size < 1) return -1;
+    value |= size;
+
+    ctx->work_area[assembler_next(ctx)] = value;
+
+    return 0;
+}
+
 int assemble_io_var(assembler_ctx_t *ctx, uint64_t opcode) {
     uint64_t value = 0640000000000;
     
@@ -804,7 +830,7 @@ int assemble_io_var(assembler_ctx_t *ctx, uint64_t opcode) {
         evt = get_symbol_type(ctx);
         if (evt != LIST_ITEM) return -1;
         int64_t tgt = get_num(7, ctx->buf, NULL, 10);
-        if (tgt == -1) return -1;
+        if (tgt < 0) return -1;
         value |= tgt << 13;
     }
 
@@ -816,7 +842,6 @@ int assemble_io_var(assembler_ctx_t *ctx, uint64_t opcode) {
         ctx, ctx->buf, 12, 0, 0, &dev
     );
     if (status == -1) return -1;
-    if (dev == -1) return -1;
     value |= dev;
     
     ctx->work_area[assembler_next(ctx)] = value;
@@ -917,7 +942,7 @@ int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
     evt = get_symbol_type(ctx);
     if (evt != LIST_ITEM && evt != LIST_END) return -1;
     int64_t arg2 = get_num(37, ctx->buf, NULL, 10);
-    if (arg2 == -1) return -1;
+    if (arg2 < 0) return -1;
     value |= arg2 << (is_m_type ? 6 : 0);
     if (evt == LIST_END) {
         ctx->work_area[assembler_next(ctx)] = value;
@@ -927,7 +952,7 @@ int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_END) return -1;
     int64_t arg3 = get_num(37, ctx->buf, NULL, 10);
-    if (arg3 == -1) return -1;
+    if (arg3 < 0) return -1;
     value |= arg3 << (is_m_type ? 0 : 6);
     ctx->work_area[assembler_next(ctx)] = value;
     return 0;
@@ -994,7 +1019,7 @@ int assemble_aa_s(assembler_ctx_t *ctx, uint64_t opcode) {
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_END) return -1;
     int64_t arg3 = get_num(37, ctx->buf, NULL, 10);
-    if (arg3 == -1) return -1;
+    if (arg3 < 0) return -1;
     value |= arg3 << 0;
     ctx->work_area[assembler_next(ctx)] = value;
     return 0;
@@ -1154,6 +1179,12 @@ assembler_entry_t instructions[] = {
     {"ldctl",   0074000000000,  assemble_am},
     {"stctl",   0075000000000,  assemble_am},
     {"ldtrt",   0076000000000,  assemble_am},
+
+    {"ldb",     0100000000000,  assemble_bx},
+    {"stb",     0101000000000,  assemble_bx},
+    {"incbx",   0102000000000,  assemble_bx},
+    {"incldb",  0103000000000,  assemble_bx},
+    {"incstb",  0104000000000,  assemble_bx},
 
     {"tionb",   0640000160000,  assemble_io_test},
     {"tiobz",   0640000360000,  assemble_io_test},

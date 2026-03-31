@@ -16,6 +16,7 @@ somelabel:  commz.sk    0,0,5
             addr        ac,ac
             tiodn       #030
             wios        r15,1,#030
+            incldb      r15,xy,7
 
 anotherlbl: bss         16
 
