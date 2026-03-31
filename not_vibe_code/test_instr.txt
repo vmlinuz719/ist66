@@ -30,5 +30,10 @@ cmplt:      subrzn.bn   ac, ac          ; 720025600000
 cmpge:      subrzn.bz   ac, ac          ; 720025700000
 cmpgt:      subrsn.bn   ac, ac          ; 720026600000
 cmple:      subrsn.bz   ac, ac          ; 720026700000
+            ldctl       psw0, +1
+            stctl       psw0, =1
+            popcr       psw0
+            
+            save        ac, xy, x1, x3
 
 ; footer comment

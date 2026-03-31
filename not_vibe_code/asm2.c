@@ -647,6 +647,29 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
                 ctx->work_area[assembler_next(ctx)] = value;
             } while (evt == LIST_ITEM);
         } break;
+        
+        case 3: { // save
+            uint64_t value = 0;
+            enum event_type evt;
+            do {
+                read_symbol(ctx);
+                evt = get_symbol_type(ctx);
+                if (
+                    evt != SYMBOL
+                    && evt != LIST_ITEM
+                    && evt != LIST_END
+                ) return -1;
+                
+                int64_t reg = get_reg
+                    (r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+                if (reg < 0) {
+                    return -1;
+                }
+                
+                value |= 1L << (15 - reg);
+            } while (evt == LIST_ITEM);
+            ctx->work_area[assembler_next(ctx)] = value;
+        } break;
     }
     return 0;
 }
@@ -892,6 +915,32 @@ int assemble_cmp(assembler_ctx_t *ctx, uint64_t opcode) {
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_END) return -1;
     int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+int assemble_pushpop(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != SYMBOL) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+int assemble_pushpop_c(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != SYMBOL) return -1;
+    int64_t tgt = get_reg(r_control, RDC_NUM_CONTROL, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
     
@@ -1145,6 +1194,7 @@ assembler_entry_t instructions[] = {
     {"origin",  0,              assemble_directive},
     {"bss",     1,              assemble_directive},
     {"dw",      2,              assemble_directive},
+    {"save",    3,              assemble_directive},
     {"ds",      0,              assemble_string},
     {"dsn",     1,              assemble_string},
     
@@ -1173,8 +1223,10 @@ assembler_entry_t instructions[] = {
     {"retid",   0010000000000,  assemble_mr},
     {"retlmi",  0010040000000,  assemble_mr},
     {"ldmask",  0010100000000,  assemble_mr},
+    {"popim",   0010116000001,  assemble_unary},
     {"lmwait",  0010140000000,  assemble_mr},
     {"stmask",  0010200000000,  assemble_mr},
+    {"pushim",  0010217000001,  assemble_unary},
     {"invlsg",  0010240000000,  assemble_mr},
     {"invlpg",  0010300000000,  assemble_mr},
     {"retsv",   0010340000000,  assemble_unary},
@@ -1190,7 +1242,9 @@ assembler_entry_t instructions[] = {
     {"ldcom",   0050000000000,  assemble_am},
     {"ldneg",   0051000000000,  assemble_am},
     {"ld",      0052000000000,  assemble_am},
+    {"pop",     0052016000001,  assemble_pushpop},
     {"st",      0053000000000,  assemble_am},
+    {"push",    0053017000001,  assemble_pushpop},
     {"addcom",  0054000000000,  assemble_am},
     {"sub",     0055000000000,  assemble_am},
     {"add",     0056000000000,  assemble_am},
@@ -1204,7 +1258,9 @@ assembler_entry_t instructions[] = {
     {"ldkey",   0072000000000,  assemble_am},
     {"stkey",   0073000000000,  assemble_am},
     {"ldctl",   0074000000000,  assemble_ctl},
+    {"popcr",   0074016000001,  assemble_pushpop_c},
     {"stctl",   0075000000000,  assemble_ctl},
+    {"pushcr",  0075017000001,  assemble_pushpop_c},
     {"ldtrt",   0076000000000,  assemble_am},
 
     {"ldb",     0100000000000,  assemble_bx},
