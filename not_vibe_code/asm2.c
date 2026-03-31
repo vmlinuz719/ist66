@@ -823,6 +823,30 @@ int assemble_io_var(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
+int assemble_io_test(assembler_ctx_t *ctx, uint64_t opcode) {
+    read_symbol(ctx);
+    switch(get_symbol_type(ctx)) {
+        case SYMBOL: {
+            uint64_t value = 0;
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 12, 0, 0, &value
+            );
+
+            if (status == -1) {
+                return -1;
+            } else {
+                ctx->work_area[ctx->asm_offset] = value | opcode;
+            }
+        } break;
+
+        default: {
+            return -1;
+        }
+    }
+    assembler_next(ctx);
+    return 0;
+}
+
 char *tests[] = {
     "no",
     "sk",
@@ -1130,6 +1154,11 @@ assembler_entry_t instructions[] = {
     {"ldctl",   0074000000000,  assemble_am},
     {"stctl",   0075000000000,  assemble_am},
     {"ldtrt",   0076000000000,  assemble_am},
+
+    {"tionb",   0640000160000,  assemble_io_test},
+    {"tiobz",   0640000360000,  assemble_io_test},
+    {"tiond",   0640000560000,  assemble_io_test},
+    {"tiodn",   0640000760000,  assemble_io_test},
 };
 
 int main(int argc, char *argv[]) {
