@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <sys/socket.h>
 
 #define MAX_LABEL_LEN 10
 
@@ -519,7 +520,11 @@ int parse_number_or_label(
         else return -1;
     } else {
         if (!permit_label) return -1;
-        if (*field == '(') return 1;
+        if (*field == '(') {
+            *out = 0;
+            *endptr = field;
+            return 1;
+        }
         
         char label[MAX_LABEL_LEN + 1];
         for (int i = 0; i < MAX_LABEL_LEN; i++) {
@@ -1114,10 +1119,16 @@ int assemble_fr(assembler_ctx_t *ctx, uint64_t opcode) {
     value |= src << 20;
 
     read_symbol(ctx);
-    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    enum event_type evt = get_symbol_type(ctx);
+    if (evt != LIST_ITEM && evt != LIST_END) return -1;
     int64_t tgt = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
+    if (evt == LIST_END) {
+        value |= tgt << 18;
+        ctx->work_area[assembler_next(ctx)] = value;
+        return 0;
+    }
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_END) return -1;
@@ -1315,7 +1326,7 @@ assembler_entry_t instructions[] = {
     {"dsn",     1,              assemble_string},
     
     {"nop",     0000002000001,  assemble_unary},
-    {"retl",    0000014000000,  assemble_unary},
+    {"retr",    0000014000000,  assemble_unary},
     {"jmp",     0000000000000,  assemble_mr},
     {"callr",   0000040000000,  assemble_mr},
     {"inctnz",  0000100000000,  assemble_mr},
@@ -1531,7 +1542,7 @@ int main(int argc, char *argv[]) {
     
     assembler_close(assembler);
     
-    output_c(work_area, assembler->current_label, stdout);
+    output_r(work_area, assembler->current_label, stdout);
     
     delete_assembler(assembler);
     return 0;
