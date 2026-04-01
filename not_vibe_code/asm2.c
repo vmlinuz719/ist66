@@ -804,6 +804,27 @@ int assemble_ctl(assembler_ctx_t *ctx, uint64_t opcode) {
     return assemble_am_base(ctx, opcode, r_control, RDC_NUM_CONTROL);
 }
 
+int assemble_fm(assembler_ctx_t *ctx, uint64_t opcode) {
+    int index = 3;
+
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        opcode |= 1L << 26;
+    }
+    if (tolower(ctx->buf[index]) == 'r') {
+        index++;
+        opcode |= 1L << 25;
+    }
+
+    if (ctx->buf[index] != 0) return -1;
+
+    return assemble_am_base(ctx, opcode, r_float, RDC_NUM_FLOAT);
+}
+
+int assemble_fm_no_opts(assembler_ctx_t *ctx, uint64_t opcode) {
+    return assemble_am_base(ctx, opcode, r_float, RDC_NUM_FLOAT);
+}
+
 int assemble_bx(assembler_ctx_t *ctx, uint64_t opcode) {
     uint64_t value = opcode;
 
@@ -1188,6 +1209,20 @@ assembler_entry_t var_instructions[] = {
     {"rio",     0,              assemble_io_var},
     {"wio",     1,              assemble_io_var},
     {"nio",     2,              assemble_io_var},
+
+    {"ldf",     0400000000000,  assemble_fm},
+    {"stf",     0401000000000,  assemble_fm},
+    {"adf",     0402000000000,  assemble_fm},
+    {"sbf",     0403000000000,  assemble_fm},
+    {"mlf",     0404000000000,  assemble_fm},
+    {"dvf",     0405000000000,  assemble_fm},
+
+    {"ldg",     0406000000000,  assemble_fm},
+    {"stg",     0407000000000,  assemble_fm},
+    {"adg",     0410000000000,  assemble_fm},
+    {"sbg",     0411000000000,  assemble_fm},
+    {"mlg",     0412000000000,  assemble_fm},
+    {"dvg",     0413000000000,  assemble_fm},
 };
 
 assembler_entry_t instructions[] = {
@@ -1268,6 +1303,11 @@ assembler_entry_t instructions[] = {
     {"incbx",   0102000000000,  assemble_bx},
     {"incldb",  0103000000000,  assemble_bx},
     {"incstb",  0104000000000,  assemble_bx},
+
+    {"ldexp",   0414000000000,  assemble_fm_no_opts},
+    {"stexp",   0415000000000,  assemble_fm_no_opts},
+    {"ldsig",   0416000000000,  assemble_fm_no_opts},
+    {"stsig",   0417000000000,  assemble_fm_no_opts},
 
     {"tionb",   0640000160000,  assemble_io_test},
     {"tiobz",   0640000360000,  assemble_io_test},
@@ -1410,7 +1450,7 @@ int main(int argc, char *argv[]) {
     
     assembler_close(assembler);
     
-    output_r(work_area, assembler->current_label, stdout);
+    output_c(work_area, assembler->current_label, stdout);
     
     delete_assembler(assembler);
     return 0;
