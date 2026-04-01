@@ -1055,6 +1055,76 @@ int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
+char *float_tests[] = {
+    "no",
+    "sk",
+    "lz",
+    "zg",
+    "rn",
+    "rz",
+    "if",
+    "nn"
+};
+
+int assemble_fr(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    int index = 3;
+
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        value |= 1L << 26;
+    }
+
+    switch (tolower(ctx->buf[index])) {
+        case 'g': {value |= 1L << 14;}
+        case 'f': {index++; value |= 1L << 25;} break;
+    }
+
+    if (tolower(ctx->buf[index]) == 'k') {
+        index++;
+        value |= 1L << 22;
+    }
+
+    if (ctx->buf[index] == '.') {
+        index++;
+        char *test_name = &(ctx->buf[index]);
+        uint64_t test = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!strncmp(test_name, float_tests[i], 2)) {
+                test = i << 15;
+                break;
+            }
+        }
+        if (!test) return -1;
+        value |= test;
+        index += 2;
+    }
+
+    if (ctx->buf[index] != 0) return -1;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 20;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t tgt = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t dst = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    if (dst == -1) return -1;
+    value |= dst << 18;
+
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
 int assemble_aa_s(assembler_ctx_t *ctx, uint64_t opcode) {
     uint64_t value = ((opcode >> 4) << 32) | ((opcode & 7) << 20);
     value |= 1L << 14;
@@ -1223,6 +1293,13 @@ assembler_entry_t var_instructions[] = {
     {"sbg",     0411000000000,  assemble_fm},
     {"mlg",     0412000000000,  assemble_fm},
     {"dvg",     0413000000000,  assemble_fm},
+
+    {"mvl",     0440000000000,  assemble_fr},
+    {"ngl",     0441000000000,  assemble_fr},
+    {"adl",     0442000000000,  assemble_fr},
+    {"sbl",     0443000000000,  assemble_fr},
+    {"mll",     0444000000000,  assemble_fr},
+    {"dvl",     0445000000000,  assemble_fr},
 };
 
 assembler_entry_t instructions[] = {
