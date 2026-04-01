@@ -1,0 +1,96 @@
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+            origin      62                      ; user save
+
+usr_save:   dw          start, 0740000000000
+
+            origin      1024
+
+ipl:        ldea        x0, .usr_rst
+            ldea        x1, .usr_save
+            ld          0(x0)
+            st          0(x1)
+            ld          1(x0)
+            st          1(x1)
+            ldctl       psw1, .cw
+            reti
+
+usr_rst:    dw          start, 0740000000000
+
+do_halt:    ldctl       psw1, .halt
+            ldmask      .halt
+            hlt
+
+halt:       dw          0
+cw:         dw          0036000000000           ; return to irql 15
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+start:      ldea        sp, stack
+            ldctl       fpc, .fpu_on
+
+            ldea        x3, .bmp1
+            ld          x4, .x_res
+            ld          x5, .y_res
+
+            addi        x4, ac, -1              ; set line length
+            wio         ac, 2, #020
+            xorrts      ac, ac, 28              ; set display base/increment
+            wio         ac, 3, #020
+
+            xorrts      x2, x2, 1               ; Y
+            xorrts      x1, x1, 1               ; X
+
+loop_x:     callr       .mb_xyl
+
+            incr        x1, x1                  ; row done?
+            cmple       x1, x4
+            jmp         .loop_x
+
+            ldea        x3, .bmpm1              ; if so then display it
+            tiond       32                      ; wait for display ready
+            jmp         .-1
+            wios        x3, 0, #020             ; send DMA command
+
+            incr        x2, x2                  ; screen done?
+            xorrts      x1, x1, 1               ; reset x either way
+            cmple       x2, x5
+            jmp         .loop_x
+
+done:       ldctl       fpc, .fpu_off
+            hlt
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; mb_xyl - iterate mandelbrot given hx and hy
+        ;
+        ; Locals:
+        ;   0(x0)       x
+        ;   2(x0)       y
+        ;   4(x0)       xx (temp for x*x + y*y + cx)
+        ;   6(x0)       cx
+        ;   8(x0)       cy
+        ;
+        ; hx in x1, hy in x2
+        ; bitmap pointer in x3
+        ; x_res, y_res in x4, x5
+        ; iteration count in ac
+        ;
+
+mb_xyl:     addea       sp, -10
+            movr        sp, x0
+
+            movr        x1, xy
+            or          xy, .int_to_f
+            push        xy
+            ldfn        f0, +1
+            movr        x4, xy
+            or          xy, .int_to_f
+            push        xy
+            ldfn        f1, +1
+            dvlng       f0, f1, f0
+            sbfn        f0, .f_0_5
+            dvf         f0, .f_mag
+            mlf         f0, .f_3
+            ldfn        f1, .f_xpan
+            sbln        f0, f1, f0
+            stg         f0, (x0)

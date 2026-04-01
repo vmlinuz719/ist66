@@ -499,7 +499,8 @@ int parse_number_or_label(
     int bits,
     int need_relative,
     int permit_label,
-    uint64_t *out
+    uint64_t *out,
+    char **endptr
 ) {
     uint64_t mask = (1L << bits) - 1;
     
@@ -518,6 +519,7 @@ int parse_number_or_label(
         else return -1;
     } else {
         if (!permit_label) return -1;
+        if (*field == '(') return 1;
         
         char label[MAX_LABEL_LEN + 1];
         for (int i = 0; i < MAX_LABEL_LEN; i++) {
@@ -540,9 +542,11 @@ int parse_number_or_label(
         if (status) {
             *out = result;
         }
+        if (endptr != NULL) *endptr = field;
         return status;
     }
     
+    if (endptr != NULL) *endptr = field;
     return 1;
 }
 
@@ -570,7 +574,7 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     
     uint64_t displacement;
     int status = parse_number_or_label(
-        ctx, field, 18, need_relative, 1, &displacement
+        ctx, field, 18, need_relative, 1, &displacement, &field
     );
     if (status == -1) return -1;
     thunked_label = !status;
@@ -578,7 +582,7 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     
     if (*field == '(') {
         if (!allow_parens) return -1;
-        
+
         int64_t reg = get_reg(r_general, RDC_NUM_GENERAL, field + 1, &field);
         if (reg < 3 || reg > 13) return -1;
         if (*field != ')') return -1;
@@ -607,7 +611,7 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
             
             uint64_t new_origin;
             int status = parse_number_or_label(
-                ctx, ctx->buf, 36, 0, 1, &new_origin
+                ctx, ctx->buf, 36, 0, 1, &new_origin, NULL
             );
             if (status == -1) return -1;
             
@@ -620,7 +624,7 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
             
             uint64_t new_origin;
             int status = parse_number_or_label(
-                ctx, ctx->buf, 36, 0, 1, &new_origin
+                ctx, ctx->buf, 36, 0, 1, &new_origin, NULL
             );
             if (status == -1) return -1;
             
@@ -640,7 +644,7 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
                 
                 uint64_t value = 0;
                 int status = parse_number_or_label(
-                    ctx, ctx->buf, 36, 0, 1, &value
+                    ctx, ctx->buf, 36, 0, 1, &value, NULL
                 );
                 if (status == -1) return -1;
                 
@@ -709,7 +713,7 @@ int assemble_string(assembler_ctx_t *ctx, uint64_t opcode) {
             }
         } else {
             int status = parse_number_or_label(
-                ctx, ctx->buf, 7, 0, 0, &value
+                ctx, ctx->buf, 7, 0, 0, &value, NULL
             );
             if (status == -1) return -1;
             
@@ -891,7 +895,7 @@ int assemble_io_var(assembler_ctx_t *ctx, uint64_t opcode) {
     if (evt != SYMBOL && evt != LIST_END) return -1;
     uint64_t dev;
     int status = parse_number_or_label(
-        ctx, ctx->buf, 12, 0, 0, &dev
+        ctx, ctx->buf, 12, 0, 0, &dev, NULL
     );
     if (status == -1) return -1;
     value |= dev;
@@ -906,7 +910,7 @@ int assemble_io_test(assembler_ctx_t *ctx, uint64_t opcode) {
         case SYMBOL: {
             uint64_t value = 0;
             int status = parse_number_or_label(
-                ctx, ctx->buf, 12, 0, 0, &value
+                ctx, ctx->buf, 12, 0, 0, &value, NULL
             );
 
             if (status == -1) {
