@@ -1,3 +1,5 @@
+        ; Fastcall: X0-X3 for first args, caller saved
+        
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
             origin      0                       ; exception
@@ -181,3 +183,93 @@ excnames:   ds          "USER"
 exc_pfix:   dsn         13, 10, "EXC #"
 
 psl:        dsn         32, "PSL", 32
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+        ; DUMPREGS - print register contents
+        ;
+        ;   X0:     Input data address
+
+dumpregs:   save        x4, x5, x6
+
+            movr        x0, x4
+            ldea        x5, .regnames
+            ldea        x6, -16
+            
+            addi        sp, sp, -6
+            ldea        ac, 9
+            st          ac, (sp)
+            
+dumploop:   ld          ac, (x5)
+            push        ac
+            ldea        ac, 5
+            push        ac
+            incr        x5, x5
+            movr        sp, x0
+            calls       .writeld
+            
+            addi        sp, sp, 2
+            
+            addi        sp, x0, 3
+            ld          x1, (x4)
+            ldea        x2, 16
+            calls       .num2ld
+            
+            addi        sp, x0, 3
+            movr        sp, x1
+            ldea        x2, 32
+            calls       .left_pad
+            
+            movr        sp, x0
+            calls       .writeld
+            
+            incr        x4, x4
+            incr.rn     x6, x6
+            jmp         .dumploop
+            
+            ldea        x0, .crlf
+            calls       .writeld
+            ldea        x0, .crlf
+            calls       .writeld
+            
+            addi        sp, sp, 6
+            rets
+
+        ; LEFT_PAD - you already know
+        ;
+        ;   X0:     Input buffer address
+        ;   X1:     Output buffer address, specifies length
+        ;   X2:     Padding character
+        ;
+        ;   Return: -1 on failure, 0 on success
+
+left_pad:   dw          0
+
+            ld          ac, (x1)                ; check if too big
+            sub         ac, (x0)
+            movrzn.rn   ac, ac, 1, 35
+            jmp         .copyfail
+
+            movr.rz     ac, ac                  ; copy now if no padding
+            jmp         .cpyinput
+            
+            ngtr        ac, ac
+            
+writepad:   incstb      x2, x1, 7
+            incr.rn     ac, ac
+            jmp         .writepad
+
+cpyinput:   ldneg       ac, (x0)                ; done if input length 0
+            movr.rz     ac, ac
+            rets
+
+cpyiloop:   incldb      x2, x0, 7
+            incstb      x2, x1, 7
+            incr.rn     ac, ac
+            jmp         .cpyiloop
+
+            xorr        ac, ac
+            rets
+
+copyfail:   ldea        ac, -1
+            rets
