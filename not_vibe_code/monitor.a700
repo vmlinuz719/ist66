@@ -1,0 +1,183 @@
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+            origin      0                       ; exception
+            
+exc_vec:    dw          exc_stub, 0
+
+            origin      20                      ; tty handler
+
+tty_vec:    dw          tty_intr, 0
+
+            origin      62
+
+usr_save:   bss         2
+
+exc_spsv:   bss         1
+exc_top:    bss         2
+exc_save:   bss         13
+exc_olds:   bss         3
+exc_stk0:   bss         0
+            bss         128
+exc_stk1:   bss         0
+
+extab:      bss         16
+
+mem_size:   bss         1
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        
+            origin      1024
+
+ipl:        ldea        x0, .usr_rst
+            ldea        x1, .usr_save
+            ld          0(x0)
+            st          0(x1)
+            ld          1(x0)
+            st          1(x1)
+            ldctl       psw1, .cw
+            retlmi      .mask
+            
+usr_rst:    dw          start, 0740000000000
+cw:         dw          0036000000000           ; return to irql 15
+mask:       dw          02000                   ; enable console irq
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+exc_stub:   st          sp, .exc_spsv
+            ldea        sp, .exc_stk0
+            calls       .exhandlr
+            reti
+
+exhandlr:   dw          #FFFF                   ; save all
+
+            ldea        sp, .exc_stk1
+            pushcr      psw1
+            pop         ac
+            movrz       ac, x0, 12, 32
+            ldea        x1, .extab
+            addr        x0, x1
+            ld          x4, (x1)
+            movr.rn     x4, x4
+            jmp         .alt_hndl
+            
+            movrz       ac, ac, 8, 32
+            movr        ac, x4, 1
+            addi        x4, x4, 34
+            addea       x0, .excnames
+            ld          ac, (x0)
+            push        ac
+            ldea        ac, 4
+            push        ac
+            
+            ldea        x0, .exc_pfix
+            calls       .writeld
+            
+            movr        sp, x0
+            calls       .writeld
+            
+            addi        sp, sp, 2
+            ldea        x0, .psl
+            calls       .writeld
+            
+            addi        sp, sp, -6
+            ldea        ac, 9
+            st          ac, (sp)
+            
+            ldea        x5, -2
+            
+dump_psw:   addi        x4, x4, -1
+            addi        sp, x0, 3
+            ld          x1, (x4)
+            ldea        x2, 16
+            calls       .num2ld
+            
+            addi        sp, x0, 3
+            movr        sp, x1
+            ldea        x2, 060
+            calls       .left_pad
+            
+            movr        sp, x0
+            calls       .writeld
+            
+            incr.rn     x5, x5
+            jmp         .dump_psw
+            
+            addi        sp, sp, 6
+            ldea        x0, .crlf
+            calls       .writeld
+            ldea        x0, .crlf
+            calls       .writeld
+            
+            ld          ac, .exc_spsv
+            st          ac, .exc_olds
+            
+            ldea        x0, .exc_save
+            calls       .dumpregs
+            
+            ldctl       psw1, .halt
+            ldmask      .halt
+            hlt
+
+alt_hndl:   ldea        x0, .exc_save
+            ld          ac, .exc_spsv
+            st          ac, .exc_olds
+            calls       (x4)
+            
+            ldea        sp, .exc_top
+            movr.rn     ac, ac
+            jmp         .no_retry
+            rets
+
+no_retry:   ldea        ac, .rfi_1
+            st          ac, (sp)
+            rets
+rfi_1:      retid       1
+
+tty_intr:   nioc        #030                    ; clear intr
+            st          ac, .tty_acsv
+            xorrts      ac, ac, 1               ; console has data
+            st          ac, .tty_stat
+            ld          ac, .tty_acsv
+            reti
+
+tty_stat:   bss         1
+tty_acsv:   bss         1
+
+crlf:       dsn         13, 10
+
+regnames:   ds          0,   0,   "AC", 040
+            ds          040, 040, "MQ", 040
+            ds          040, 040, "XY", 040
+            ds          015, 012, "X0", 040
+            ds          040, 040, "X1", 040
+            ds          040, 040, "X2", 040
+            ds          040, 040, "X3", 040
+            ds          015, 012, "X4", 040
+            ds          040, 040, "X5", 040
+            ds          040, 040, "X6", 040
+            ds          040, 040, "X7", 040
+            ds          015, 012, "AP", 040
+            ds          040, 040, "LR", 040
+            ds          015, 012, "14", 040
+            ds          040, 040, "15", 040
+
+excnames:   ds          "USER"
+            ds          "INST"
+            ds          "MEMX"
+            ds          "DEVX"
+            ds          "PPFR"
+            ds          "PPFW"
+            ds          "PPFS"
+            ds          "TIME"
+            ds          "DIVZ"
+            ds          "NFPU"
+            ds          "????"
+            ds          "????"
+            ds          "????"
+            ds          "????"
+            ds          "MCHK"
+            ds          "PWRX"
+
+exc_pfix:   dsn         13, 10, "EXC #"
+
+psl:        dsn         32, "PSL", 32
