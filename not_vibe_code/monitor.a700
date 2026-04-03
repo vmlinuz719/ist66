@@ -161,6 +161,7 @@ regnames:   ds          0,   0,   "AC", 040
             ds          040, 040, "X7", 040
             ds          015, 012, "AP", 040
             ds          040, 040, "LR", 040
+            ds          040, 040, "SP", 040
             ds          015, 012, "14", 040
             ds          040, 040, "15", 040
 
@@ -405,6 +406,70 @@ dontidle:   popim
 maskall:    dw          0
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Queue structure:
+        ;
+        ;   (q):    Head pointer (0 if queue empty)
+        ;   1(q):   Tail pointer (0 if queue empty)
+        ;
+        ; Queue item structure:
+        ;
+        ;   (i):    Next pointer (0 if at end)
+        ;   1(i):   Prev pointer (0 if at start)
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; ENQUEUE - add an item to a queue
+        ;
+        ;   X0:     Queue structure
+        ;   X1:     Address of new queue item
+
+enqueue:    tstmz       (x0)                    ; no items in queue yet?
+            jmp         .enq_empty
+
+            ld          x2, (x0)                ; get current head
+            st          x1, (x0)                ; place new head
+            st          x2, (x1)                ; new.next = old
+            st          x1, 1(x2)               ; old.prev = new
+            xorr        ac, ac                  ; new.prev = null
+            st          ac, 1(x1)
+            
+            retr
+
+enq_empty:  xorr        ac, ac                  ; no next or prev yet
+            st          ac, (x1)
+            st          ac, 1(x1)
+            
+            st          x1, (x0)                ; head and tail same
+            st          x1, 1(x0)
+            
+            retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; DEQUEUE - remove an item from a queue
+        ;
+        ;   X0:     Queue structure
+        ;   Return: Address of queue item else 0
+
+dequeue:    xorr        ac, ac                  ; return nothing if no item...
+            tstmz       1(x0)
+            retr
+
+            ld          x1, 1(x0)               ; get tail
+            
+            tstmz       1(x1)                   ; got only item?
+            jmp         .deq_last
+            
+            ld          x2, 1(x1)               ; get new tail
+            st          ac, (x2)                ; new.next = null
+            st          x2, 1(x0)               ; save new tail
+            jmp         .deq_done
+            
+deq_last:   st          ac, (x0)                ; zero out queue
+            st          ac, 1(x0)
+            
+deq_done:   movr        x1, ac                  ; return last item
+            retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
 
 test_rst:   ld          ac, (x1)
@@ -466,6 +531,36 @@ memtest:    xorr        ac, ac
             ldea        x0, .banner2
             calls       .writeld
             
+            ldea        x0, .queue
+            ldea        x1, .item0
+            callr       .enqueue
+            ldea        x0, .queue
+            ldea        x1, .item1
+            callr       .enqueue
+            ldea        x0, .queue
+            ldea        x1, .item2
+            callr       .enqueue
+            ldea        x0, .queue
+            ldea        x1, .item3
+            callr       .enqueue
+            
+            ldea        x0, .queue
+            callr       .dequeue
+            movr        ac, x0
+            ld          x4, 2(x0)
+            ldea        x0, .queue
+            callr       .dequeue
+            movr        ac, x0
+            ld          x5, 2(x0)
+            ldea        x0, .queue
+            callr       .dequeue
+            movr        ac, x0
+            ld          x6, 2(x0)
+            ldea        x0, .queue
+            callr       .dequeue
+            movr        ac, x0
+            ld          x7, 2(x0)
+            
             ld          ac, .ok
             hlt
 
@@ -476,6 +571,17 @@ zero:       dw          0
 incptr:     dw          0401000000000
 banner1:    dsn         "RDC-700/E1 "
 banner2:    dsn         "W ONLINE", 13, 10, 13, 10
+
+queue:      bss         2
+
+item0:      bss         2
+            dw          #111111
+item1:      bss         2
+            dw          #222222
+item2:      bss         2
+            dw          #333333
+item3:      bss         2
+            dw          #444444
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
