@@ -42,6 +42,7 @@ ipl:        ldea        x0, .usr_rst
 usr_rst:    dw          start, 0740000000000
 cw:         dw          0036000000000           ; return to irql 15
 mask:       dw          02000                   ; enable console irq
+halt:       dw          0
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -273,3 +274,211 @@ cpyiloop:   incldb      x2, x0, 7
 
 copyfail:   ldea        ac, -1
             rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; NUM2LD - convert number to string
+        ;
+        ;   X0:     Output buffer address
+        ;   X1:     Value
+        ;   X2:     Base
+
+num2ld:     save        mq, xy
+
+            push        x2                      ; set up divisor at x2
+            movr        sp, x2
+            
+            xorr        ac, ac                  ; init string
+            st          ac, (x0)
+            
+            movr        x1, ac
+            
+div:        udiv        (x2)                    ; grab digit and remainder
+            push        xy                      ; push digit
+            inctnz      (x0)                    ; inc string size
+            movr.rn     mq, ac                  ; test if done
+            jmp         .div                    ; loop until zero
+            
+            movr        x0, x2
+            ldea        mq, 58
+
+convert:    pop         x1                      ; pop digits into string
+            addi        x1, x1, 48
+            cmpge       x1, mq
+            addi        x1, x1, 7
+            incstb      x1, x0, 7
+            inctne      ac, (x2)
+            jmp         .convert
+            
+            incr        sp, sp
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; READLD - read up to n characters from the support console
+        ;
+        ;   X0:     Output buffer address
+        ;   X1:     Max size
+        ;
+        ;   Return: Size of input
+
+readld:     save        x4, x5
+
+            movr        x0, x4                  ; x4: buffer
+            xorr        ac, ac                  ; clear count field
+            st          ac, (x4)
+            
+            movr.rz     x4, x4                  ; don't read if count 0
+            rets
+            
+            ngtr        x1, x5                  ; x5: max length
+            
+            push        x4                      ; push head of string
+            
+            jmp         .readloop
+
+idleloop:   ldea        x0, .test_rst
+            ldea        x1, .tty_stat           ; await full buffer or crlf
+            calls       .idle
+
+readloop:   rio         ac, 2, #030             ; get buffer count
+            movmzn.rz   ac, ac, 28              ; idle if no data
+            jmp         .idleloop
+            
+            inctnz      @(sp)                   ; increment length
+            rio         ac, 0, #030             ; get a byte
+            incstb      ac, x4, 7
+            
+            incr.rn     x5, x5                  ; is buffer full
+            subin.rz    ac, ac, 10              ; or do we have LF
+            jmp         .readdone
+            
+            jmp         .readloop
+
+readdone:   ld          ac, @+1
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; WRITELD - write a length-data string to the support console
+        ;
+        ;   X0:     Buffer address
+
+writeld:    dw          0
+
+            ldneg       x1, (x0)
+            movr.rz     x1, x1
+            rets
+            
+wrt_loop:   tiobz       #030
+            jmp         .wrt_loop
+            
+            incldb      ac, x0, 7
+            wios        ac, 0, #030
+            
+            incr.rn     x1, x1
+            jmp         .wrt_loop
+            
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; IDLE - wait until we have something to do
+        ;
+        ;      X0 -> test subroutine
+        ;      X1, X2, X3 -> arguments to subroutine (optional, will not
+        ;                    be modified by IDLE)
+        ;      Return -> whatever the subroutine puts in AC
+
+idle:       save        lr
+
+            pushim
+            
+doidle:     ldmask      .maskall
+
+            callr       (x0)
+            movr.rn     ac, ac
+            jmp         .dontidle
+            
+            lmwait      (sp)
+            jmp         .doidle
+            
+dontidle:   popim
+            rets
+
+maskall:    dw          0
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
+
+test_rst:   ld          ac, (x1)
+            movr.rz     ac, ac
+            jmp         .dont_rst
+
+            push        xy
+            xorr        xy, xy
+            st          xy, (x1)
+            pop         xy
+
+dont_rst:   retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; ENUMDONE - break out of memory count loop
+
+enumdone:   dw          0
+            ld          ac, .ok
+            st          ac, (x0)
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+start:      ldea        sp, stack
+
+            ldea        x0, .extab
+            ldea        x1, .enumdone
+            st          x1, 2(x0)
+            
+            ldea        x0, .banner1
+            calls       .writeld
+            
+            ldea        x2, stack
+            or          x2, .incptr
+            push        x2
+            
+memtest:    xorr        ac, ac
+            ld          xy, @(sp)
+            movr.rz     ac, ac
+            jmp         .memtest
+            
+            ldea        x0, .extab
+            xorr        x1, x1
+            st          x1, 2(x0)
+            
+            pop         ac
+            movmz       ac, x1, 9
+            st          x1, .mem_size
+            
+            addi        sp, sp, -4
+            ldea        ac, 15
+            
+            movr        sp, x0
+            ldea        x2, 10
+            calls       .num2ld
+            
+            movr        sp, x0
+            calls       .writeld
+            ldea        x0, .banner2
+            calls       .writeld
+            
+            ld          ac, .ok
+            hlt
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+ok:         dw          0666
+zero:       dw          0
+incptr:     dw          0401000000000
+banner1:    dsn         "RDC-700/E1 "
+banner2:    dsn         "W ONLINE", 13, 10, 13, 10
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+            origin      4096
+
+stack:      bss         0
