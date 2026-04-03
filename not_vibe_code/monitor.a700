@@ -185,7 +185,6 @@ exc_pfix:   dsn         13, 10, "EXC #"
 psl:        dsn         32, "PSL", 32
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
         ; DUMPREGS - print register contents
         ;
         ;   X0:     Input data address
@@ -235,6 +234,7 @@ dumploop:   ld          ac, (x5)
             addi        sp, sp, 6
             rets
 
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; LEFT_PAD - you already know
         ;
         ;   X0:     Input buffer address
