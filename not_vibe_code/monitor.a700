@@ -406,6 +406,20 @@ dontidle:   popim
 maskall:    dw          0
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
+
+test_rst:   ld          ac, (x1)
+            movr.rz     ac, ac
+            jmp         .dont_rst
+
+            push        xy
+            xorr        xy, xy
+            st          xy, (x1)
+            pop         xy
+
+dont_rst:   retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Queue structure:
         ;
         ;   (q):    Head pointer (0 if queue empty)
@@ -449,7 +463,7 @@ enq_empty:  xorr        ac, ac                  ; no next or prev yet
         ;   X0:     Queue structure
         ;   Return: Address of queue item else 0
 
-popque:     ld          ac, (x0)               ; get head
+popque:     ld          ac, (x0)                ; get head
 
             movr.rz     ac, x1
             retr                                ; intentional fallthrough
@@ -491,20 +505,6 @@ delque:     ld          x2, (x1)                ; x2: next
             st          x3, 1(x0)               ; same for tail
 
             retr
-
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
-
-test_rst:   ld          ac, (x1)
-            movr.rz     ac, ac
-            jmp         .dont_rst
-
-            push        xy
-            xorr        xy, xy
-            st          xy, (x1)
-            pop         xy
-
-dont_rst:   retr
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
