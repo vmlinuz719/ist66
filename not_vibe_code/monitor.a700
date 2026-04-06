@@ -417,12 +417,12 @@ maskall:    dw          0
         ;   1(i):   Prev pointer (0 if at start)
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; ENQUEUE - add an item to a queue
+        ; INSQUE - add an item to a queue
         ;
         ;   X0:     Queue structure
         ;   X1:     Address of new queue item
 
-enqueue:    tstmz       (x0)                    ; no items in queue yet?
+insque:     tstmz       (x0)                    ; no items in queue yet?
             jmp         .enq_empty
 
             ld          x2, (x0)                ; get current head
@@ -444,23 +444,23 @@ enq_empty:  xorr        ac, ac                  ; no next or prev yet
             retr
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; DEQUEUE - remove an item from a queue
+        ; REMQUE - remove an item from a queue
         ;
         ;   X0:     Queue structure
         ;   Return: Address of queue item else 0
 
-dequeue:    ld          ac, 1(x0)               ; get tail
+remque:     ld          ac, 1(x0)               ; get tail
             
             movr.rz     ac, x1
             retr                                ; intentional fallthrough
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; RMQUEUE - remove an item from a queue at any position
+        ; DELQUE - remove an item from a queue at any position
         ;
         ;   X0:     Queue structure
         ;   X1:     List item *MUST ACTUALLY BE IN QUEUE AT X0*
 
-rmqueue:    ld          x2, (x1)                ; x2: next
+delque:     ld          x2, (x1)                ; x2: next
             ld          x3, 1(x1)               ; x3: prev
 
             movr.rn     x2, x2                  ; do we have next
@@ -547,33 +547,33 @@ memtest:    xorr        ac, ac
 
             ldea        x0, .queue
             ldea        x1, .item0
-            callr       .enqueue
+            callr       .insque
             ldea        x0, .queue
             ldea        x1, .item1
-            callr       .enqueue
+            callr       .insque
 
             ldea        x0, .queue
-            callr       .dequeue
+            callr       .remque
             movr        ac, x0
             ld          x4, 2(x0)
 
             ldea        x0, .queue
             ldea        x1, .item2
-            callr       .enqueue
+            callr       .insque
             ldea        x0, .queue
             ldea        x1, .item3
-            callr       .enqueue
+            callr       .insque
             
             ldea        x0, .queue
-            callr       .dequeue
+            callr       .remque
             movr        ac, x0
             ld          x5, 2(x0)
             ldea        x0, .queue
-            callr       .dequeue
+            callr       .remque
             movr        ac, x0
             ld          x6, 2(x0)
             ldea        x0, .queue
-            callr       .dequeue
+            callr       .remque
             movr        ac, x0
             ld          x7, 2(x0)
             
