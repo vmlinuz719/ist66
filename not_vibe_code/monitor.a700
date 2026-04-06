@@ -444,7 +444,20 @@ enq_empty:  xorr        ac, ac                  ; no next or prev yet
             retr
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; REMQUE - remove an item from a queue
+        ; POPQUE - remove an item from a queue (last in)
+        ;
+        ;   X0:     Queue structure
+        ;   Return: Address of queue item else 0
+
+popque:     ld          ac, (x0)               ; get head
+
+            movr.rz     ac, x1
+            retr                                ; intentional fallthrough
+
+            jmp         .delque
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; REMQUE - remove an item from a queue (first in)
         ;
         ;   X0:     Queue structure
         ;   Return: Address of queue item else 0
