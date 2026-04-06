@@ -465,6 +465,7 @@ rmqueue:    ld          x2, (x1)                ; x2: next
 
             movr.rn     x2, x2                  ; do we have next
             st          x3, 1(x2)               ; then next.prev = prev
+
             movr.rn     x3, x3                  ; do we have prev
             st          x2, (x3)                ; prev.next = next
 
