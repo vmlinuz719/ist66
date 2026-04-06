@@ -449,24 +449,33 @@ enq_empty:  xorr        ac, ac                  ; no next or prev yet
         ;   X0:     Queue structure
         ;   Return: Address of queue item else 0
 
-dequeue:    xorr        ac, ac                  ; return nothing if no item...
-            tstmz       1(x0)
-            retr
+dequeue:    ld          ac, 1(x0)               ; get tail
+            
+            movr.rz     ac, x1
+            retr                                ; intentional fallthrough
 
-            ld          x1, 1(x0)               ; get tail
-            
-            tstmz       1(x1)                   ; got only item?
-            jmp         .deq_last
-            
-            ld          x2, 1(x1)               ; get new tail
-            st          ac, (x2)                ; new.next = null
-            st          x2, 1(x0)               ; save new tail
-            jmp         .deq_done
-            
-deq_last:   st          ac, (x0)                ; zero out queue
-            st          ac, 1(x0)
-            
-deq_done:   movr        x1, ac                  ; return last item
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; RMQUEUE - remove an item from a queue at any position
+        ;
+        ;   X0:     Queue structure
+        ;   X1:     List item *MUST ACTUALLY BE IN QUEUE AT X0*
+
+rmqueue:    ld          x2, (x1)                ; x2: next
+            ld          x3, 1(x1)               ; x3: prev
+
+            movr.rn     x2, x2                  ; do we have next
+            st          x3, 1(x2)               ; then next.prev = prev
+            movr.rn     x3, x3                  ; do we have prev
+            st          x2, (x3)                ; prev.next = next
+
+            ld          xy, (x0)                ; check if delisting head
+            cmp         xy, x1
+            st          x2, (x0)                ; if so then new head = next
+
+            ld          xy, 1(x0)
+            cmp         xy, x1
+            st          x3, 1(x0)               ; same for tail
+
             retr
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -531,12 +540,22 @@ memtest:    xorr        ac, ac
             ldea        x0, .banner2
             calls       .writeld
             
+            addi        sp, sp, 4
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
             ldea        x0, .queue
             ldea        x1, .item0
             callr       .enqueue
             ldea        x0, .queue
             ldea        x1, .item1
             callr       .enqueue
+
+            ldea        x0, .queue
+            callr       .dequeue
+            movr        ac, x0
+            ld          x4, 2(x0)
+
             ldea        x0, .queue
             ldea        x1, .item2
             callr       .enqueue
@@ -544,10 +563,6 @@ memtest:    xorr        ac, ac
             ldea        x1, .item3
             callr       .enqueue
             
-            ldea        x0, .queue
-            callr       .dequeue
-            movr        ac, x0
-            ld          x4, 2(x0)
             ldea        x0, .queue
             callr       .dequeue
             movr        ac, x0
