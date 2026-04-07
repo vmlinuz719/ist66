@@ -533,7 +533,7 @@ delque:     ld          x2, (x1)                ; x2: next
 freemain1:  save        x7, lr
 
             movrz       x0, x7, 28, 8           ; descriptor offset to x7
-            addea       x7, stack               ; address of queue entry
+            addea       x7, coretab             ; address of queue entry
             
             ld          x0, 2(x7)               ; get owning queue
             cmpne       x0, x1                  ; check if match
@@ -692,4 +692,5 @@ item3:      bss         2
 
             origin      4096
 
-stack:      bss         0
+stack:      
+coretab:    bss         0
