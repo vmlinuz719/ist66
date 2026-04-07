@@ -26,7 +26,8 @@ extab:      bss         16
 
 mem_size:   bss         1
 
-mainpool:   bss         2
+mainpool:   bss         1
+mp_end:     bss         1
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
@@ -151,7 +152,8 @@ tty_acsv:   bss         1
 crlf:       dsn         13, 10
 msg_initmp: dsn         "Init MAINPOOL"
 dot:        dsn         "."
-done:       dsn         "Done.", 13, 10
+bang:       dsn         "!"
+done:       dsn         " Done.", 13, 10
 
 regnames:   ds          0,   0,   "AC", 040
             ds          040, 040, "MQ", 040
@@ -639,15 +641,28 @@ memtest:    xorr        ac, ac
             ldea        x0, .msg_initmp
             calls       .writeld
             
-mp_init0:   ldea        x0, .dot
+mp_init0:   ldea        x0, .dot                ; phase 0: list all memory
             calls       .writeld
             movr        x7, x0, 10
             xorr        x1, x1
             calls       .freemain1
             inctne      x7, (sp)
             jmp         .mp_init0
-
+            
             pop         ac
+            
+            xorrts      x7, x7, 3
+            add         x7, .mp_end
+            movrz       x7, x7, 26, 10
+            incr        x7, x7
+            
+mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
+            calls       .writeld
+            xorr        x0, x0
+            calls       .getmain1
+            addi.rn     x7, x7, -1
+            jmp         .mp_init1
+            
             ldea        x0, .done
             calls       .writeld
             
