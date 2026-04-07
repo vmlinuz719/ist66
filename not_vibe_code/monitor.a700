@@ -26,6 +26,8 @@ extab:      bss         16
 
 mem_size:   bss         1
 
+mainpool:   bss         2
+
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
             origin      1024
@@ -507,6 +509,73 @@ delque:     ld          x2, (x1)                ; x2: next
             retr
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Memory descriptor: queue entry (2), owner pointer (1), flags (1)
+        ;
+        ; To get a 1024-word block's 4-word descriptor:
+        ;           descriptor_list_base + (address >> 8)
+        ;
+        ; To get the block described:
+        ;           (address - descriptor_list_base) << 8
+        
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; FREEMAIN1 - release a 1024-word page to MAINPOOL
+        ;
+        ;   X0:     Address of block to release
+        ;   X1:     Expected owner
+        ;
+        ;   Return: 0 on failure (owner mismatch), 1 on success
+        
+freemain1:  save        x7, lr
+
+            movrz       x0, x7, 28, 8           ; descriptor offset to x7
+            addea       x7, stack               ; address of queue entry
+            
+            ld          x0, 2(x7)               ; get owning queue
+            cmpne       x0, x1                  ; check if match
+            jmp         .fm1_fail
+            movr        x7, x1
+            movr.rn     x0, x0                  ; dequeue if it has an owner
+            callr       .delque
+            
+            ldea        x0, .mainpool           ; get mainpool
+            movr        x7, x1
+            st          x0, 2(x1)
+            callr       .insque                 ; add to mainpool
+            
+            xorrts      ac, ac, 1
+            rets
+
+fm1_fail:   xorr        ac, ac
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; GETMAIN1 - get a 1024-word page from MAINPOOL
+        ;
+        ;   X0:     Address of new owner queue
+        ;
+        ;   Return: 0 on failure (mainpool empty), else address of a page
+
+getmain1:   save        x7, lr
+
+            movr        x0, x7                  ; save argument
+            
+            ldea        x0, .mainpool
+            callr       .remque
+            movr.rz     ac, ac
+            jmp         .fm1_fail               ; did we get anything
+            
+            movr        ac, x0                  ; queue page if new owner
+            movr        x7, x2
+            st          x7, 2(x0)
+            movr        ac, x7
+            movr.rn     x2, x1
+            callr       .insque
+            
+            movrrz      x7, ac, 8, 8
+
+fm1_fail:   rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
 
 enumdone:   dw          0
@@ -557,39 +626,19 @@ memtest:    xorr        ac, ac
             addi        sp, sp, 4
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-            ldea        x0, .queue
-            ldea        x1, .item0
-            callr       .insque
-            ldea        x0, .queue
-            ldea        x1, .item1
-            callr       .insque
-
-            ldea        x0, .queue
-            callr       .remque
-            movr        ac, x0
-            ld          x4, 2(x0)
-
-            ldea        x0, .queue
-            ldea        x1, .item2
-            callr       .insque
-            ldea        x0, .queue
-            ldea        x1, .item3
-            callr       .insque
+        ; Initialize MAINPOOL
+        
+            ld          ac, .mem_size
+            movrz       ac, ac, 26, 10
+            xorr        x7, x7
+            push        ac
             
-            ldea        x0, .queue
-            callr       .remque
-            movr        ac, x0
-            ld          x5, 2(x0)
-            ldea        x0, .queue
-            callr       .remque
-            movr        ac, x0
-            ld          x6, 2(x0)
-            ldea        x0, .queue
-            callr       .remque
-            movr        ac, x0
-            ld          x7, 2(x0)
-            
+mp_init0:   movr        x7, x0, 10
+            xorr        x1, x1
+            calls       .freemain1
+            inctne      x7, (sp)
+            jmp         .mp_init0
+        
             ld          ac, .ok
             hlt
 
