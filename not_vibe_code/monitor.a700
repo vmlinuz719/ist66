@@ -149,6 +149,9 @@ tty_stat:   bss         1
 tty_acsv:   bss         1
 
 crlf:       dsn         13, 10
+msg_initmp: dsn         "Init MAINPOOL"
+dot:        dsn         "."
+done:       dsn         "Done.", 13, 10
 
 regnames:   ds          0,   0,   "AC", 040
             ds          040, 040, "MQ", 040
@@ -633,12 +636,21 @@ memtest:    xorr        ac, ac
             xorr        x7, x7
             push        ac
             
-mp_init0:   movr        x7, x0, 10
+            ldea        x0, .msg_initmp
+            calls       .writeld
+            
+mp_init0:   ldea        x0, .dot
+            calls       .writeld
+            movr        x7, x0, 10
             xorr        x1, x1
             calls       .freemain1
             inctne      x7, (sp)
             jmp         .mp_init0
-        
+
+            pop         ac
+            ldea        x0, .done
+            calls       .writeld
+            
             ld          ac, .ok
             hlt
 
