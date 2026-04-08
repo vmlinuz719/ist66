@@ -125,6 +125,11 @@ dump_psw:   addi        x4, x4, -1
             ldea        x0, .exc_save
             calls       .dumpregs
             
+            ldea        x0, .crlf
+            calls       .writeld
+            ldea        x0, .msg_halted
+            calls       .writeld
+            
             ldctl       psw1, .halt
             ldmask      .halt
             hlt
@@ -155,11 +160,18 @@ tty_stat:   bss         1
 tty_acsv:   bss         1
 
 crlf:       dsn         13, 10
+msg_banner: dsn         "OS/700 VERSION 1 RELEASE 0", 13, 10,
+                        "(C) 2026 vmlinuz719. ", 
+                        "All rights reserved. Do not redistribute!",
+                        13, 10, 13, 10
+                        
+msg_initrm: dsn         "Init RMDETECT... "
 msg_initmp: dsn         "Init MAINPOOL"
 msg_initsd: dsn         "Init SEGMENTS..."
 dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
+msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
 
 regnames:   ds          0,   0,   "AC", 040
             ds          040, 040, "MQ", 040
@@ -195,9 +207,10 @@ excnames:   ds          "USER"
             ds          "MCHK"
             ds          "PWRX"
 
-exc_pfix:   dsn         13, 10, "EXC #"
-
-psl:        dsn         32, "PSL", 32
+exc_pfix:   dsn         13, 10, "An unhandled exception #"
+psl:        dsn         32, "occurred at PSL", 32
+msg_halted: dsn         "***OS/700 TERMINATED - NOTE THE ABOVE AND CONTACT ",
+                        "YOUR SERVICE REPRESENTATIVE***", 13, 10
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; DUMPREGS - print register contents
@@ -604,7 +617,10 @@ start:      ldea        sp, stack
             ldea        x1, .enumdone
             st          x1, 2(x0)
             
-            ldea        x0, .banner1
+            ldea        x0, .msg_banner
+            calls       .writeld
+            
+            ldea        x0, .msg_initrm
             calls       .writeld
             
             ldea        x2, stack
@@ -633,7 +649,7 @@ memtest:    xorr        ac, ac
             
             movr        sp, x0
             calls       .writeld
-            ldea        x0, .banner2
+            ldea        x0, .msg_rmdone
             calls       .writeld
             
             addi        sp, sp, 4
@@ -704,14 +720,12 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
 ok:         dw          0666
 zero:       dw          0
 incptr:     dw          0401000000000
-banner1:    dsn         "RDC-700/E1 "
-banner2:    dsn         "W ONLINE", 13, 10, 13, 10
 
 cseg1:      dw          01600777777
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-            origin      4096
+            origin      5120
 
 stack:      
 coretab:    bss         0
