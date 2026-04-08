@@ -14,8 +14,8 @@ tty_vec:    dw          tty_intr, 0
 
 usr_save:   bss         2
 
-exc_spsv:   bss         1
-
+exc_spsv:   bss         1                       ;
+                                                ;
 exc_top:    bss         2                       ; TODO: indirect these
 exc_save:   bss         13                      ;
 exc_olds:   bss         3                       ;
