@@ -22,12 +22,17 @@ exc_stk0:   bss         0
             bss         128
 exc_stk1:   bss         0
 
-extab:      bss         16
+extab:      bss         16                      ; exception handlers
 
-mem_size:   bss         1
+mem_size:   bss         1                       ; memory size
 
-mainpool:   bss         1
+mainpool:   bss         1                       ; physical memory queue
 mp_end:     bss         1
+
+segpool:    bss         2                       ; segment descriptor tables
+pagepool:   bss         2                       ; page tables
+
+segments:   bss         1                       ; default SDT
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
@@ -151,6 +156,7 @@ tty_acsv:   bss         1
 
 crlf:       dsn         13, 10
 msg_initmp: dsn         "Init MAINPOOL"
+msg_initsd: dsn         "Init SEGMENTS..."
 dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
@@ -569,14 +575,16 @@ getmain1:   save        x7, lr
             movr.rz     ac, ac
             jmp         .fm1_fail               ; did we get anything
             
-            movr        ac, x0                  ; queue page if new owner
+            movr        ac, x1                  ; queue page if new owner
             movr        x7, x2
-            st          x7, 2(x0)
+            st          x7, 2(x1)
             movr        ac, x7
-            movr.rn     x2, x1
+            movr.rn     x2, x0
             callr       .insque
             
-            movrrz      x7, ac, 8, 8
+            ldea        xy, .coretab
+            subrrs      xy, x7, 8, 8
+            movr        x7, ac
 
 fm1_fail:   rets
 
@@ -665,6 +673,28 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             
             ldea        x0, .done
             calls       .writeld
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Initialize segment descriptor table
+        
+            ldea        x0, .msg_initsd
+            calls       .writeld
+        
+            ldea        x0, .segpool
+            calls       .getmain1
+            st          ac, .segments
+            
+            movr        ac, x0
+            movms       ac, ac, 9               ; 512 descriptors
+            xorr        xy, xy
+            st          xy, (x0)
+            ld          xy, .cseg1
+            st          xy, 1(x0)
+            push        ac
+            popcr       sdr
+            
+            ldea        x0, .done
+            calls       .writeld
             
             ld          ac, .ok
             hlt
@@ -677,16 +707,7 @@ incptr:     dw          0401000000000
 banner1:    dsn         "RDC-700/E1 "
 banner2:    dsn         "W ONLINE", 13, 10, 13, 10
 
-queue:      bss         2
-
-item0:      bss         2
-            dw          #111111
-item1:      bss         2
-            dw          #222222
-item2:      bss         2
-            dw          #333333
-item3:      bss         2
-            dw          #444444
+cseg1:      dw          01600777777
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

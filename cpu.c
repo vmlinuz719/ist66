@@ -40,7 +40,7 @@ seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
         cpu->seg_cache[cache_row].tag = tag;
         cpu->seg_cache[cache_row].key = cache_key;
     }
-    
+    // printf("segment lookup success\n");
     return &(cpu->seg_cache[cache_row]);
 }
 
@@ -175,6 +175,7 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
     
     seg_cache_t *seg = seg_lookup(cpu, vaddress >> 18);
     if (seg == NULL) {
+        // printf("Segment not present\n");
         cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT;
         return KEY_FAULT;
     }
@@ -187,20 +188,23 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
         seg_key != key
     ) {
         cpu->c[C_SF] = vaddress | SEG_FAULT_KEY;
+        // printf("Segment key error\n");
         return KEY_FAULT;
     }
     
     uint64_t offset = vaddress & 0x3FFFF;
     if (offset > (seg->tag & 0x3FFFF)) {
+        // printf("Segment bounds error\n");
         cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS;
         return KEY_FAULT;
     }
     
     uint64_t address = (seg->base + offset) & MASK_36;
     
-    if (((seg->tag >> 27) & 1)) {
+    if (((seg->tag >> 24) & 1)) {
         tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
         if (entry == NULL) {
+            // printf("Segment page fault\n");
             cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
             return KEY_FAULT;
         }
@@ -289,7 +293,7 @@ uint64_t write_vmem(
     
     uint64_t address = (seg->base + offset) & MASK_36;
     
-    if (((seg->tag >> 27) & 1)) {
+    if (((seg->tag >> 24) & 1)) {
         tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
         if (entry == NULL) {
             cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
