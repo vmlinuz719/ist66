@@ -15,12 +15,14 @@ tty_vec:    dw          tty_intr, 0
 usr_save:   bss         2
 
 exc_spsv:   bss         1
-exc_top:    bss         2
-exc_save:   bss         13
-exc_olds:   bss         3
-exc_stk0:   bss         0
-            bss         128
-exc_stk1:   bss         0
+
+exc_top:    bss         2                       ; TODO: indirect these
+exc_save:   bss         13                      ;
+exc_olds:   bss         3                       ;
+exc_stk0:   bss         0                       ;
+                                                ;
+            bss         128                     ;
+exc_stk1:   bss         0                       ;
 
 extab:      bss         16                      ; exception handlers
 
