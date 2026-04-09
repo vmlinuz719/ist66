@@ -39,9 +39,6 @@ mem_size:   bss         1                       ; memory size
 mainpool:   bss         1                       ; physical memory queue
 mp_end:     bss         1
 
-segpool:    bss         2                       ; segment descriptor tables
-pagepool:   bss         2                       ; page tables
-
 segments:   bss         1                       ; default SDT
 
 savearea:   bss         1                       ; current save area
@@ -718,7 +715,7 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, .msg_initsd
             calls       .writeld
         
-            ldea        x0, .segpool
+            xorr        x0, x0
             calls       .getmain1
             st          ac, .segments
             
