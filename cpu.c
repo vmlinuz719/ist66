@@ -15,10 +15,11 @@
 #include "lpt.h"
 #include "tty.h"
 #include "panel.h"
+#include "bishop.h"
 
 seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
     uint8_t cache_row = selector & 0x1F;
-    uint8_t cache_key = selector >> 5;
+    uint16_t cache_key = selector >> 5;
     
     if (
         (cpu->seg_cache[cache_row].key != cache_key) || // not cached
@@ -39,43 +40,29 @@ seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
         cpu->seg_cache[cache_row].tag = tag;
         cpu->seg_cache[cache_row].key = cache_key;
     }
-    
+    // printf("segment lookup success\n");
     return &(cpu->seg_cache[cache_row]);
 }
 
-void seg_invalidate(ist66_cu_t *cpu, int selector) {
-    cpu->seg_cache[selector & 0x1F].tag = 0;
-}
-
-void seg_invalidate_all(ist66_cu_t *cpu) {
-    for (int i = 0; i < 32; i++) {
-        if (!(cpu->seg_cache[i].tag & (1 << 25))) {
-            cpu->seg_cache[i].tag = 0;
-        }
-    }
-}
-
-seg_cache_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pts) {
+tlb_entry_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pg_table) {
     uint8_t cache_row = selector & 0x1F;
-    uint8_t cache_key = selector >> 5;
+    uint16_t cache_key = selector >> 5;
+    uint16_t page_select = selector & 0x1FF;
     
     if (
         (cpu->tlb[cache_row].key != cache_key) || // not cached
-        (!(cpu->tlb[cache_row].tag & (1 << 27))) // not present
+        (!(cpu->tlb[cache_row].rights & TLB_PRESENT)) // not present
     ) { // go fish
-        if (selector > 511) return NULL; // no such page
-        
-        uint64_t descriptor_addr = pts->base + selector;
+        uint64_t descriptor_addr = pg_table->base + page_select;
         
         if (descriptor_addr >= cpu->mem_size) return NULL;
         
-        uint64_t tag = (cpu->memory[descriptor_addr] & 0x1E0) << 19;
-        tag |= (pts->tag & 0776000000000) | 0777;
-        if (!(tag & (1 << 27))) return NULL; // still not present
+        uint8_t rights = (cpu->memory[descriptor_addr] & 0x1E0) >> 5;
+        if (!(rights & TLB_PRESENT)) return NULL; // still not present
         
-        cpu->tlb[cache_row].base =
+        cpu->tlb[cache_row].pg_base =
             cpu->memory[descriptor_addr] & 0777777777000;
-        cpu->tlb[cache_row].tag = tag;
+        cpu->tlb[cache_row].rights = rights;
         cpu->tlb[cache_row].key = cache_key;
     }
     
@@ -83,13 +70,26 @@ seg_cache_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pts) {
 }
 
 void tlb_invalidate(ist66_cu_t *cpu, int selector) {
-    cpu->tlb[selector & 0x1F].tag = 0;
+    cpu->tlb[selector & 0x1F].rights = 0;
 }
 
 void tlb_invalidate_all(ist66_cu_t *cpu) {
     for (int i = 0; i < 32; i++) {
-        if (!(cpu->tlb[i].tag & (1 << 25))) {
-            cpu->tlb[i].tag = 0;
+        if (!(cpu->tlb[i].rights & TLB_GLOBAL)) {
+            cpu->tlb[i].rights = 0;
+        }
+    }
+}
+
+void seg_invalidate(ist66_cu_t *cpu, int selector) {
+    cpu->seg_cache[selector & 0x1F].tag = 0;
+    tlb_invalidate_all(cpu);
+}
+
+void seg_invalidate_all(ist66_cu_t *cpu) {
+    for (int i = 0; i < 32; i++) {
+        if (!(cpu->seg_cache[i].tag & (1 << 25))) {
+            cpu->seg_cache[i].tag = 0;
         }
     }
 }
@@ -175,6 +175,7 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
     
     seg_cache_t *seg = seg_lookup(cpu, vaddress >> 18);
     if (seg == NULL) {
+        // printf("Segment not present\n");
         cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT;
         return KEY_FAULT;
     }
@@ -187,24 +188,30 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
         seg_key != key
     ) {
         cpu->c[C_SF] = vaddress | SEG_FAULT_KEY;
+        // printf("Segment key error\n");
         return KEY_FAULT;
     }
     
     uint64_t offset = vaddress & 0x3FFFF;
     if (offset > (seg->tag & 0x3FFFF)) {
+        // printf("Segment bounds error\n");
         cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS;
         return KEY_FAULT;
     }
     
-    if (((seg->tag >> 27) & 1)) {
-        seg = tlb_lookup(cpu, (vaddress >> 9) & 0x1F, seg);
-        if (seg == NULL) {
+    uint64_t address = (seg->base + offset) & MASK_36;
+    
+    if (((seg->tag >> 24) & 1)) {
+        tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
+        if (entry == NULL) {
+            // printf("Segment page fault\n");
             cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
             return KEY_FAULT;
         }
+        address = entry->pg_base + (vaddress & 0x1FF);
     }
     
-    uint64_t address = (seg->base + offset) & MASK_36;
+    
     if (address >= cpu->mem_size) return MEM_FAULT;
     
     return cpu->memory[address] & MASK_36;
@@ -284,19 +291,21 @@ uint64_t write_vmem(
         return KEY_FAULT;
     }
     
-    if (((seg->tag >> 27) & 1)) {
-        seg = tlb_lookup(cpu, (vaddress >> 9) & 0x1F, seg);
-        if (seg == NULL) {
-            cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE | SEG_FAULT_WRITE;
+    uint64_t address = (seg->base + offset) & MASK_36;
+    
+    if (((seg->tag >> 24) & 1)) {
+        tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
+        if (entry == NULL) {
+            cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
             return KEY_FAULT;
         }
-        if (!((seg->tag >> 26) & 1)) {
+        if (!(entry->rights & TLB_WRITE)) {
             cpu->c[C_SF] = vaddress | SEG_FAULT_RIGHTS | SEG_FAULT_WRITE | SEG_FAULT_PAGE;
             return KEY_FAULT;
         }
+        address = entry->pg_base + (vaddress & 0x1FF);
     }
     
-    uint64_t address = (seg->base + offset) & MASK_36;
     if (address >= cpu->mem_size) return MEM_FAULT;
     
     uint64_t old_tag = cpu->memory[address] & ~(MASK_36);
@@ -643,7 +652,7 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, ea + 1);
         } break;
         case 15: { // RET
-            uint64_t temp_sp = cpu->a[13];
+            uint64_t temp_sp = cpu->a[13] + ea;
             uint64_t last_two[2]; // return addr, mask
             
             for (int i = 0; i < 2; i++) {
@@ -1952,14 +1961,21 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
 
 void exec_local_trap(ist66_cu_t *cpu, uint64_t inst) {
     uint64_t opcode = ((inst >> 27) & 0x1FF);
-    set_pc(cpu, get_pc(cpu) + 1);
     if (opcode >= 0300) { // SLT, set key to 0 and save full PSW
+        if (!((cpu->c[C_SLT] >> 27) & 1)) {
+            do_except(cpu, X_USER);
+            return;
+        }
         cpu->a[15] = cpu->c[C_PSW];
         cpu->c[C_PSW] &= (1 << 27);
-        set_pc(cpu, cpu->c[C_SLT] + (opcode & 077));
+        set_pc(cpu, (cpu->c[C_SLT] + (opcode & 077)) & MASK_ADDR);
     } else { // PLT, preserve key and save only program counter
+        if (!((cpu->c[C_PLT] >> 27) & 1)) {
+            do_except(cpu, X_USER);
+            return;
+        }
         cpu->a[15] = get_pc(cpu);
-        set_pc(cpu, cpu->c[C_PLT] + (opcode & 077));
+        set_pc(cpu, (cpu->c[C_PLT] + (opcode & 077)) & MASK_ADDR);
     }
     cpu->a[14] = inst;
 }
@@ -2042,7 +2058,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                     } break;
                     case 7: { // SLR
                         cpu->c[C_PSW] = cpu->a[15];
-                    }
+                    } break;
                     default: {
                         // Illegal
                         do_except(cpu, X_INST);
@@ -2106,16 +2122,18 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                     return;
                 }
                 
+                uint64_t address = (seg->base + offset) & MASK_36;
+                
                 if (((seg->tag >> 27) & 1)) {
-                    seg = tlb_lookup(cpu, (vaddress >> 9) & 0x1F, seg);
-                    if (seg == NULL) {
+                    tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
+                    if (entry == NULL) {
                         cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
                         set_pc(cpu, get_pc(cpu) + 1);
                         return;
                     }
+                    address = entry->pg_base + (vaddress & 0x1FF);
                 }
                 
-                uint64_t address = (seg->base + offset) & MASK_36;
                 cpu->c[ac] = address;
                 set_pc(cpu, get_pc(cpu) + 2);
             } break;
@@ -2359,9 +2377,13 @@ void *run(void *vctx) {
             cpu->a[13] = cpu->next_stack;
             cpu->do_stack = 0;
         }
+        cpu->cycles++;
     } while (!cpu->exit || cpu->do_edit);
     
-    fprintf(stderr, "CPU: halted, code %012lo\n", cpu->stop_code);
+    cpu->running = 0;
+    fprintf(stderr, "CPU: halted, code %012lo after %ld instructions\n", 
+        cpu->stop_code, cpu->cycles);
+    cpu->cycles = 0;
     return NULL;
 }
 
@@ -2376,6 +2398,8 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     cpu->ioctx = calloc(sizeof(void *), max_io);
     cpu->max_io = max_io;
     cpu->mask = 0xFFFF;
+    cpu->min_pending = 0xFFFF;
+    cpu->exit = 1;
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
@@ -2383,26 +2407,38 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
-    cpu->running = 1;
-    cpu->exit = do_step;
-    pthread_create(&cpu->thread, NULL, run, cpu);
+    if (cpu->exit) {
+        cpu->running = 1;
+        cpu->exit = do_step;
+        pthread_create(&cpu->thread, NULL, run, cpu);
+        if (do_step) {
+            pthread_join(cpu->thread, NULL);
+        }
+    } else if (!(cpu->running)) {
+        cpu->running = 1;
+        pthread_cond_signal(&cpu->intr_cond);
+    }
 }
 
 void stop_cpu(ist66_cu_t *cpu) {
-    cpu->running = 1;
-    cpu->exit = 1;
-    pthread_cond_signal(&cpu->intr_cond);
-    pthread_join(cpu->thread, NULL);
-    cpu->running = 0;
+    if (!(cpu->exit)) {
+        cpu->running = 1;
+        cpu->exit = 1;
+        pthread_cond_signal(&cpu->intr_cond);
+        pthread_join(cpu->thread, NULL);
+        cpu->running = 0;
+    }
 }
 
 void wait_for_cpu(ist66_cu_t *cpu) {
-    pthread_join(cpu->thread, NULL);
-    cpu->running = 0;
+    if (!(cpu->exit)) {
+        pthread_join(cpu->thread, NULL);
+        cpu->running = 0;
+    }
 }
 
 void destroy_cpu(ist66_cu_t *cpu) {
-    if (!cpu->exit && cpu->running) stop_cpu(cpu);
+    stop_cpu(cpu);
     
     for (int i = 0; i < cpu->max_io; i++) {
         if (cpu->io_destroy[i] != NULL) {
@@ -2423,58 +2459,60 @@ void destroy_cpu(ist66_cu_t *cpu) {
 int main(int argc, char *argv[]) {
     ist66_cu_t cpu;
     
-    int do_sdl = 0; //(SDL_Init(SDL_INIT_EVERYTHING) == 0);
-    
     
     
     init_cpu(&cpu, 262144, 512);
 
-    if (do_sdl)
-        init_panel(&cpu, 0);
+    init_panel(&cpu, 0);
+    init_bishop(&cpu, 32);
 
-    init_ppt(&cpu, 012, 9);
+
+    init_ppt_ex(&cpu, 012, 9, "monitor.ppt");
     init_lpt(&cpu, 013, 8, stdout);
-    // init_iocpu(&cpu, 020, 8, 1024, 512);
     // init_pch(&cpu, 014, 6);
     init_tty(&cpu, 060, 10, 8080);
-    
-    cpu.memory[512] = 0640000370012;
-    cpu.memory[513] = 0743170000000;
-    cpu.memory[514] = 0742130000000;
-    cpu.memory[515] = 0640000560012;
-    cpu.memory[516] = 0000002777777;
-    cpu.memory[517] = 0640000200012;
-    cpu.memory[518] = 0700010500000;
-    cpu.memory[519] = 0000002777774;
-    cpu.memory[520] = 0700011004100;
-    cpu.memory[521] = 0703150000003;
-    cpu.memory[522] = 0740150000000;
-    cpu.memory[523] = 0045102000021;
-    cpu.memory[524] = 0000002777767;
-    cpu.memory[525] = 0043043777777;
-    cpu.memory[526] = 0640000560012;
-    cpu.memory[527] = 0000002777777;
-    cpu.memory[528] = 0640140200012;
-    cpu.memory[529] = 0723010500000;
-    cpu.memory[530] = 0000002777774;
-    cpu.memory[531] = 0043103777736;
-    cpu.memory[532] = 0045102000011;
-    cpu.memory[533] = 0700010100000;
-    cpu.memory[534] = 0000002777753;
-    cpu.memory[535] = 0045102000007;
-    cpu.memory[536] = 0700010100000;
-    cpu.memory[537] = 0070002000001;
-    cpu.memory[538] = 0104101000006;
-    cpu.memory[539] = 0000002777763;
-    cpu.memory[540] = 0000000000011;
-    cpu.memory[541] = 0000000000133;
-    cpu.memory[542] = 0000000000136;
     
     char cmd[512];
     int running = 1;
     uint64_t ptr = 0;
     
-    printf("Ready. Note: use command /1000GW for PPT loader\n");
+    start_render(&(cpu.render_ctx));
+    
+    printf("Ready. Relocatable loader at 01000:\n");
+    
+    printf("    640000,370012\n");
+    printf("    704212,004400\n");
+    printf("    740032,120023\n");
+    printf("    740032,020001\n");
+    printf("    640000,560012\n");
+    printf("    000002,777777\n");
+    printf("    640100,200012\n");
+    printf("    722130,577600\n");
+    printf("    000002,777771\n");
+    printf("    700011,020006\n");
+    printf("    742010,300000\n");
+    printf("    000002,777771\n");
+    printf("    704214,500000\n");
+    printf("    700650,100000\n");
+    printf("    053016,000001\n");
+    printf("    000002,777764\n");
+        
+    cpu.memory[512] = 0640000370012;
+    cpu.memory[513] = 0704212004400;
+    cpu.memory[514] = 0740032120023;
+    cpu.memory[515] = 0740032020001;
+    cpu.memory[516] = 0640000560012;
+    cpu.memory[517] = 0000002777777;
+    cpu.memory[518] = 0640100200012;
+    cpu.memory[519] = 0722130577600;
+    cpu.memory[520] = 0000002777771;
+    cpu.memory[521] = 0700011020006;
+    cpu.memory[522] = 0742010300000;
+    cpu.memory[523] = 0000002777771;
+    cpu.memory[524] = 0704214500000;
+    cpu.memory[525] = 0700650100000;
+    cpu.memory[526] = 0053016000001;
+    cpu.memory[527] = 0000002777764;
     
     while (running) {
         printf("> ");
@@ -2570,7 +2608,8 @@ int main(int argc, char *argv[]) {
             }
             
             else if (cmd[i] == 'S') {
-                start_cpu(&cpu, 0);
+                start_cpu(&cpu, 1);
+                ptr = get_pc(&cpu);
             }
 
             else if (cmd[i] == 'F') {
@@ -2609,11 +2648,8 @@ int main(int argc, char *argv[]) {
         }
     }
     
+    kill_render(&(cpu.render_ctx));
     destroy_cpu(&cpu);
-    
-    if (do_sdl) {
-        SDL_Quit();
-    }
     
     return 0;
 }

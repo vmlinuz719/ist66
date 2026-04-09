@@ -1,0 +1,1549 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <sys/socket.h>
+
+#define MAX_LABEL_LEN 10
+
+typedef struct {
+    char label[MAX_LABEL_LEN + 1];
+    uint64_t value;
+} label_def_t;
+
+typedef struct {
+    label_def_t *labels;
+    int num_labels, max_labels;
+} label_tab_t;
+
+int get_label(label_tab_t *ltab, char *label) {
+    for (int i = 0; i < ltab->num_labels; i++) {
+        if (!strcmp(label, ltab->labels[i].label)) return i;
+    }
+    
+    return -1;
+}
+
+int insert_label_def(label_tab_t *ltab, char *label, uint64_t value) {
+    if (get_label(ltab, label) != -1) return -1;
+    
+    if (ltab->num_labels == ltab->max_labels) return -1;
+    
+    strncpy(ltab->labels[ltab->num_labels].label, label, MAX_LABEL_LEN);
+    ltab->labels[ltab->num_labels].label[MAX_LABEL_LEN] = 0;
+    ltab->labels[ltab->num_labels].value = value;
+    
+    return ltab->num_labels++;
+}
+
+typedef struct {
+    char label[MAX_LABEL_LEN + 1];
+    uint64_t address, addr_in_place;
+    int is_relative, width, left_shift;
+} label_thunk_t;
+
+typedef struct {
+    label_thunk_t *thunks;
+    int num_thunks, max_thunks;
+} thunk_tab_t;
+
+label_tab_t *new_label_tab(int max_labels) {
+    label_def_t *labels = malloc(sizeof(label_def_t) * max_labels);
+    label_tab_t *result = malloc(sizeof(label_tab_t));
+    result->labels = labels;
+    result->num_labels = 0;
+    result->max_labels = max_labels;
+    return result;
+}
+
+void delete_label_tab(label_tab_t *ltab) {
+    free(ltab->labels);
+    free(ltab);
+}
+
+thunk_tab_t *new_thunk_tab(int max_thunks) {
+    label_thunk_t *thunks = malloc(sizeof(label_thunk_t) * max_thunks);
+    thunk_tab_t *result = malloc(sizeof(thunk_tab_t));
+    result->thunks = thunks;
+    result->num_thunks = 0;
+    result->max_thunks = max_thunks;
+    return result;
+}
+
+void delete_thunk_tab(thunk_tab_t *ttab) {
+    free(ttab->thunks);
+    free(ttab);
+}
+
+int insert_thunk(
+    thunk_tab_t *ttab,
+    char *label,
+    uint64_t address,
+    uint64_t addr_in_place,
+    int is_relative,
+    int width,
+    int left_shift
+) {
+    if (ttab->num_thunks == ttab->max_thunks) return -1;
+    
+    memcpy(ttab->thunks[ttab->num_thunks].label, label, MAX_LABEL_LEN);
+    ttab->thunks[ttab->num_thunks].label[MAX_LABEL_LEN] = 0;
+    
+    ttab->thunks[ttab->num_thunks].address = address;
+    ttab->thunks[ttab->num_thunks].addr_in_place = addr_in_place;
+    ttab->thunks[ttab->num_thunks].is_relative = is_relative;
+    ttab->thunks[ttab->num_thunks].width = width;
+    ttab->thunks[ttab->num_thunks].left_shift = left_shift;
+    
+    return ttab->num_thunks++;
+}
+
+int remove_thunk(thunk_tab_t *ttab, int index) {
+    if (ttab->num_thunks == 0 || index < 0 || index >= ttab->num_thunks)
+        return -1;
+    
+    ttab->thunks[index] = ttab->thunks[--ttab->num_thunks];
+    return 0;
+}
+
+int register_label_do_thunks(
+    label_tab_t *ltab, char *label, uint64_t value,
+    thunk_tab_t *ttab, uint64_t *work_area
+) {
+    if (insert_label_def(ltab, label, value) == -1) return -1;
+    
+    int thunks_done = 0;
+    int current_thunk = 0;
+    while (current_thunk < ttab->num_thunks) {
+        if (strcmp(label, ttab->thunks[current_thunk].label)) {
+            current_thunk++;
+            continue;
+        }
+        
+        label_thunk_t *thunk = &ttab->thunks[current_thunk];
+        uint64_t v = thunk->is_relative ? value - thunk->addr_in_place : value;
+        v &= (1L << thunk->width) - 1;
+        v <<= thunk->left_shift;
+        work_area[thunk->address] |= v;
+        thunks_done++;
+        remove_thunk(ttab, current_thunk);
+    }
+    return thunks_done;
+}
+
+typedef struct {
+    char buf[513];
+    int next, is_label_def, has_comma, is_end_of_list, is_string, eof, error;
+    
+    FILE *file;
+    int line_no;
+    
+    uint64_t asm_offset, pc;
+    uint64_t current_label, current_size;
+    
+    label_tab_t *ltab;
+    thunk_tab_t *ttab;
+    uint64_t *work_area;
+} assembler_ctx_t;
+
+int assembler_get_label(assembler_ctx_t *ctx, char *label) {
+    return get_label(ctx->ltab, label);
+}
+
+uint64_t assembler_next(assembler_ctx_t *ctx) {
+    ctx->current_size++;
+    ctx->pc++;
+    return ctx->asm_offset++;
+}
+
+uint64_t assembler_set(assembler_ctx_t *ctx, uint64_t new_pc) {
+    ctx->work_area[ctx->asm_offset - ctx->current_size - 1]
+        = ctx->current_size;
+    
+    ctx->work_area[ctx->asm_offset++] = new_pc;
+    
+    ctx->pc = ctx->current_label = new_pc;
+    ctx->current_size = 0; // asm_offset - current_size - 2 for label record
+    ctx->asm_offset++;
+    return ctx->asm_offset;
+}
+
+uint64_t assembler_open(assembler_ctx_t *ctx, uint64_t start_pc) {
+    ctx->work_area[0] = start_pc;
+    
+    ctx->pc = ctx->current_label = start_pc;
+    ctx->current_size = 0; // asm_offset - current_size - 2 for label record
+    ctx->asm_offset = 2;
+    return ctx->asm_offset;
+}
+
+uint64_t assembler_close(assembler_ctx_t *ctx) {
+    ctx->work_area[ctx->asm_offset - ctx->current_size - 1]
+        = ctx->current_size;
+    
+    return ctx->asm_offset;
+}
+
+assembler_ctx_t *new_assembler(
+    char *fname, int max_labels, int max_thunks, uint64_t *work_area
+) {
+    FILE *file = fopen(fname, "r");
+    if (file == NULL) return NULL;
+    
+    assembler_ctx_t *result = calloc(1, sizeof(assembler_ctx_t));
+    result->file = file;
+    
+    result->ltab = new_label_tab(max_labels);
+    result->ttab = new_thunk_tab(max_thunks);
+    result->work_area = work_area;
+    
+    return result;
+}
+
+void delete_assembler(assembler_ctx_t *ctx) {
+    fclose(ctx->file);
+    
+    delete_label_tab(ctx->ltab);
+    delete_thunk_tab(ctx->ttab);
+    
+    free(ctx);
+}
+
+int read_symbol(assembler_ctx_t *ctx) {
+    ctx->is_string = 0;
+    
+    int is_comment = (ctx->next == ';');
+    while (
+        (isspace(ctx->next) || ctx->next == 0 || is_comment)
+        && ctx->next != EOF
+    ) {
+        if (ctx->next == '\n') {
+            ctx->line_no++;
+            is_comment = 0;
+        }
+        
+        ctx->next = fgetc(ctx->file);
+        
+        if (ctx->next == ';') {
+            is_comment = 1;
+        }
+    }
+    
+    if (ctx->next == EOF) {
+        if (feof(ctx->file)) {
+            ctx->eof = 1;
+        }
+        if (ferror(ctx->file)) {
+            ctx->error = 1;
+        }
+        return -1;
+    }
+    
+    ctx->is_end_of_list = ctx->has_comma;
+    ctx->is_label_def = ctx->has_comma = 0;
+    
+    if (ctx->next == '"') {
+        ctx->is_string = 1;
+        ctx->next = fgetc(ctx->file);
+    }
+    
+    int i;
+    for (i = 0; i < 512; i++) {
+        ctx->buf[i] = ctx->next;
+        
+        ctx->next = fgetc(ctx->file);
+        
+        if (ctx->next == EOF) {
+            if (ferror(ctx->file)) {
+                ctx->error = 1;
+                return -1;
+            }
+            break;
+        }
+        
+        if (isspace(ctx->next)) {
+            if (ctx->next == '\n') ctx->line_no++;
+            if (!ctx->is_string) break;
+        }
+        
+        if (ctx->is_string) {
+            if (ctx->next == '"') break;
+        } else {
+            if (ctx->next == ':') {
+                if (ctx->is_end_of_list) {
+                    ctx->error = 1;
+                    return -1;
+                }
+                ctx->is_label_def = 1;
+                break;
+            }
+            
+            if (ctx->next == ',') {
+                ctx->has_comma = 1;
+                break;
+            }
+        }
+    }
+    ctx->buf[i + 1] = 0;
+    
+    ctx->next = fgetc(ctx->file);
+    is_comment = (ctx->next == ';');
+    while ((isspace(ctx->next) || is_comment) && ctx->next != EOF) {
+        if (ctx->next == '\n') {
+            ctx->line_no++;
+            is_comment = 0;
+        }
+        
+        ctx->next = fgetc(ctx->file);
+        
+        if (ctx->next == ';') {
+            is_comment = 1;
+        }
+    }
+    
+    if (ctx->next == EOF) {
+        if (ferror(ctx->file)) {
+            ctx->error = 1;
+            return -1;
+        }
+        return 0;
+    }
+    
+    if (ctx->next == ':') {
+        if (ctx->is_label_def || ctx->has_comma || ctx->is_end_of_list) {
+            ctx->error = 1;
+            return -1;
+        }
+        ctx->is_label_def = 1;
+        ctx->next = fgetc(ctx->file);
+    }
+    
+    if (ctx->next == ',') {
+        if (ctx->is_label_def || ctx->has_comma) {
+            ctx->error = 1;
+            return -1;
+        }
+        
+        ctx->has_comma = 1;
+        ctx->next = fgetc(ctx->file);
+    }
+    
+    return 0;
+}
+
+enum event_type {
+    ERROR,
+    SYMBOL,
+    LABEL_DEF,
+    LIST_ITEM,
+    LIST_END,
+    FILE_END
+};
+
+enum event_type get_symbol_type(assembler_ctx_t *ctx) {
+    enum event_type result =  ctx->error          ? ERROR
+                            : ctx->eof            ? FILE_END
+                            : ctx->is_label_def   ? LABEL_DEF
+                            : ctx->has_comma      ? LIST_ITEM
+                            : ctx->is_end_of_list ? LIST_END
+                            :                       SYMBOL
+    ;
+    
+    return result;
+}
+
+int assembler_register_label(
+    assembler_ctx_t *ctx,
+    char *label,
+    uint64_t value
+) {
+    return register_label_do_thunks(
+        ctx->ltab, label, value,
+        ctx->ttab, ctx->work_area
+    );
+}
+
+int assembler_insert_thunk(
+    assembler_ctx_t *ctx,
+    char *label,
+    uint64_t address,
+    uint64_t addr_in_place,
+    int is_relative,
+    int width,
+    int left_shift
+) {
+    return insert_thunk(
+        ctx->ttab,
+        label,
+        address,
+        addr_in_place,
+        is_relative,
+        width,
+        left_shift
+    );
+}
+
+int assembler_get_or_thunk(
+    assembler_ctx_t *ctx,
+    char *label,
+    uint64_t address,
+    uint64_t addr_in_place,
+    int is_relative,
+    int width,
+    int left_shift,
+    uint64_t *result
+) {
+    int label_index = assembler_get_label(
+        ctx, label
+    );
+    
+    if (label_index == -1) {
+        int thunk = assembler_insert_thunk(
+            ctx,
+            label,
+            address,
+            addr_in_place,
+            is_relative,
+            width,
+            left_shift
+        );
+        if (thunk == -1) return -1;
+        else return 0;
+    }
+    
+    uint64_t value = ctx->ltab->labels[label_index].value;
+    if (is_relative) value -= addr_in_place;
+    
+    *result = value & ((1L << width) - 1);
+    *result <<= left_shift;
+    
+    return 1;
+}
+
+#define ADDR_INDIRECT       (1L << 22)
+
+#define ADDR_IMMEDIATE      (0)
+#define ADDR_DIRECT_PAGE    (1L << 18)
+#define ADDR_PC_RELATIVE    (2L << 18)
+#define ADDR_POST_INCREMENT (14L << 18)
+#define ADDR_PRE_DECREMENT  (15L << 18)
+
+#define RDC_NUM_GENERAL 16
+
+char *r_general[] = {
+    "ac", 
+    "mq", 
+    "xy", 
+    "x0", 
+    "x1", 
+    "x2", 
+    "x3", 
+    "x4", 
+    "x5", 
+    "x6", 
+    "x7", 
+    "ap", 
+    "lr", 
+    "sp", 
+    "r14",
+    "r15"
+};
+
+#define RDC_NUM_CONTROL 8
+
+char *r_control[] = {
+    "psw0",
+    "psw1",
+    "fpc",
+    "plt",
+    "slt",
+    "sdr",
+    "sflt",
+    "cr8"
+};
+
+#define RDC_NUM_FLOAT 4
+
+char *r_float[] = {
+    "f0",
+    "f1",
+    "f2",
+    "f3"
+};
+
+int64_t get_num(int max, char *label, char **endptr, int base) {
+    int64_t result = (int64_t) strtoull(label, endptr, base);
+    if ((endptr != NULL && *endptr == label) || result == -1 || result >= max) return -1;
+    else return result;
+}
+
+int64_t get_reg(char *rtab[], int max, char *label, char **endptr) {
+    if (isdigit(*label)) {
+        return get_num(max, label, endptr, 10);
+    } else {
+        for (int i = 0; i < max; i++) {
+            char *p = strstr(label, rtab[i]);
+            if (p == label) {
+                if (endptr != NULL) *endptr = label + strlen(rtab[i]);
+                return i;
+            }
+        }
+        if (endptr != NULL) *endptr = label;
+        return -1;
+    }
+}
+
+int parse_number_or_label(
+    assembler_ctx_t *ctx,
+    char *field,
+    int bits,
+    int need_relative,
+    int permit_label,
+    uint64_t *out,
+    char **endptr
+) {
+    uint64_t mask = (1L << bits) - 1;
+    
+    uint64_t result;
+
+    if (*field == '0') {
+        result = (uint64_t) strtoull(field + 1, &field, 8);
+        if (result <= mask) *out = result;
+        else return -1;
+    } else if (isdigit(*field) || *field == '-') {
+        result = (uint64_t) strtoll(field, &field, 10);
+        *out = result & mask;
+    } else if (*field == '#') {
+        result = (uint64_t) strtoull(field + 1, &field, 16);
+        if (result <= mask) *out = result;
+        else return -1;
+    } else {
+        if (!permit_label) return -1;
+        if (*field == '(') {
+            *out = 0;
+            *endptr = field;
+            return 1;
+        }
+        
+        char label[MAX_LABEL_LEN + 1];
+        for (int i = 0; i < MAX_LABEL_LEN; i++) {
+            if (!(*field) || *field == '(') {
+                label[i] = 0;
+                break;
+            }
+            label[i] = *field++;
+        }
+        label[MAX_LABEL_LEN] = 0;
+        
+        int status = assembler_get_or_thunk(
+            ctx, label, ctx->asm_offset, ctx->pc,
+            need_relative, bits, 0,
+            &result
+        );
+        
+        if (status == -1) return -1;
+        
+        if (status) {
+            *out = result;
+        }
+        if (endptr != NULL) *endptr = field;
+        return status;
+    }
+    
+    if (endptr != NULL) *endptr = field;
+    return 1;
+}
+
+int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
+    int thunked_label = 0;
+    int allow_parens = 0;
+    int need_relative = 0;
+    
+    if (*field == '@') {
+        field++;
+        *out |= ADDR_INDIRECT;
+    }
+    
+    switch (*field) {
+        case '_': {*out |= ADDR_DIRECT_PAGE; field++;} break;
+        case '.': {
+            *out |= ADDR_PC_RELATIVE;
+            need_relative = 1;
+            field++;
+        } break;
+        case '+': {*out |= ADDR_POST_INCREMENT; field++;} break;
+        case '=': {*out |= ADDR_PRE_DECREMENT; field++;} break;
+        default: allow_parens = 1;
+    }
+    
+    uint64_t displacement;
+    int status = parse_number_or_label(
+        ctx, field, 18, need_relative, 1, &displacement, &field
+    );
+    if (status == -1) return -1;
+    thunked_label = !status;
+    if (status) *out |= displacement;
+    
+    if (*field == '(') {
+        if (!allow_parens) return -1;
+
+        int64_t reg = get_reg(r_general, RDC_NUM_GENERAL, field + 1, &field);
+        if (reg < 3 || reg > 13) return -1;
+        if (*field != ')') return -1;
+        *out |= reg << 18;
+    }
+    
+    return thunked_label;
+}
+
+typedef struct {
+    char *mnemonic;
+    uint64_t base;
+    int (*assemble)(assembler_ctx_t *, uint64_t);
+} assembler_entry_t;
+
+int assemble_unary(assembler_ctx_t *ctx, uint64_t opcode) {
+    ctx->work_area[assembler_next(ctx)] = opcode;
+    return 0;
+}
+
+int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
+    switch (opcode) {
+        case 0: { // origin
+            read_symbol(ctx);
+            if (get_symbol_type(ctx) != SYMBOL) return -1;
+            
+            uint64_t new_origin;
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 36, 0, 1, &new_origin, NULL
+            );
+            if (status == -1) return -1;
+            
+            assembler_set(ctx, new_origin);
+        } break;
+
+        case 1: { // bss
+            read_symbol(ctx);
+            if (get_symbol_type(ctx) != SYMBOL) return -1;
+            
+            uint64_t new_origin;
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 36, 0, 1, &new_origin, NULL
+            );
+            if (status == -1) return -1;
+            
+            assembler_set(ctx, ctx->pc + new_origin);
+        } break;
+        
+        case 2: { // dw
+            enum event_type evt;
+            do {
+                read_symbol(ctx);
+                evt = get_symbol_type(ctx);
+                if (
+                    evt != SYMBOL
+                    && evt != LIST_ITEM
+                    && evt != LIST_END
+                ) return -1;
+                
+                uint64_t value = 0;
+                int status = parse_number_or_label(
+                    ctx, ctx->buf, 36, 0, 1, &value, NULL
+                );
+                if (status == -1) return -1;
+                
+                ctx->work_area[assembler_next(ctx)] = value;
+            } while (evt == LIST_ITEM);
+        } break;
+        
+        case 3: { // save
+            uint64_t value = 0;
+            enum event_type evt;
+            do {
+                read_symbol(ctx);
+                evt = get_symbol_type(ctx);
+                if (
+                    evt != SYMBOL
+                    && evt != LIST_ITEM
+                    && evt != LIST_END
+                ) return -1;
+                
+                int64_t reg = get_reg
+                    (r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+                if (reg < 0) {
+                    return -1;
+                }
+                
+                value |= 1L << (15 - reg);
+            } while (evt == LIST_ITEM);
+            ctx->work_area[assembler_next(ctx)] = value;
+        } break;
+    }
+    return 0;
+}
+
+int assemble_string(assembler_ctx_t *ctx, uint64_t opcode) {
+    enum event_type evt;
+    int shift = 29;
+    int len = 0;
+    uint64_t write_size_to;
+    
+    if (opcode == 1) {
+        write_size_to = assembler_next(ctx);
+    }
+    
+    do {
+        read_symbol(ctx);
+        evt = get_symbol_type(ctx);
+        if (
+            evt != SYMBOL
+            && evt != LIST_ITEM
+            && evt != LIST_END
+        ) return -1;
+        
+        uint64_t value;
+        
+        if (ctx->is_string) {
+            int index = 0;
+            while ((value = ctx->buf[index++] & 0x7F) != 0) {
+                ctx->work_area[ctx->asm_offset] &= ~(0x7FL << shift);
+                ctx->work_area[ctx->asm_offset] |= value << shift;
+                shift -= 7;
+                if (shift < 1) {
+                    shift = 29;
+                    assembler_next(ctx);
+                }
+                len++;
+            }
+        } else {
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 7, 0, 0, &value, NULL
+            );
+            if (status == -1) return -1;
+            
+            ctx->work_area[ctx->asm_offset] &= ~(0x7FL << shift);
+            ctx->work_area[ctx->asm_offset] |= value << shift;
+            shift -= 7;
+            if (shift < 1) {
+                shift = 29;
+                assembler_next(ctx);
+            }
+            len++;
+        }
+        
+    } while (evt == LIST_ITEM);
+    
+    if (shift != 29) assembler_next(ctx);
+    
+    if (opcode == 1) {
+        ctx->work_area[write_size_to] = len;
+    }
+    
+    return 0;
+}
+
+int assemble_mr(assembler_ctx_t *ctx, uint64_t opcode) {
+    read_symbol(ctx);
+    switch(get_symbol_type(ctx)) {
+        case SYMBOL: {
+            uint64_t value = 0;
+            int status = parse_address_field(
+                ctx, ctx->buf, &value
+            );
+
+            if (status == -1) {
+                return -1;
+            } else {
+                ctx->work_area[ctx->asm_offset] = value | opcode;
+            }
+        } break;
+
+        default: {
+            return -1;
+        }
+    }
+    assembler_next(ctx);
+    return 0;
+}
+
+int assemble_am_base
+    (assembler_ctx_t *ctx, uint64_t opcode, char *regs[], int max)
+{
+    read_symbol(ctx);
+    uint64_t value = 0;
+    switch(get_symbol_type(ctx)) {
+        case LIST_ITEM: {
+            int64_t reg = get_reg(regs, max, ctx->buf, NULL);
+            if (reg == -1) {
+                return -1;
+            }
+
+            value |= reg << 23;
+            read_symbol(ctx);
+            if (get_symbol_type(ctx) != LIST_END) {
+                return -1;
+            }
+        }
+        case SYMBOL: {
+            int status = parse_address_field(
+                ctx, ctx->buf, &value
+            );
+
+            if (status == -1) {
+                return -1;
+            } else {
+                ctx->work_area[ctx->asm_offset] = value | opcode;
+            }
+        } break;
+
+        default: {
+            return -1;
+        }
+    }
+    assembler_next(ctx);
+    return 0;
+}
+
+int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
+    return assemble_am_base(ctx, opcode, r_general, RDC_NUM_GENERAL);
+}
+
+int assemble_ctl(assembler_ctx_t *ctx, uint64_t opcode) {
+    return assemble_am_base(ctx, opcode, r_control, RDC_NUM_CONTROL);
+}
+
+int assemble_fm(assembler_ctx_t *ctx, uint64_t opcode) {
+    int index = 3;
+
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        opcode |= 1L << 26;
+    }
+    if (tolower(ctx->buf[index]) == 'r') {
+        index++;
+        opcode |= 1L << 25;
+    }
+
+    if (ctx->buf[index] != 0) return -1;
+
+    return assemble_am_base(ctx, opcode, r_float, RDC_NUM_FLOAT);
+}
+
+int assemble_fm_no_opts(assembler_ctx_t *ctx, uint64_t opcode) {
+    return assemble_am_base(ctx, opcode, r_float, RDC_NUM_FLOAT);
+}
+
+int assemble_bx(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 18;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t size = get_num(37, ctx->buf, NULL, 10);
+    if (size < 1) return -1;
+    value |= size;
+
+    ctx->work_area[assembler_next(ctx)] = value;
+
+    return 0;
+}
+
+int assemble_io_var(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = 0640000000000;
+    
+    char ctl = tolower(ctx->buf[3]);
+    switch(ctl) {
+        case '\0': break;
+        case 's': value |= 1L << 16; break;
+        case 'c': value |= 2L << 16; break;
+        case 'p': value |= 3L << 16; break;
+        default: return -1;
+    }
+    
+    if (opcode == 0 || opcode == 1) { // RIO, WIO
+        value |= opcode << 12;
+    } else { // NIO
+        value |= 0xFL << 12;
+    }
+
+    enum event_type evt;
+
+    if (opcode != 2) {
+        read_symbol(ctx);
+        if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+        int64_t src_dst = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+        if (src_dst == -1) return -1;
+        value |= src_dst << 23;
+
+        read_symbol(ctx);
+        evt = get_symbol_type(ctx);
+        if (evt != LIST_ITEM) return -1;
+        int64_t tgt = get_num(7, ctx->buf, NULL, 10);
+        if (tgt < 0) return -1;
+        value |= tgt << 13;
+    }
+
+    read_symbol(ctx);
+    evt = get_symbol_type(ctx);
+    if (evt != SYMBOL && evt != LIST_END) return -1;
+    uint64_t dev;
+    int status = parse_number_or_label(
+        ctx, ctx->buf, 12, 0, 0, &dev, NULL
+    );
+    if (status == -1) return -1;
+    value |= dev;
+    
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+int assemble_io_test(assembler_ctx_t *ctx, uint64_t opcode) {
+    read_symbol(ctx);
+    switch(get_symbol_type(ctx)) {
+        case SYMBOL: {
+            uint64_t value = 0;
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 12, 0, 0, &value, NULL
+            );
+
+            if (status == -1) {
+                return -1;
+            } else {
+                ctx->work_area[ctx->asm_offset] = value | opcode;
+            }
+        } break;
+
+        default: {
+            return -1;
+        }
+    }
+    assembler_next(ctx);
+    return 0;
+}
+
+int assemble_cmp(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 27;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+int assemble_pushpop(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != SYMBOL) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+int assemble_pushpop_c(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != SYMBOL) return -1;
+    int64_t tgt = get_reg(r_control, RDC_NUM_CONTROL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+char *tests[] = {
+    "no",
+    "sk",
+    "cn",
+    "cz",
+    "rn",
+    "rz",
+    "bn",
+    "bz"
+};
+
+int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
+    int is_m_type = (tolower(ctx->buf[3]) == 'm');
+    uint64_t value = ((opcode >> 4) << 32) | ((opcode & 7) << 20);
+
+    int index = 4;
+    if (tolower(ctx->buf[index]) == 't') {
+        index++;
+        value |= 1L << 13;
+    }
+    if (tolower(ctx->buf[index]) == 'r') {
+        index++;
+        value |= 1L << 12;
+    }
+    switch (tolower(ctx->buf[index])) {
+        case 'z': {index++; value |= 1L << 18;} break;
+        case 's': {index++; value |= 2L << 18;} break;
+        case 'c': {index++; value |= 3L << 18;} break;
+    }
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        value |= 1L << 31;
+    }
+    if (ctx->buf[index] == '.') {
+        index++;
+        char *test_name = &(ctx->buf[index]);
+        uint64_t test = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!strncmp(test_name, tests[i], 2)) {
+                test = i << 15;
+                break;
+            }
+        }
+        if (!test) return -1;
+        value |= test;
+        index += 2;
+    }
+    if (ctx->buf[index] != 0) return -1;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 27;
+
+    read_symbol(ctx);
+    enum event_type evt = get_symbol_type(ctx);
+    if (evt != LIST_ITEM && evt != LIST_END) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    if (evt == LIST_END) {
+        ctx->work_area[assembler_next(ctx)] = value;
+        return 0;
+    }
+
+    read_symbol(ctx);
+    evt = get_symbol_type(ctx);
+    if (evt != LIST_ITEM && evt != LIST_END) return -1;
+    int64_t arg2 = get_num(37, ctx->buf, NULL, 10);
+    if (arg2 < 0) return -1;
+    value |= arg2 << (is_m_type ? 6 : 0);
+    if (evt == LIST_END) {
+        ctx->work_area[assembler_next(ctx)] = value;
+        return 0;
+    }
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t arg3 = get_num(37, ctx->buf, NULL, 10);
+    if (arg3 < 0) return -1;
+    value |= arg3 << (is_m_type ? 0 : 6);
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+char *float_tests[] = {
+    "no",
+    "sk",
+    "lz",
+    "zg",
+    "rn",
+    "rz",
+    "if",
+    "nn"
+};
+
+int assemble_fr(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = opcode;
+
+    int index = 3;
+
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        value |= 1L << 26;
+    }
+
+    switch (tolower(ctx->buf[index])) {
+        case 'g': {value |= 1L << 14;}
+        case 'f': {index++; value |= 1L << 25;} break;
+    }
+
+    if (tolower(ctx->buf[index]) == 'k') {
+        index++;
+        value |= 1L << 22;
+    }
+
+    if (ctx->buf[index] == '.') {
+        index++;
+        char *test_name = &(ctx->buf[index]);
+        uint64_t test = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!strncmp(test_name, float_tests[i], 2)) {
+                test = i << 15;
+                break;
+            }
+        }
+        if (!test) return -1;
+        value |= test;
+        index += 2;
+    }
+
+    if (ctx->buf[index] != 0) return -1;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 20;
+
+    read_symbol(ctx);
+    enum event_type evt = get_symbol_type(ctx);
+    if (evt != LIST_ITEM && evt != LIST_END) return -1;
+    int64_t tgt = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+    if (evt == LIST_END) {
+        value |= tgt << 18;
+        ctx->work_area[assembler_next(ctx)] = value;
+        return 0;
+    }
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t dst = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    if (dst == -1) return -1;
+    value |= dst << 18;
+
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+int assemble_aa_s(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = ((opcode >> 4) << 32) | ((opcode & 7) << 20);
+    value |= 1L << 14;
+
+    int index = 4;
+
+    if (tolower(ctx->buf[index]) == 'r') {
+        index++;
+        value |= 1L << 12;
+    }
+    switch (tolower(ctx->buf[index])) {
+        case 'z': {index++; value |= 1L << 18;} break;
+        case 's': {index++; value |= 2L << 18;} break;
+        case 'c': {index++; value |= 3L << 18;} break;
+    }
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        value |= 1L << 31;
+    }
+    if (ctx->buf[index] == '.') {
+        index++;
+        char *test_name = &(ctx->buf[index]);
+        uint64_t test = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!strncmp(test_name, tests[i], 2)) {
+                test = i << 15;
+                break;
+            }
+        }
+        if (!test) return -1;
+        value |= test;
+        index += 2;
+    }
+    if (ctx->buf[index] != 0) return -1;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 27;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+
+    read_symbol(ctx);
+    enum event_type evt = get_symbol_type(ctx);
+    if (evt != LIST_ITEM && evt != LIST_END) return -1;
+    int64_t dst = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (dst == -1) return -1;
+    value |= dst << 6;
+    if (evt == LIST_END) {
+        ctx->work_area[assembler_next(ctx)] = value;
+        return 0;
+    }
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    int64_t arg3 = get_num(37, ctx->buf, NULL, 10);
+    if (arg3 < 0) return -1;
+    value |= arg3 << 0;
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+int assemble_aa_i(assembler_ctx_t *ctx, uint64_t opcode) {
+    uint64_t value = ((opcode >> 4) << 32) | ((opcode & 7) << 20);
+    value |= 3L << 13;
+
+    int index = 4;
+
+    switch (tolower(ctx->buf[index])) {
+        case 'z': {index++; value |= 1L << 18;} break;
+        case 's': {index++; value |= 2L << 18;} break;
+        case 'c': {index++; value |= 3L << 18;} break;
+    }
+    if (tolower(ctx->buf[index]) == 'n') {
+        index++;
+        value |= 1L << 31;
+    }
+    if (ctx->buf[index] == '.') {
+        index++;
+        char *test_name = &(ctx->buf[index]);
+        uint64_t test = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!strncmp(test_name, tests[i], 2)) {
+                test = i << 15;
+                break;
+            }
+        }
+        if (!test) return -1;
+        value |= test;
+        index += 2;
+    }
+    if (ctx->buf[index] != 0) return -1;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (src == -1) return -1;
+    value |= src << 27;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    if (tgt == -1) return -1;
+    value |= tgt << 23;
+
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_END) return -1;
+    char *field = ctx->buf;
+    uint64_t arg2;
+    if (*field == '0') {
+        arg2 = (uint64_t) strtoull(field + 1, &field, 8);
+        if (arg2 > 017777) return -1;
+    } else if (isdigit(*field) || *field == '-') {
+        arg2 = (uint64_t) strtoll(field, &field, 10);
+    } else if (*field == '#') {
+        arg2 = (uint64_t) strtoull(field + 1, &field, 16);
+        if (arg2 > 017777) return -1;
+    } else return -1;
+    value |= arg2 & 017777;
+    ctx->work_area[assembler_next(ctx)] = value;
+    return 0;
+}
+
+int assemble_aa_var(assembler_ctx_t *ctx, uint64_t opcode) {
+    switch (tolower(ctx->buf[3])) {
+        case 'r':
+        case 'm': return assemble_aa_r(ctx, opcode);
+        case 's': return assemble_aa_s(ctx, opcode);
+        case 'i': return assemble_aa_i(ctx, opcode);
+        default:  return -1;
+    }
+}
+
+assembler_entry_t var_instructions[] = {
+    {"com",     0xE0,           assemble_aa_var},
+    {"ngt",     0xE1,           assemble_aa_var},
+    {"mov",     0xE2,           assemble_aa_var},
+    {"inc",     0xE3,           assemble_aa_var},
+    {"adc",     0xE4,           assemble_aa_var},
+    {"sub",     0xE5,           assemble_aa_var},
+    {"add",     0xE6,           assemble_aa_var},
+    {"and",     0xE7,           assemble_aa_var},
+    {"bis",     0xF2,           assemble_aa_var},
+    {"xor",     0xF6,           assemble_aa_var},
+    {"pct",     0xF7,           assemble_aa_var},
+    
+    {"rio",     0,              assemble_io_var},
+    {"wio",     1,              assemble_io_var},
+    {"nio",     2,              assemble_io_var},
+
+    {"ldf",     0400000000000,  assemble_fm},
+    {"stf",     0401000000000,  assemble_fm},
+    {"adf",     0402000000000,  assemble_fm},
+    {"sbf",     0403000000000,  assemble_fm},
+    {"mlf",     0404000000000,  assemble_fm},
+    {"dvf",     0405000000000,  assemble_fm},
+
+    {"ldg",     0406000000000,  assemble_fm},
+    {"stg",     0407000000000,  assemble_fm},
+    {"adg",     0410000000000,  assemble_fm},
+    {"sbg",     0411000000000,  assemble_fm},
+    {"mlg",     0412000000000,  assemble_fm},
+    {"dvg",     0413000000000,  assemble_fm},
+
+    {"mvl",     0440000000000,  assemble_fr},
+    {"ngl",     0441000000000,  assemble_fr},
+    {"adl",     0442000000000,  assemble_fr},
+    {"sbl",     0443000000000,  assemble_fr},
+    {"mll",     0444000000000,  assemble_fr},
+    {"dvl",     0445000000000,  assemble_fr},
+};
+
+assembler_entry_t instructions[] = {
+    {"origin",  0,              assemble_directive},
+    {"bss",     1,              assemble_directive},
+    {"dw",      2,              assemble_directive},
+    {"save",    3,              assemble_directive},
+    {"ds",      0,              assemble_string},
+    {"dsn",     1,              assemble_string},
+    
+    {"nop",     0000002000001,  assemble_unary},
+    {"retr",    0000014000000,  assemble_unary},
+    {"jmp",     0000000000000,  assemble_mr},
+    {"callr",   0000040000000,  assemble_mr},
+    {"inctnz",  0000100000000,  assemble_mr},
+    {"dectnz",  0000140000000,  assemble_mr},
+    {"tstmnz",  0000200000000,  assemble_mr},
+    {"tstmz",   0000240000000,  assemble_mr},
+    {"calls",   0000700000000,  assemble_mr},
+    {"rets",    0000740000000,  assemble_unary},
+    {"retsd",   0000740000000,  assemble_mr},
+    
+    {"mul",     0001000000000,  assemble_mr},
+    {"fmadd",   0001040000000,  assemble_mr},
+    {"fmsub",   0001100000000,  assemble_mr},
+    {"div",     0001140000000,  assemble_mr},
+    {"umul",    0001200000000,  assemble_mr},
+    {"ufmadd",  0001240000000,  assemble_mr},
+    {"ufmsub",  0001300000000,  assemble_mr},
+    {"udiv",    0001340000000,  assemble_mr},
+    
+    {"reti",    0010000000000,  assemble_unary},
+    {"retid",   0010000000000,  assemble_mr},
+    {"retlmi",  0010040000000,  assemble_mr},
+    {"ldmask",  0010100000000,  assemble_mr},
+    {"popim",   0010116000001,  assemble_unary},
+    {"lmwait",  0010140000000,  assemble_mr},
+    {"stmask",  0010200000000,  assemble_mr},
+    {"pushim",  0010217000001,  assemble_unary},
+    {"invlsg",  0010240000000,  assemble_mr},
+    {"invlpg",  0010300000000,  assemble_mr},
+    {"retsv",   0010340000000,  assemble_unary},
+    {"retsvd",  0010340000000,  assemble_mr},
+    
+    {"edit",    0041000000000,  assemble_am},
+    {"edits",   0042000000000,  assemble_am},
+    {"ldea",    0043000000000,  assemble_am},
+    {"addea",   0044000000000,  assemble_am},
+    {"inctne",  0045000000000,  assemble_am},
+    {"dectne",  0046000000000,  assemble_am},
+    {"ldeas",   0047000000000,  assemble_am},
+    {"ldcom",   0050000000000,  assemble_am},
+    {"ldneg",   0051000000000,  assemble_am},
+    {"ld",      0052000000000,  assemble_am},
+    {"pop",     0052016000001,  assemble_pushpop},
+    {"st",      0053000000000,  assemble_am},
+    {"push",    0053017000001,  assemble_pushpop},
+    {"addcom",  0054000000000,  assemble_am},
+    {"sub",     0055000000000,  assemble_am},
+    {"add",     0056000000000,  assemble_am},
+    {"and",     0057000000000,  assemble_am},
+    {"or",      0062000000000,  assemble_am},
+    {"xor",     0066000000000,  assemble_am},
+    
+    {"hlt",     0070002000001,  assemble_unary},
+    {"wait",    0070000000000,  assemble_am},
+    {"intr",    0071000000000,  assemble_am},
+    {"ldkey",   0072000000000,  assemble_am},
+    {"stkey",   0073000000000,  assemble_am},
+    {"ldctl",   0074000000000,  assemble_ctl},
+    {"popcr",   0074016000001,  assemble_pushpop_c},
+    {"stctl",   0075000000000,  assemble_ctl},
+    {"pushcr",  0075017000001,  assemble_pushpop_c},
+    {"ldtrt",   0076000000000,  assemble_am},
+
+    {"ldb",     0100000000000,  assemble_bx},
+    {"stb",     0101000000000,  assemble_bx},
+    {"incbx",   0102000000000,  assemble_bx},
+    {"incldb",  0103000000000,  assemble_bx},
+    {"incstb",  0104000000000,  assemble_bx},
+
+    {"ldexp",   0414000000000,  assemble_fm_no_opts},
+    {"stexp",   0415000000000,  assemble_fm_no_opts},
+    {"ldsig",   0416000000000,  assemble_fm_no_opts},
+    {"stsig",   0417000000000,  assemble_fm_no_opts},
+
+    {"tionb",   0640000160000,  assemble_io_test},
+    {"tiobz",   0640000360000,  assemble_io_test},
+    {"tiond",   0640000560000,  assemble_io_test},
+    {"tiodn",   0640000760000,  assemble_io_test},
+    
+    {"cmpne",   0720024400000,  assemble_cmp},
+    {"cmp",     0720024500000,  assemble_cmp},
+    {"cmplt",   0720025600000,  assemble_cmp},
+    {"cmpge",   0720025700000,  assemble_cmp},
+    {"cmpgt",   0720026600000,  assemble_cmp},
+    {"cmple",   0720026700000,  assemble_cmp},
+};
+
+void output_c(uint64_t *work_area, uint64_t limit, FILE *out) {
+    int index = 0;
+    while (1) {
+        uint64_t base = work_area[index];
+        uint64_t orig_base = base;
+        uint64_t size = work_area[index + 1];
+        index += 2;
+        
+        if (size > 0) {
+            while (size--) {
+                fprintf(
+                    out,
+                    "    cpu.memory[%lu] = 0%012lo;\n",
+                    base++,
+                    work_area[index++]
+                );
+            }
+        }
+        
+        if (orig_base == limit) break;
+    }
+}
+
+void output_r(uint64_t *work_area, uint64_t limit, FILE *out) {
+    int index = 0;
+    while (1) {
+        uint64_t base = work_area[index];
+        uint64_t size = work_area[index + 1];
+        index += 2;
+        
+        if (size > 0) {
+            for (int i = 12; i >= 0; i -= 6)
+                fputc((base >> i) & 077, out);
+            
+            while (size--) {
+                uint64_t data = work_area[index++];
+                for (int i = 30; i >= 0; i -= 6)
+                    fputc((data >> i) & 077, out);
+            }
+            
+            fputc(128, out);
+        }
+        
+        if (base == limit) break;
+    }
+}
+
+int main(int argc, char *argv[]) {
+    uint64_t work_area[8192];
+    assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
+    assembler_open(assembler, 0);
+    
+    while (!assembler->error && !read_symbol(assembler)) {
+        switch (get_symbol_type(assembler)) {
+            default: {
+                assembler->error = 1;
+            } break;
+            
+            case LABEL_DEF: {
+                assembler_register_label(
+                    assembler,
+                    assembler->buf,
+                    assembler->pc
+                );
+            } break;
+            
+            case SYMBOL: {
+                int assembled = 0;
+                for (
+                    int i = 0;
+                    i < sizeof(instructions) / sizeof(assembler_entry_t);
+                    i++
+                ) {
+                    if (!strcmp(assembler->buf, instructions[i].mnemonic)) {
+                        if (
+                            instructions[i].assemble(
+                                assembler, instructions[i].base
+                            ) == -1
+                        ) assembler->error = 1;
+                        else assembled = 1;
+                        break;
+                    }
+                }
+                if (!assembled) {
+                    for (
+                        int i = 0;
+                        i < sizeof(var_instructions) / sizeof(assembler_entry_t);
+                        i++
+                    ) {
+                        if (
+                            !strncmp(
+                                assembler->buf,
+                                var_instructions[i].mnemonic,
+                                3
+                            )
+                        ) {
+                            if (
+                                var_instructions[i].assemble(
+                                    assembler, var_instructions[i].base
+                                ) == -1
+                            ) assembler->error = 1;
+                            else assembled = 1;
+                            break;
+                        }
+                    }
+                }
+                if (!assembled) {
+                    assembler->error = 1;
+                }
+            } break;
+        }
+    }
+    
+    if (assembler->error) {
+        fprintf(stderr, "Error on line %d\n", assembler->line_no);
+        exit(EXIT_FAILURE);
+    } else if (assembler->ttab->num_thunks == 0) {
+        fprintf(stderr, "All references resolved\n");
+    } else {
+        fprintf(
+            stderr,
+            "%d unresolved references\n",
+            assembler->ttab->num_thunks
+        );
+    }
+    
+    assembler_close(assembler);
+    
+    output_r(work_area, assembler->current_label, stdout);
+    
+    delete_assembler(assembler);
+    return 0;
+}

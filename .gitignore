@@ -58,7 +58,16 @@ dkms.conf
 # generated documentation
 docs/html/
 docs/latex/
+*.html
 
 compile_commands.json
 
 .cache/
+
+# Test binaries
+tests/test_fpu
+tests/test_cpu
+vibe_code/bcd_test
+
+# Python
+__pycache__/

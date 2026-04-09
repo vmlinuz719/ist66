@@ -1,0 +1,189 @@
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+            origin      62                      ; user save
+
+usr_save:   dw          start, 0740000000000
+
+            origin      1024
+
+ipl:        ldea        x0, .usr_rst
+            ldea        x1, .usr_save
+            ld          0(x0)
+            st          0(x1)
+            ld          1(x0)
+            st          1(x1)
+            ldctl       psw1, .cw
+            reti
+
+usr_rst:    dw          start, 0740000000000
+
+cw:         dw          0036000000000           ; return to irql 15
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+start:      ldea        sp, stack
+            ldctl       fpc, .fpu_on
+
+            ldea        x3, .bmpm1
+            ld          x4, .x_res
+            ld          x5, .y_res
+
+            addi        x4, ac, -1              ; set line length
+            wio         ac, 2, #020
+            xorrts      ac, ac, 28              ; set display base/increment
+            wio         ac, 3, #020
+
+            xorrts      x2, x2, 1               ; Y
+            xorrts      x1, x1, 1               ; X
+
+loop_x:     callr       .mb_xyl
+
+            incr        x1, x1                  ; row done?
+            cmple       x1, x4
+            jmp         .loop_x
+
+            ldea        x3, .bmpm1              ; if so then display it
+            tiond       32                      ; wait for display ready
+            jmp         .-1
+            wios        x3, 0, #020             ; send DMA command
+
+            incr        x2, x2                  ; screen done?
+            xorrts      x1, x1, 1               ; reset x either way
+            cmple       x2, x5
+            jmp         .loop_x
+
+done:       ldctl       fpc, .fpu_off
+            ldctl       psw1, .zero
+            ldmask      .zero
+            hlt
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; mb_xyl - iterate mandelbrot given hx and hy
+        ;
+        ; Locals:
+        ;   0(x0)       x
+        ;   2(x0)       y
+        ;   4(x0)       xx (temp for x*x + y*y + cx)
+        ;   6(x0)       cx
+        ;   8(x0)       cy
+        ;
+        ; hx in x1, hy in x2
+        ; bitmap pointer in x3
+        ; x_res, y_res in x4, x5
+        ; iteration count in ac
+        ;
+
+mb_xyl:     addea       sp, -10
+            movr        sp, x0
+
+            movr        x1, xy
+            or          xy, .int_to_f
+            push        xy
+            ldfn        f0, +1
+            movr        x4, xy
+            or          xy, .int_to_f
+            push        xy
+            ldfn        f1, +1
+            dvlng       f0, f1, f0
+            sbfn        f0, .f_0_5
+            dvf         f0, .f_mag
+            mlf         f0, .f_3
+            ldfn        f1, .f_xpan
+            sbln        f0, f1, f0
+            stg         f0, 6(x0)
+
+            movr        x2, xy
+            or          xy, .int_to_f
+            push        xy
+            ldfn        f0, +1
+            movr        x5, xy
+            or          xy, .int_to_f
+            push        xy
+            ldfn        f1, +1
+            dvlng       f0, f1, f0
+            sbfn        f0, .f_0_5
+            dvf         f0, .f_mag
+            mlf         f0, .f_3
+            ldfn        f1, .f_ypan
+            sbln        f0, f1, f0
+            stg         f0, 8(x0)
+
+            xorr        ac, ac
+            st          (x0)
+            st          1(x0)
+            st          2(x0)
+            st          3(x0)
+            incr        ac, ac
+
+            ldea        mq, 275
+
+mb_xyl0:    ldg         f0, (x0)
+            mlgn        f0, (x0)
+            ldg         f1, 2(x0)
+            mlgn        f1, 2(x0)
+            sblng       f0, f1, f0
+            adgnr       f0, 6(x0)
+            stg         f0, 4(x0)
+
+            ldg         f1, (x0)
+            adgn        f1, (x0)
+            mlgn        f1, 2(x0)
+            adgnr       f1, 8(x0)
+            stg         f1, 2(x0)
+
+            stg         f0, (x0)
+
+            mll         f0, f0
+            mll         f1, f1
+            adlng       f0, f1, f2
+            sbf         f0, .f_100
+            mvlng.zg    f0, f0
+            ld          .big
+
+            incr        ac, ac
+            cmplt       ac, mq
+            jmp         .mb_xyl0
+
+            ldea        xy, 99999
+            cmplt       ac, xy
+            jmp         .mb_xylsm
+
+            xorr        ac, ac
+            incstb      ac, x3, 1
+            jmp         .mb_xylen
+
+mb_xylsm:   xorrts      ac, ac, 1
+            incstb      ac, x3, 1
+
+mb_xylen:   addea       sp, 10
+            retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+fpu_on:     dw          4
+fpu_off:    dw          0
+zero:       dw          0
+int_to_f:   dw          0231000000000
+f_0_5:      dw          0176400000000
+f_1:        dw          0177400000000
+f_3:        dw          0200600000000
+f_100:      dw          0205620000000
+big:        dw          999999
+
+f_mag:      dw          0220400000000
+f_xpan:     dw          0176574575520
+f_ypan:     dw          0174415765140
+x_res:      dw          512
+y_res:      dw          480
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+            origin      4096
+
+stack:      bss         0
+
+            origin      8191
+
+bmpm1:      bss         1
+bitmap:     bss         0
+

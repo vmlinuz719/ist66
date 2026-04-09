@@ -1,0 +1,178 @@
+{
+  "title": "RDC-700 Instruction Formats",
+  "word_bits": 36,
+  "formats": [
+    {
+      "name": "MR",
+      "description": "Memory Reference",
+      "fields": [
+        { "name": "Op", "bits": 9, "description": "Opcode" },
+        { "name": "Fn", "bits": 4, "description": "Function" },
+        { "name": "I", "bits": 1, "description": "Indirect" },
+        { "name": "Mod", "bits": 4, "description": "Address Mode", "values_alt": [
+          {"value": "0", "description": "Displacement Only" },
+          {"value": "1", "description": "Displacement + Direct Page" },
+          {"value": "2", "description": "Displacement + Program Counter" },
+          {"value": "3-13", "description": "Displacement + Accumulator n" },
+          {"value": "14", "description": "Accumulator 13, post-increment by displacement" },
+          {"value": "15", "description": "Accumulator 13, pre-decrement by displacement" }
+        ]},
+        { "name": "Disp", "bits": 18, "description": "Displacement (signed)" }
+      ]
+    },
+    {
+      "name": "AM",
+      "description": "Accumulator-Memory",
+      "fields": [
+        { "name": "Op", "bits": 9, "description": "Opcode" },
+        { "name": "Acc", "bits": 4, "description": "Target Accumulator" },
+        { "name": "I", "bits": 1, "description": "Indirect" },
+        { "name": "Mod", "bits": 4, "description": "Address Mode (see format MR)" },
+        { "name": "Disp", "bits": 18, "description": "Displacement (signed)" }
+      ]
+    },
+    {
+      "name": "BX",
+      "description": "Byte Index",
+      "fields": [
+        { "name": "Op", "bits": 9, "description": "Opcode" },
+        { "name": "Acc", "bits": 4, "description": "Destination Accumulator" },
+        { "name": "unused", "bits": 1, "description": "Unused", "unused": true},
+        { "name": "Idx", "bits": 4, "description": "Byte Index Register" },
+        { "name": "unused", "bits": 12, "description": "Unused", "unused": true },
+        { "name": "Size", "bits": 6, "description": "Byte Size" }
+      ]
+    },
+    {
+      "name": "IO",
+      "description": "Input/Output",
+      "fields": [
+        { "name": "Op", "bits": 9, "description": "Opcode" },
+        { "name": "Acc", "bits": 4, "description": "Src/Dest Accumulator" },
+        { "name": "unused", "bits": 5, "description": "Unused", "unused": true},
+        { "name": "Ctl", "bits": 2, "description": "Control Operation", "values": [
+          {"value": 0, "name": "(NB)", "description": "No Control (Test: If Not Busy)" },
+          {"value": 1, "name": "S (BZ)", "description": "Start (Test: If Busy)" },
+          {"value": 2, "name": "C (ND)", "description": "Cancel (Test: If Not Done)" },
+          {"value": 3, "name": "P (DN)", "description": "Send Pulse (Test: If Done)" }
+        ]
+        },
+        { "name": "Xfer", "bits": 4, "description": "Transfer Type", "values": [
+          {"value": "0, 2, ..., 12", "name": "RIO", "description": "Read Device Register n/2" },
+          {"value": "1, 3, ..., 13", "name": "WIO", "description": "Write Device Register (n-1)/2" },
+          {"value": 14, "name": "TIO", "description": "I/O Test" },
+          {"value": 15, "name": "NIO", "description": "No Transfer" }
+        ]
+        },
+        { "name": "Dev", "bits": 12, "description": "Device Select" }
+      ]
+    },
+    {
+      "name": "AA/0",
+      "description": "Accumulator-Accumulator, type 0",
+      "fields": [
+        { "name": "Op", "bits": 4, "description": "Opcode, either 016 or 017" },
+        {"name": "NL", "bits": 1, "description": "No Load (discard result)"},
+        {"name": "Src", "bits": 4, "description": "Source Accumulator"},
+        {"name": "Tgt", "bits": 4, "description": "Target Accumulator"},
+        {"name": "Fn", "bits": 3, "description": "Function"},
+        {"name": "CFI", "bits": 2, "description": "Carry Flag Init", "values": [
+          {"value": 0, "name": "", "description": "No Change" },
+          {"value": 1, "name": "CC", "description": "Clear Carry Flag" },
+          {"value": 2, "name": "SC", "description": "Set Carry Flag" },
+          {"value": 3, "name": "CMC", "description": "Complement Carry Flag" }
+        ]},
+        {"name": "Test", "bits": 3, "description": "Conditional Test", "values": [
+          {"value": 0, "name": "", "description": "No Test" },
+          {"value": 1, "name": "NV", "description": "Always skip next instruction" },
+          {"value": 2, "name": "CN", "description": "Carry flag nonzero" },
+          {"value": 3, "name": "CZ", "description": "Carry flag zero" },
+          {"value": 4, "name": "RN", "description": "Result nonzero" },
+          {"value": 5, "name": "RZ", "description": "Result zero" },
+          {"value": 6, "name": "CRN", "description": "Carry flag AND result nonzero" },
+          {"value": 7, "name": "CRZ", "description": "Carry flag OR result zero" }
+        ]},
+        {"name": "0", "bits": 1, "description": "Must be zero to select mode AA/0"},
+        {"name": "RC", "bits": 1, "description": "Rotate through carry flag"},
+        {"name": "MR", "bits": 1, "description": "Mask off bits from right (default is from left)"},
+        {"name": "Mask", "bits": 6, "description": "Width to mask off with value of carry flag"},
+        {"name": "Rotl", "bits": 6, "description": "Rotate left this many bits"}
+      ]
+    },
+    {
+      "name": "AA/1",
+      "description": "Accumulator-Accumulator, type 1",
+      "fields": [
+        { "name": "Op", "bits": 4, "description": "Opcode, either 016 or 017" },
+        {"name": "NL", "bits": 1, "description": "No Load (discard result)"},
+        {"name": "Src", "bits": 4, "description": "Source Accumulator"},
+        {"name": "Tgt", "bits": 4, "description": "Target Accumulator"},
+        {"name": "Fn", "bits": 3, "description": "Function"},
+        {"name": "CFI", "bits": 2, "description": "Carry Flag Init (see format AA/0)"},
+        {"name": "Test", "bits": 3, "description": "Conditional Test (see format AA/0)"},
+        {"name": "2", "bits": 2, "description": "Must be two to select mode AA/1"},
+        {"name": "SR", "bits": 1, "description": "Shift right (default is left)"},
+        { "name": "unused", "bits": 2, "description": "Unused", "unused": true },
+        {"name": "Dest", "bits": 4, "description": "Destination Accumulator"},
+        {"name": "Shift", "bits": 6, "description": "Shift by this many bits (incoming bits take value of carry flag)"}
+      ]
+    },
+    {
+      "name": "AA/2",
+      "description": "Accumulator-Accumulator, type 2",
+      "fields": [
+        { "name": "Op", "bits": 4, "description": "Opcode, either 016 or 017" },
+        {"name": "NL", "bits": 1, "description": "No Load (discard result)"},
+        {"name": "Src", "bits": 4, "description": "Source Accumulator"},
+        {"name": "Dest", "bits": 4, "description": "Destination Accumulator"},
+        {"name": "Fn", "bits": 3, "description": "Function"},
+        {"name": "CFI", "bits": 2, "description": "Carry Flag Init (see format AA/0)"},
+        {"name": "Test", "bits": 3, "description": "Conditional Test (see format AA/0)"},
+        {"name": "3", "bits": 2, "description": "Must be three to select mode AA/2"},
+        {"name": "ImmTgt", "bits": 13, "description": "Target (signed 13-bit immediate)"}
+      ]
+    },
+    {
+      "name": "FM",
+      "description": "Floating-Point Register-Memory",
+      "fields": [
+        { "name": "Op", "bits": 9, "description": "Opcode" },
+        { "name": "N", "bits": 1, "description": "Normalize Result" },
+        { "name": "R", "bits": 1, "description": "Round Result" },
+        { "name": "Tgt", "bits": 2, "description": "Target Floating-Point Register" },
+        { "name": "I", "bits": 1, "description": "Indirect" },
+        { "name": "Mod", "bits": 4, "description": "Address Mode (see format MR)" },
+        { "name": "Disp", "bits": 18, "description": "Displacement (signed)" }
+      ]
+    },
+    {
+      "name": "FR",
+      "description": "Floating-Point Register-Register",
+      "fields": [
+        { "name": "Op", "bits": 9, "description": "Opcode" },
+        { "name": "N", "bits": 1, "description": "Normalize Result" },
+        { "name": "R", "bits": 1, "description": "Round Result" },
+        { "name": "Tgt", "bits": 2, "description": "Target Floating-Point Register" },
+        { "name": "NL", "bits": 1, "description": "No Load (discard result)" },
+        { "name": "Src", "bits": 2, "description": "Source Floating-Point Register" },
+        { "name": "Dest", "bits": 2, "description": "Destination Floating-Point Register" },
+        {"name": "Test", "bits": 3, "description": "Conditional Test", "values": [
+          {"value": 0, "name": "", "description": "No Test" },
+          {"value": 1, "name": "NV", "description": "Always skip next instruction" },
+          {"value": 2, "name": "RL", "description": "Result negative" },
+          {"value": 3, "name": "RG", "description": "Result positive" },
+          {"value": 4, "name": "RN", "description": "Result nonzero" },
+          {"value": 5, "name": "RZ", "description": "Result zero" },
+          {"value": 6, "name": "INF", "description": "Result infinite" },
+          {"value": 7, "name": "NAN", "description": "Result not a number" }
+        ]},
+        { "name": "RS", "bits": 1, "description": "Result Size", "values_alt": [
+          {"value": "0", "description": "Single precision" },
+          {"value": "1", "description": "Double precision" }
+        ]},
+        { "name": "unused", "bits": 14, "description": "Unused", "unused": true }
+      ]
+    }
+
+  ]
+}

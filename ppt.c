@@ -65,7 +65,7 @@ void *ppt(void *vctx) {
             msleep(2);
             int ch = fgetc(ctx->file);
             if (ch == EOF) {
-                fclose(ctx->file);
+                // fclose(ctx->file);
                 ctx->running = 0;
                 ctx->buf = 0;
                 fprintf(

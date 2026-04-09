@@ -1,0 +1,25 @@
+        *INSTR.  ARGUMENTS                      REMARKS                 SORT
+        
+         ORIGIN  512                            position independent
+
+         NIOS    10                             Init ppt
+         
+GET_ADDR LA      4,4,SC,M(36)                   Address/data toggle
+         XA      0,0,SC,RC(19),TNV              Init AC to get addr
+GET_DATA XA      0,0,SC,RC(1)                   or data
+
+RD_WAIT  TIOND   10                             wait for tape
+         B       .RD_WAIT
+         
+         RIOS    10,2,0
+         AA      2,2,I(-128),NL,TRZ             consume leader
+         B       .GET_ADDR
+         
+         LA      0,0,CC,RC(6)                   get bytes until done
+         OA      2,0,TCZ
+         B       .RD_WAIT
+         
+         IA      4,4,TRZ                        got address?
+         LA      0,13,TNV                       then set address
+         ST      0,1+                           store word
+         B       .GET_DATA

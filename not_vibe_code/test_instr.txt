@@ -1,0 +1,39 @@
+; header comment
+
+            origin      512
+
+loop:       ld          5,@somelabel(x3)
+            calls       .function
+            rets
+            jmp         .loop
+            jmp         16              ; some comment
+                                        ; more comments
+function:   retsd       3
+
+            origin      4096
+
+somelabel:  commz.sk    0,0,5
+            addr        ac,ac
+            tiodn       #030
+            wios        r15,1,#030
+            incldb      r15,xy,7
+
+anotherlbl: bss         16
+
+data:       dw          0123456712345,1,2,3
+string:     ds          "Hello World",13,10,0
+            dsn         "Blah blah blah"
+            
+cmpne:      subrn.rn    ac, ac          ; 720024400000
+cmp:        subrn.rz    ac, ac          ; 720024500000
+cmplt:      subrzn.bn   ac, ac          ; 720025600000
+cmpge:      subrzn.bz   ac, ac          ; 720025700000
+cmpgt:      subrsn.bn   ac, ac          ; 720026600000
+cmple:      subrsn.bz   ac, ac          ; 720026700000
+            ldctl       psw0, +1
+            stctl       psw0, =1
+            popcr       psw0
+            
+            save        ac, xy, x1, x3
+
+; footer comment

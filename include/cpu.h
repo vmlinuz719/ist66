@@ -5,6 +5,7 @@
 #include <pthread.h>
 
 #include "fpu.h"
+#include "sdlctx.h"
 
 #define MASK_ADDR 0x7FFFFFFL
 #define C_PSW 0
@@ -40,8 +41,20 @@ typedef void (*ist66_io_dtor_t) (
 typedef struct {
     uint64_t base;
     uint64_t tag;
-    uint8_t key;
+    uint16_t key;
 } seg_cache_t;
+
+#define TLB_PRESENT 8
+#define TLB_WRITE   4
+#define TLB_GLOBAL  2
+#define TLB_NOCACHE 1
+
+typedef struct {
+    uint64_t pg_base;   // 512W aligned
+    uint16_t key;       // high 9+4=13 bits of virtual address
+                        // segment selector + high 4 bits of page selector
+    uint8_t rights;     // present, writable, global, nocache
+} tlb_entry_t;      // indexed by low 5 bits of page selector
 
 struct ist66_cu {
     struct ist66_cu *host;
@@ -50,8 +63,9 @@ struct ist66_cu {
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
     uint64_t inst;
     rdc700_float_t f[16];
-    seg_cache_t seg_cache[32], tlb[32];
-    uint64_t stop_code;
+    seg_cache_t seg_cache[32];
+    tlb_entry_t tlb[32];
+    uint64_t stop_code, cycles;
     
     uint64_t xeq_inst, inc_addr, inc_data, next_stack;
     int do_edit, do_edsk, do_inc, do_stack;
@@ -71,6 +85,8 @@ struct ist66_cu {
     int min_pending;
     uint16_t mask;
     int running, throttle, exit;
+    
+    render_loop_ctx_t render_ctx;
 };
 
 static inline void halt(ist66_cu_t *cpu) {
@@ -161,5 +177,9 @@ void init_iocpu(
     uint64_t mem_size,
     int max_io
 );
+
+void start_cpu(ist66_cu_t *cpu, int do_step);
+
+void stop_cpu(ist66_cu_t *cpu);
 
 #endif
