@@ -731,7 +731,9 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, .done
             calls       .writeld
             
-            ld          ac, .ok
+            xorrts      x0, x0, 18
+            ldea        x1, tasksave(x0)
+            movr        x1, ac
             hlt
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -748,3 +750,11 @@ cseg1:      dw          01600777777
 
 stack:      
 coretab:    bss         0
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Task context segment
+
+            origin      #40000
+
+taskseg:    bss         512
+tasksave:   bss         19
