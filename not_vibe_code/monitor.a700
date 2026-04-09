@@ -14,15 +14,24 @@ tty_vec:    dw          tty_intr, 0
 
 usr_save:   bss         2
 
-exc_spsv:   bss         1                       ;
-                                                ;
-exc_top:    bss         2                       ; TODO: indirect these
-exc_save:   bss         13                      ;
-exc_olds:   bss         3                       ;
-exc_stk0:   bss         0                       ;
-                                                ;
-            bss         128                     ;
-exc_stk1:   bss         0                       ;
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Exception save area structure
+        ;
+        ;   +0      Saved stack pointer
+        ;
+        ;   +1      Handler return address
+        ;   +2      Handler return mask
+        ;
+        ;   +3      Saved registers AC through R15
+        ;           (SP has been replaced by supervisor stack)
+        ;
+        ;   +19     One past the end of the save area
+        ;           Load this address to SP when calling handler from stub
+        
+init_esa:   bss         19                      ; initial exception save area
+
+            bss         128
+exc_stk1:   bss         0                       ; exception handler call stack
 
 extab:      bss         16                      ; exception handlers
 
@@ -35,6 +44,9 @@ segpool:    bss         2                       ; segment descriptor tables
 pagepool:   bss         2                       ; page tables
 
 segments:   bss         1                       ; default SDT
+
+savearea:   bss         1                       ; current save area
+excstack:   bss         1                       ; current exception stack
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
@@ -56,14 +68,16 @@ halt:       dw          0
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-exc_stub:   st          sp, .exc_spsv
-            ldea        sp, .exc_stk0
+exc_stub:   st          sp, @.savearea
+            ld          sp, .savearea
+            addi        sp, sp, 19
             calls       .exhandlr
             reti
 
 exhandlr:   dw          #FFFF                   ; save all
 
-            ldea        sp, .exc_stk1
+            ld          sp, .excstack
+            ld          x6, .savearea
             pushcr      psw1
             pop         ac
             movrz       ac, x0, 12, 32
@@ -121,10 +135,10 @@ dump_psw:   addi        x4, x4, -1
             ldea        x0, .crlf
             calls       .writeld
             
-            ld          ac, .exc_spsv
-            st          ac, .exc_olds
+            ld          ac, (x6)
+            st          ac, 16(x6)
             
-            ldea        x0, .exc_save
+            ldea        x0, 3(x6)
             calls       .dumpregs
             
             ldea        x0, .crlf
@@ -136,12 +150,13 @@ dump_psw:   addi        x4, x4, -1
             ldmask      .halt
             hlt
 
-alt_hndl:   ldea        x0, .exc_save
-            ld          ac, .exc_spsv
-            st          ac, .exc_olds
+alt_hndl:   ldea        x0, 3(x6)
+            ld          ac, (x6)
+            st          ac, 16(x6)
             calls       (x4)
             
-            ldea        sp, .exc_top
+            ld          x6, .savearea
+            ldea        sp, 1(x6)
             movr.rn     ac, ac
             jmp         .no_retry
             rets
@@ -618,6 +633,12 @@ start:      ldea        sp, stack
             ldea        x0, .extab
             ldea        x1, .enumdone
             st          x1, 2(x0)
+            
+            ldea        ac, .init_esa
+            st          ac, .savearea
+            
+            ldea        ac, .exc_stk1
+            st          ac, .excstack
             
             ldea        x0, .msg_banner
             calls       .writeld
