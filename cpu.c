@@ -193,7 +193,7 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
     }
     
     uint64_t offset = vaddress & 0x3FFFF;
-    if (offset > (seg->tag & 0x3FFFF)) {
+    if (!((seg->tag >> 24) & 1) && offset > (seg->tag & 0x3FFFF)) {
         // printf("Segment bounds error\n");
         cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS;
         return KEY_FAULT;
@@ -286,7 +286,7 @@ uint64_t write_vmem(
     }
     
     uint64_t offset = vaddress & 0x3FFFF;
-    if (offset > (seg->tag & 0x3FFFF)) {
+    if (!((seg->tag >> 24) & 1) && offset > (seg->tag & 0x3FFFF)) {
         cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS | SEG_FAULT_WRITE;
         return KEY_FAULT;
     }
@@ -2116,7 +2116,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 
                 uint64_t offset = vaddress & 0x3FFFF;
-                if (offset > (seg->tag & 0x3FFFF)) {
+                if (!((seg->tag >> 24) & 1) && offset > (seg->tag & 0x3FFFF)) {
                     cpu->c[C_SF] = vaddress | SEG_FAULT_BOUNDS;
                     set_pc(cpu, get_pc(cpu) + 1);
                     return;
@@ -2124,7 +2124,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 
                 uint64_t address = (seg->base + offset) & MASK_36;
                 
-                if (((seg->tag >> 27) & 1)) {
+                if (((seg->tag >> 24) & 1)) {
                     tlb_entry_t *entry = tlb_lookup(cpu, vaddress >> 9, seg);
                     if (entry == NULL) {
                         cpu->c[C_SF] = vaddress | SEG_FAULT_PRESENT | SEG_FAULT_PAGE;
