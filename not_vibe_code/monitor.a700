@@ -569,7 +569,7 @@ relpage:    save        x7, lr
             
             ld          x0, 2(x7)               ; get owning queue
             cmpne       x0, x1                  ; check if match
-            jmp         .fm1_fail
+            jmp         .rlp_fail
             movr        x7, x1
             movr.rn     x0, x0                  ; dequeue if it has an owner
             callr       .delque
@@ -582,7 +582,7 @@ relpage:    save        x7, lr
             xorrts      ac, ac, 1
             rets
 
-fm1_fail:   xorr        ac, ac
+rlp_fail:   xorr        ac, ac
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -599,7 +599,7 @@ acqpage:    save        x7, lr
             ldea        x0, .mainpool
             callr       .remque
             movr.rz     ac, ac
-            jmp         .fm1_fail               ; did we get anything
+            jmp         .aqp_fail               ; did we get anything
             
             movr        ac, x1                  ; queue page if new owner
             movr        x7, x2
@@ -612,7 +612,7 @@ acqpage:    save        x7, lr
             subrrs      xy, x7, 8, 8
             movr        x7, ac
 
-fm1_fail:   rets
+aqp_fail:   rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
