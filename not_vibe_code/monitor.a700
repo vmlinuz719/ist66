@@ -555,14 +555,14 @@ delque:     ld          x2, (x1)                ; x2: next
         ;           (address - descriptor_list_base) << 8
         
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; RELPAGE - release a 1024-word page to MAINPOOL
+        ; FREEREAL - release a 1024-word page to MAINPOOL
         ;
         ;   X0:     Address of block to release
         ;   X1:     Expected owner
         ;
         ;   Return: 0 on failure (owner mismatch), 1 on success
         
-relpage:    save        x7, lr
+freereal:   save        x7, lr
 
             movrz       x0, x7, 28, 8           ; descriptor offset to x7
             addea       x7, coretab             ; address of queue entry
@@ -586,13 +586,13 @@ rlp_fail:   xorr        ac, ac
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; ACQPAGE - get a 1024-word page from MAINPOOL
+        ; GETREAL - get a 1024-word page from MAINPOOL
         ;
         ;   X0:     Address of new owner queue
         ;
         ;   Return: 0 on failure (mainpool empty), else address of a page
 
-acqpage:    save        x7, lr
+getreal:    save        x7, lr
 
             movr        x0, x7                  ; save argument
             
@@ -613,6 +613,15 @@ acqpage:    save        x7, lr
             movr        x7, ac
 
 aqp_fail:   rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Double descriptor format:
+        ;
+        ;   0:      Double page table base
+        ;   1:      Key = 1, present, writable, virtual, limit = 1023
+        ;   2:      Double page table base + 512
+        ;   3:      Key = 1, present, writable, virtual,
+        ;           limit = number of active pages
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
@@ -688,7 +697,7 @@ mp_init0:   ldea        x0, .dot                ; phase 0: list all memory
             calls       .writeld
             movr        x7, x0, 10
             xorr        x1, x1
-            calls       .relpage
+            calls       .freereal
             inctne      x7, (sp)
             jmp         .mp_init0
             
@@ -702,7 +711,7 @@ mp_init0:   ldea        x0, .dot                ; phase 0: list all memory
 mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             calls       .writeld
             xorr        x0, x0
-            calls       .acqpage
+            calls       .getreal
             addi.rn     x7, x7, -1
             jmp         .mp_init1
             
@@ -716,7 +725,7 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             calls       .writeld
         
             xorr        x0, x0
-            calls       .acqpage
+            calls       .getreal
             st          ac, .segments
             
             movr        ac, x0
