@@ -83,7 +83,7 @@ void tlb_invalidate_all(ist66_cu_t *cpu) {
 
 void seg_invalidate(ist66_cu_t *cpu, int selector) {
     cpu->seg_cache[selector & 0x1F].tag = 0;
-    tlb_invalidate_all(cpu);
+    // tlb_invalidate_all(cpu);
 }
 
 void seg_invalidate_all(ist66_cu_t *cpu) {
