@@ -36,7 +36,7 @@ extab:      bss         16                      ; exception handlers
 
 mem_size:   bss         1                       ; memory size
 
-mainpool:   bss         1                       ; physical memory queue
+realpool:   bss         1                       ; physical memory queue
 mp_end:     bss         1
 
 segments:   bss         1                       ; default SDT
@@ -179,7 +179,7 @@ msg_banner: dsn         "OS/700 VERSION 1 RELEASE 0", 13, 10,
                         13, 10, 13, 10
                         
 msg_initrm: dsn         "Init RMDETECT... "
-msg_initmp: dsn         "Init MAINPOOL"
+msg_initmp: dsn         "Init REALPOOL"
 msg_initsd: dsn         "Init SEGMENTS..."
 dot:        dsn         "."
 bang:       dsn         "!"
@@ -555,7 +555,7 @@ delque:     ld          x2, (x1)                ; x2: next
         ;           (address - descriptor_list_base) << 8
         
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; FREEREAL - release a 1024-word page to MAINPOOL
+        ; FREEREAL - release a 1024-word page to REALPOOL
         ;
         ;   X0:     Address of block to release
         ;   X1:     Expected owner
@@ -574,10 +574,10 @@ freereal:   save        x7, lr
             movr.rn     x0, x0                  ; dequeue if it has an owner
             callr       .delque
             
-            ldea        x0, .mainpool           ; get mainpool
+            ldea        x0, .realpool           ; get realpool
             movr        x7, x1
             st          x0, 2(x1)
-            callr       .insque                 ; add to mainpool
+            callr       .insque                 ; add to realpool
             
             xorrts      ac, ac, 1
             rets
@@ -586,17 +586,17 @@ rlp_fail:   xorr        ac, ac
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; GETREAL - get a 1024-word page from MAINPOOL
+        ; GETREAL - get a 1024-word page from REALPOOL
         ;
         ;   X0:     Address of new owner queue
         ;
-        ;   Return: 0 on failure (mainpool empty), else address of a page
+        ;   Return: 0 on failure (realpool empty), else address of a page
 
 getreal:    save        x7, lr
 
             movr        x0, x7                  ; save argument
             
-            ldea        x0, .mainpool
+            ldea        x0, .realpool
             callr       .remque
             movr.rz     ac, ac
             jmp         .aqp_fail               ; did we get anything
@@ -683,7 +683,7 @@ memtest:    xorr        ac, ac
             addi        sp, sp, 4
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Initialize MAINPOOL
+        ; Initialize REALPOOL
         
             ld          ac, .mem_size
             movrz       ac, ac, 26, 10
