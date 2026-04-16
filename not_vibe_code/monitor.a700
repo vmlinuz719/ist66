@@ -429,11 +429,11 @@ start:      ldea        sp, stack
             ldea        x0, .msg_banner
             calls       .writeld
             
-            ldea        x0, .msg_initrm
-            calls       .writeld
-            
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Count memory
+            
+            ldea        x0, .msg_initrm
+            calls       .writeld
             
             ldea        x2, stack
             or          x2, .incptr
@@ -531,6 +531,12 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, .done
             calls       .writeld
             
+            xorrts      x0, x0, 19
+            ld          xy, .ok
+            st          xy, testsave(x0)
+            ld          x1, .segments
+            ld          ac, testsave(x1)
+            
             hlt
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -548,3 +554,11 @@ cseg2:      dw          01600001777
 
 stack:      
 coretab:    bss         0
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Task context segment
+
+            origin      #40000
+
+taskseg:    bss         512
+testsave:   bss         1
