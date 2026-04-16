@@ -2,9 +2,9 @@
         
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-            origin      0                       ; exception
-            
-exc_vec:    dw          exc_stub, 0
+            origin      0
+
+exc_vec:    bss         1
 
             origin      20                      ; tty handler
 
@@ -15,24 +15,6 @@ tty_vec:    dw          tty_intr, 0
 usr_save:   bss         2
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Exception save area structure
-        ;
-        ;   +0      Saved stack pointer (duplicate)
-        ;
-        ;   +1      Handler return address
-        ;   +2      Handler return mask
-        ;
-        ;   +3      Saved registers AC through R15
-        ;
-        ;   +19     One past the end of the save area
-        ;           Load this address to SP when calling handler from stub
-        
-init_esa:   bss         19                      ; initial exception save area
-
-            bss         128
-exc_stk1:   bss         0                       ; exception handler call stack
-
-extab:      bss         16                      ; exception handlers
 
 mem_size:   bss         1                       ; memory size
 
@@ -40,9 +22,7 @@ realpool:   bss         1                       ; physical memory queue
 mp_end:     bss         1
 
 segments:   bss         1                       ; default SDT
-
-savearea:   bss         1                       ; current save area
-excstack:   bss         1                       ; current exception stack
+savepool:   bss         2                       ; SDT queue
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
@@ -63,104 +43,6 @@ mask:       dw          02000                   ; enable console irq
 halt:       dw          0
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-exc_stub:   st          sp, @.savearea
-            ld          sp, .savearea
-            addi        sp, sp, 19
-            calls       .exhandlr
-            reti
-
-exhandlr:   dw          #FFFF                   ; save all
-
-            ld          sp, .excstack
-            ld          x6, .savearea
-            pushcr      psw1
-            pop         ac
-            movrz       ac, x0, 12, 32
-            ldea        x1, .extab
-            addr        x0, x1
-            ld          x4, (x1)
-            movr.rn     x4, x4
-            jmp         .alt_hndl
-            
-            movrz       ac, ac, 8, 32
-            movr        ac, x4, 1
-            addi        x4, x4, 34
-            addea       x0, .excnames
-            ld          ac, (x0)
-            push        ac
-            ldea        ac, 4
-            push        ac
-            
-            ldea        x0, .exc_pfix
-            calls       .writeld
-            
-            movr        sp, x0
-            calls       .writeld
-            
-            addi        sp, sp, 2
-            ldea        x0, .psl
-            calls       .writeld
-            
-            addi        sp, sp, -6
-            ldea        ac, 9
-            st          ac, (sp)
-            
-            ldea        x5, -2
-            
-dump_psw:   addi        x4, x4, -1
-            addi        sp, x0, 3
-            ld          x1, (x4)
-            ldea        x2, 16
-            calls       .num2ld
-            
-            addi        sp, x0, 3
-            movr        sp, x1
-            ldea        x2, 060
-            calls       .left_pad
-            
-            movr        sp, x0
-            calls       .writeld
-            
-            incr.rn     x5, x5
-            jmp         .dump_psw
-            
-            addi        sp, sp, 6
-            ldea        x0, .crlf
-            calls       .writeld
-            ldea        x0, .crlf
-            calls       .writeld
-            
-            ld          ac, (x6)
-            st          ac, 16(x6)
-            
-            ldea        x0, 3(x6)
-            calls       .dumpregs
-            
-            ldea        x0, .crlf
-            calls       .writeld
-            ldea        x0, .msg_halted
-            calls       .writeld
-            
-            ldctl       psw1, .halt
-            ldmask      .halt
-            hlt
-
-alt_hndl:   ldea        x0, 3(x6)
-            ld          ac, (x6)
-            st          ac, 16(x6)
-            calls       (x4)
-            
-            ld          x6, .savearea
-            ldea        sp, 1(x6)
-            movr.rn     ac, ac
-            jmp         .no_retry
-            rets
-
-no_retry:   ldea        ac, .rfi_1
-            st          ac, (sp)
-            rets
-rfi_1:      retid       1
 
 tty_intr:   nioc        #030                    ; clear intr
             st          ac, .tty_acsv
@@ -185,95 +67,6 @@ dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
-
-regnames:   ds          0,   0,   "AC", 040
-            ds          040, 040, "MQ", 040
-            ds          040, 040, "XY", 040
-            ds          015, 012, "X0", 040
-            ds          040, 040, "X1", 040
-            ds          040, 040, "X2", 040
-            ds          040, 040, "X3", 040
-            ds          015, 012, "X4", 040
-            ds          040, 040, "X5", 040
-            ds          040, 040, "X6", 040
-            ds          040, 040, "X7", 040
-            ds          015, 012, "AP", 040
-            ds          040, 040, "LR", 040
-            ds          040, 040, "SP", 040
-            ds          015, 012, "14", 040
-            ds          040, 040, "15", 040
-
-excnames:   ds          "USER"
-            ds          "INST"
-            ds          "MEMX"
-            ds          "DEVX"
-            ds          "PPFR"
-            ds          "PPFW"
-            ds          "PPFS"
-            ds          "TIME"
-            ds          "DIVZ"
-            ds          "NFPU"
-            ds          "????"
-            ds          "????"
-            ds          "????"
-            ds          "????"
-            ds          "MCHK"
-            ds          "PWRX"
-
-exc_pfix:   dsn         13, 10, "An unhandled exception #"
-psl:        dsn         32, "occurred at PSL", 32
-msg_halted: dsn         "***OS/700 TERMINATED - NOTE THE ABOVE AND CONTACT ",
-                        "YOUR SERVICE REPRESENTATIVE***", 13, 10
-
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; DUMPREGS - print register contents
-        ;
-        ;   X0:     Input data address
-
-dumpregs:   save        x4, x5, x6
-
-            movr        x0, x4
-            ldea        x5, .regnames
-            ldea        x6, -16
-            
-            addi        sp, sp, -6
-            ldea        ac, 9
-            st          ac, (sp)
-            
-dumploop:   ld          ac, (x5)
-            push        ac
-            ldea        ac, 5
-            push        ac
-            incr        x5, x5
-            movr        sp, x0
-            calls       .writeld
-            
-            addi        sp, sp, 2
-            
-            addi        sp, x0, 3
-            ld          x1, (x4)
-            ldea        x2, 16
-            calls       .num2ld
-            
-            addi        sp, x0, 3
-            movr        sp, x1
-            ldea        x2, 32
-            calls       .left_pad
-            
-            movr        sp, x0
-            calls       .writeld
-            
-            incr        x4, x4
-            incr.rn     x6, x6
-            jmp         .dumploop
-            
-            ldea        x0, .crlf
-            calls       .writeld
-            ldea        x0, .crlf
-            calls       .writeld
-            
-            addi        sp, sp, 6
-            rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; LEFT_PAD - you already know
@@ -626,24 +419,12 @@ aqp_fail:   rets
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
 
-enumdone:   dw          0
-            ld          ac, .ok
-            st          ac, (x0)
-            rets
+enumdone:   xorrts      ac, ac, 1
+            retid       1
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 start:      ldea        sp, stack
-
-            ldea        x0, .extab
-            ldea        x1, .enumdone
-            st          x1, 2(x0)
-            
-            ldea        ac, .init_esa
-            st          ac, .savearea
-            
-            ldea        ac, .exc_stk1
-            st          ac, .excstack
             
             ldea        x0, .msg_banner
             calls       .writeld
@@ -651,18 +432,22 @@ start:      ldea        sp, stack
             ldea        x0, .msg_initrm
             calls       .writeld
             
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Count memory
+            
             ldea        x2, stack
             or          x2, .incptr
             push        x2
+            ldea        ac, .enumdone
+            st          ac, .exc_vec
             
 memtest:    xorr        ac, ac
             ld          xy, @(sp)
             movr.rz     ac, ac
             jmp         .memtest
             
-            ldea        x0, .extab
-            xorr        x1, x1
-            st          x1, 2(x0)
+            xorr        ac, ac
+            st          ac, .exc_vec
             
             pop         ac
             movmz       ac, x1, 9
@@ -724,25 +509,28 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, .msg_initsd
             calls       .writeld
         
-            xorr        x0, x0
+            ldea        x0, .savepool
             calls       .getreal
             st          ac, .segments
             
             movr        ac, x0
-            movms       ac, ac, 9               ; 512 descriptors
+            
+            movms       ac, ac, 9               ; 256 descriptors
+            movmz       ac, ac, 1
+            
             xorr        xy, xy
             st          xy, (x0)
             ld          xy, .cseg1
             st          xy, 1(x0)
+            st          x0, 2(x0)
+            ld          xy, .cseg2
+            st          xy, 3(x0)
             push        ac
             popcr       sdr
             
             ldea        x0, .done
             calls       .writeld
             
-            xorrts      x0, x0, 18
-            ldea        x1, tasksave(x0)
-            movr        x1, ac
             hlt
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -752,6 +540,7 @@ zero:       dw          0
 incptr:     dw          0401000000000
 
 cseg1:      dw          01600777777
+cseg2:      dw          01600001777
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -759,11 +548,3 @@ cseg1:      dw          01600777777
 
 stack:      
 coretab:    bss         0
-
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Task context segment
-
-            origin      #40000
-
-taskseg:    bss         512
-tasksave:   bss         19
