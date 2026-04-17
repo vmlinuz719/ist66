@@ -45,17 +45,17 @@ halt:       dw          0
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 tty_intr:   nioc        #030                    ; clear intr
-            st          ac, .tty_acsv
+            st          .tty_acsv
             xorrts      ac, ac, 1               ; console has data
-            st          ac, .tty_stat
-            ld          ac, .tty_acsv
+            st          .tty_stat
+            ld          .tty_acsv
             reti
 
 tty_stat:   bss         1
 tty_acsv:   bss         1
 
 crlf:       dsn         13, 10
-msg_banner: dsn         "OS/700 VERSION 1 RELEASE 0", 13, 10,
+msg_banner: dsn         "MP-700 VERSION 1 RELEASE 0", 13, 10,
                         "(C) 2026 vmlinuz719. ", 
                         "All rights reserved. Do not redistribute!",
                         13, 10, 13, 10
@@ -69,6 +69,47 @@ done:       dsn         " Done.", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MEMSET - set a block of memory to a value
+        ;
+        ;   X0:     Block address
+        ;   X1:     Size
+        ;   X2:     Value
+
+memset:     save        x3
+
+            movr        sp, x3
+            movr        x0, sp
+            
+mset_l:     st          x2, +1
+            addi.rn     x1, x1, -1
+            jmp         .mset_l
+
+            movr        x3, sp
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MEMCOPY - copy a block of memory
+        ;
+        ;   X0:     Source address
+        ;   X1:     Dest address
+        ;   X2:     Size
+
+memcopy:    dw          0
+            
+            or          x1, .incptr
+            push        x1
+            or          x0, .incptr
+            push        x0
+
+mcpy_l:     ld          @(sp)
+            st          @1(sp)
+            addi.rn     x2, x2, -1
+            jmp         .mcpy_l
+            
+            addi        sp, sp, 2
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; LEFT_PAD - you already know
         ;
         ;   X0:     Input buffer address
@@ -79,8 +120,8 @@ msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
 
 left_pad:   dw          0
 
-            ld          ac, (x1)                ; check if too big
-            sub         ac, (x0)
+            ld          (x1)                    ; check if too big
+            sub         (x0)
             movrzn.rn   ac, ac, 1, 35
             jmp         .copyfail
 
@@ -93,7 +134,7 @@ writepad:   incstb      x2, x1, 7
             incr.rn     ac, ac
             jmp         .writepad
 
-cpyinput:   ldneg       ac, (x0)                ; done if input length 0
+cpyinput:   ldneg       (x0)                    ; done if input length 0
             movr.rz     ac, ac
             rets
 
@@ -105,7 +146,7 @@ cpyiloop:   incldb      x2, x0, 7
             xorr        ac, ac
             rets
 
-copyfail:   ldea        ac, -1
+copyfail:   ldea        -1
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -121,7 +162,7 @@ num2ld:     save        mq, xy
             movr        sp, x2
             
             xorr        ac, ac                  ; init string
-            st          ac, (x0)
+            st          (x0)
             
             movr        x1, ac
             
@@ -139,7 +180,7 @@ convert:    pop         x1                      ; pop digits into string
             cmpge       x1, mq
             addi        x1, x1, 7
             incstb      x1, x0, 7
-            inctne      ac, (x2)
+            inctne      (x2)
             jmp         .convert
             
             incr        sp, sp
@@ -157,7 +198,7 @@ readld:     save        x4, x5
 
             movr        x0, x4                  ; x4: buffer
             xorr        ac, ac                  ; clear count field
-            st          ac, (x4)
+            st          (x4)
             
             movr.rz     x4, x4                  ; don't read if count 0
             rets
@@ -186,7 +227,7 @@ readloop:   rio         ac, 2, #030             ; get buffer count
             
             jmp         .readloop
 
-readdone:   ld          ac, @+1
+readdone:   ld          @+1
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -240,7 +281,7 @@ maskall:    dw          0
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
 
-test_rst:   ld          ac, (x1)
+test_rst:   ld          (x1)
             movr.rz     ac, ac
             jmp         .dont_rst
 
@@ -276,13 +317,13 @@ insque:     tstmz       (x0)                    ; no items in queue yet?
             st          x2, (x1)                ; new.next = old
             st          x1, 1(x2)               ; old.prev = new
             xorr        ac, ac                  ; new.prev = null
-            st          ac, 1(x1)
+            st          1(x1)
             
             retr
 
 enq_empty:  xorr        ac, ac                  ; no next or prev yet
-            st          ac, (x1)
-            st          ac, 1(x1)
+            st          (x1)
+            st          1(x1)
             
             st          x1, (x0)                ; head and tail same
             st          x1, 1(x0)
@@ -295,10 +336,10 @@ enq_empty:  xorr        ac, ac                  ; no next or prev yet
         ;   X0:     Queue structure
         ;   Return: Address of queue item else 0
 
-popque:     ld          ac, (x0)                ; get head
+popque:     ld          (x0)                    ; get start of queue
 
             movr.rz     ac, x1
-            retr                                ; intentional fallthrough
+            retr
 
             jmp         .delque
 
@@ -308,7 +349,7 @@ popque:     ld          ac, (x0)                ; get head
         ;   X0:     Queue structure
         ;   Return: Address of queue item else 0
 
-remque:     ld          ac, 1(x0)               ; get tail
+remque:     ld          1(x0)                   ; get end of queue
             
             movr.rz     ac, x1
             retr                                ; intentional fallthrough
@@ -438,8 +479,8 @@ start:      ldea        sp, stack
             ldea        x2, stack
             or          x2, .incptr
             push        x2
-            ldea        ac, .enumdone
-            st          ac, .exc_vec
+            ldea        .enumdone
+            st          .exc_vec
             
 memtest:    xorr        ac, ac
             ld          xy, @(sp)
@@ -447,14 +488,14 @@ memtest:    xorr        ac, ac
             jmp         .memtest
             
             xorr        ac, ac
-            st          ac, .exc_vec
+            st          .exc_vec
             
             pop         ac
             movmz       ac, x1, 9
             st          x1, .mem_size
             
             addi        sp, sp, -4
-            ldea        ac, 15
+            ldea        15
             
             movr        sp, x0
             ldea        x2, 10
@@ -470,7 +511,7 @@ memtest:    xorr        ac, ac
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Initialize REALPOOL
         
-            ld          ac, .mem_size
+            ld          .mem_size
             movrz       ac, ac, 26, 10
             xorr        x7, x7
             push        ac
@@ -504,16 +545,21 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             calls       .writeld
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Initialize segment descriptor table
+        ; Initialize a task context segment (TODO: factor this out)
         
             ldea        x0, .msg_initsd
             calls       .writeld
         
             ldea        x0, .savepool
             calls       .getreal
-            st          ac, .segments
+            st          .segments
             
             movr        ac, x0
+            ldea        x1, 1024
+            xorr        x2, x2
+            calls       .memset
+            
+            ld          x0, .segments
             
             movms       ac, ac, 9               ; 256 descriptors
             movmz       ac, ac, 1
@@ -525,6 +571,9 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             st          x0, 2(x0)
             ld          xy, .cseg2
             st          xy, 3(x0)
+            ldea        xy, taskstk
+            st          xy, savessp(x0)
+            
             push        ac
             popcr       sdr
             
@@ -533,9 +582,9 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             
             xorrts      x0, x0, 19
             ld          xy, .ok
-            st          xy, testsave(x0)
+            st          xy, savepsw0(x0)
             ld          x1, .segments
-            ld          ac, testsave(x1)
+            ld          savepsw0(x1)
             
             hlt
 
@@ -561,4 +610,14 @@ coretab:    bss         0
             origin      #40000
 
 taskseg:    bss         512
-testsave:   bss         1
+
+pagetabs:   bss         2                       ; page tables
+pages:      bss         2                       ; owned real memory
+
+savepsw0:   bss         1
+savepsw1:   bss         1
+savessp:    bss         1                       ; supervisor stack ptr
+
+            origin      #40400
+
+taskstk:    bss         1
