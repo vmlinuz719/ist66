@@ -40,7 +40,6 @@ ipl:        ldea        x0, .usr_rst
 usr_rst:    dw          start, 0740000000000
 cw:         dw          0036000000000           ; return to irql 15
 mask:       dw          02000                   ; enable console irq
-halt:       dw          0
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -67,6 +66,13 @@ dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
+
+ok:         dw          0666
+zero:       dw          0
+incptr:     dw          0401000000000
+
+cseg1:      dw          01600777777
+cseg2:      dw          01600001777
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
@@ -587,15 +593,6 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ld          savepsw0(x1)
             
             hlt
-
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-ok:         dw          0666
-zero:       dw          0
-incptr:     dw          0401000000000
-
-cseg1:      dw          01600777777
-cseg2:      dw          01600001777
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
