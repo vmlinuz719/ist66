@@ -457,6 +457,30 @@ getreal:    save        x7, lr
 aqp_fail:   rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MOVEREAL - change owner of a block
+        ;
+        ;   X0:     Address of block to transfer ownership
+        ;   X1:     New owner
+
+movereal:   save        x6, x7, lr
+
+            movrz       x0, x7, 28, 8           ; descriptor offset to x7
+            addea       x7, coretab             ; address of queue entry
+            movr        x1, x6
+
+            ld          x0, 2(x7)               ; get owning queue
+            movr        x7, x1
+            movr.rn     x0, x0                  ; dequeue if it has an owner
+            callr       .delque
+
+            movr        x6, x0
+            movr        x7, x1
+            st          x0, 2(x1)
+            callr       .insque                 ; add to destination
+
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; NEWTCS - generate a task context segment - see TASKSEG structure
         ;
         ;   Return: 0 on failure (realpool empty), else address of a page
@@ -615,7 +639,9 @@ pages:      bss         2                       ; owned real memory
 
 savepsw0:   bss         1
 savepsw1:   bss         1
-savessp:    bss         1                       ; supervisor stack ptr
+
+rstrregs:   bss         18                      ; labels to save/restore regs
+saveregs:   bss         1                       ; using calls/rets
 
             origin      #40400
 
