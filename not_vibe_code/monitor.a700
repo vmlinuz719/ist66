@@ -640,8 +640,7 @@ pages:      bss         2                       ; owned real memory
 savepsw0:   bss         1
 savepsw1:   bss         1
 
-rstrregs:   bss         18                      ; labels to save/restore regs
-saveregs:   bss         1                       ; using calls/rets
+savessp:    bss         1
 
             origin      #40400
 
