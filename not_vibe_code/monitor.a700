@@ -641,8 +641,6 @@ savepsw0:   bss         1
 savepsw1:   bss         1
 
 savessp:    bss         1
-saveuser:   bss         18                      ; user register save area
-svu_base:
 
             origin      #40400
 
