@@ -18,6 +18,8 @@ usr_save:   bss         2
 
 mem_size:   bss         1                       ; memory size
 
+svrmode:    bss         1                       ; supervisor mode
+
 realpool:   bss         1                       ; physical memory queue
 mp_end:     bss         1
 
@@ -75,6 +77,15 @@ cseg1:      dw          01600777777
 cseg2:      dw          01600001777
 
 tcslen:     dw          0377000000000
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Exception handler stub
+
+exc_stub:   tstmnz      .svrmode                ; check if already in svrmode
+            jmp         .exc_svr
+
+            inctnz      .svrmode                ; set svrmode
+            jmp         .exc_usr
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
@@ -518,6 +529,8 @@ enumdone:   xorrts      ac, ac, 1
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 start:      ldea        sp, stack
+            xorrts      ac, ac, 1
+            st          ac, .svrmode
             
             ldea        x0, .msg_banner
             calls       .writeld
