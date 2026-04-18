@@ -85,7 +85,7 @@ exc_stub:   tstmnz      .svrmode                ; check if already in svrmode
             jmp         .exc_svr
 
             inctnz      .svrmode                ; set svrmode
-            jmp         .exc_usr
+        ; need to reload SP here
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
