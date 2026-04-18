@@ -74,6 +74,8 @@ incptr:     dw          0401000000000
 cseg1:      dw          01600777777
 cseg2:      dw          01600001777
 
+tcslen:     dw          0377000000000
+
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
         ;
@@ -455,13 +457,33 @@ getreal:    save        x7, lr
 aqp_fail:   rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Double descriptor format:
+        ; NEWTCS - generate a task context segment - see TASKSEG structure
         ;
-        ;   0:      Double page table base
-        ;   1:      Key = 1, present, writable, virtual, limit = 1023
-        ;   2:      Double page table base + 512
-        ;   3:      Key = 1, present, writable, virtual,
-        ;           limit = number of active pages
+        ;   Return: 0 on failure (realpool empty), else address of a page
+
+newtcs:     save        x4
+
+            ldea        x0, .savepool
+            calls       .getreal
+
+            movr.rz     ac, x0
+            rets
+
+            movr        ac, x4
+            ldea        x1, 1024
+            xorr        x2, x2
+            calls       .memset
+
+            ld          .cseg1
+            st          1(x4)
+            st          x4, 2(x4)
+            ld          .cseg2
+            st          3(x4)
+            ldea        taskstk
+            st          savessp(x4)
+
+            movr        x4, ac
+            rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
@@ -551,35 +573,15 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             calls       .writeld
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Initialize a task context segment (TODO: factor this out)
+        ; Initialize a task context segment
         
             ldea        x0, .msg_initsd
             calls       .writeld
         
-            ldea        x0, .savepool
-            calls       .getreal
+            calls       .newtcs
             st          .segments
             
-            movr        ac, x0
-            ldea        x1, 1024
-            xorr        x2, x2
-            calls       .memset
-            
-            ld          x0, .segments
-            
-            movms       ac, ac, 9               ; 256 descriptors
-            movmz       ac, ac, 1
-            
-            xorr        xy, xy
-            st          xy, (x0)
-            ld          xy, .cseg1
-            st          xy, 1(x0)
-            st          x0, 2(x0)
-            ld          xy, .cseg2
-            st          xy, 3(x0)
-            ldea        xy, taskstk
-            st          xy, savessp(x0)
-            
+            or          .tcslen
             push        ac
             popcr       sdr
             
@@ -602,7 +604,7 @@ stack:
 coretab:    bss         0
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Task context segment
+        ; Task context segment - see NEWTCS
 
             origin      #40000
 
