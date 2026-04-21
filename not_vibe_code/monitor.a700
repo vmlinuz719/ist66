@@ -26,6 +26,11 @@ mp_end:     bss         1
 segments:   bss         1                       ; default SDT
 savepool:   bss         2                       ; SDT queue
 
+temp0:      bss         1
+temp1:      bss         1
+temp2:      bss         1
+temp3:      bss         1
+
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
             origin      1024
@@ -84,8 +89,30 @@ tcslen:     dw          0377000000000
 exc_stub:   tstmnz      .svrmode                ; check if already in svrmode
             jmp         .exc_svr
 
-            inctnz      .svrmode                ; set svrmode
-        ; need to reload SP here
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Exception handler stub - user entry
+        ;
+        ;   0. Set svrmode flag
+        ;   1. Save all registers
+        ;   2. Set up user return trampoline call
+
+            inctnz      .svrmode                ; set svr, test always passes
+        
+            st          sp, .temp0
+            st          x0, .temp1
+            xorrts      x0, x0, 19              ; addressability of taskseg
+            ld          sp, savessp(x0)
+            ld          x0, .temp1
+            
+            calls       .1                      ; save all
+            dw          #ffff
+            ld          .temp0                  ; including old sp
+            st          15(sp)
+            
+            ldea        .usr_ret                ; user return trampoline
+            st          (sp)
+            
+            
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
