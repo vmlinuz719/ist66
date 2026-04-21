@@ -12,7 +12,8 @@ tty_vec:    dw          tty_intr, 0
 
             origin      32
 
-saves:      bss         0
+saves:      bss         1
+saves1:     bss         1
 
             origin      62
 
@@ -113,7 +114,7 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
             ld          .temp0                  ; including old sp
             st          15(sp)
             
-            ldea        .exc_ret                ; exception return trampoline
+            ldea        .exc_tpl                ; exception return trampoline
             st          (sp)
             
             stctl       psw1, .temp0            ; stash the saved psw's
@@ -121,13 +122,16 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
             movrz       ac, x0, 8, 32
             ld          xy, saves(x0)
             st          xy, 18(sp)
-            incr        x0, x0
-            ld          xy, saves(x0)
+            ld          xy, saves1(x0)
             st          xy, 19(sp)
            
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; At this point all the necessary state is saved, so we need to enter
         ; an exception handler at priority level 1. TODO
+
+exc_tpl:    ldctl       psw1, .zero
+            push        ac
+            ld          
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
