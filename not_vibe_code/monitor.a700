@@ -74,10 +74,12 @@ msg_banner: dsn         "MP-700 VERSION 1 RELEASE 0", 13, 10,
 msg_initrm: dsn         "Init RMDETECT... "
 msg_initmp: dsn         "Init REALPOOL"
 msg_initsd: dsn         "Init SEGMENTS..."
+msg_initeh: dsn         "Init EXPTHDLR..."
 dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
+msg_except: dsn         "EXCEPTION!!!", 13, 10
 
 ok:         dw          0666
 zero:       dw          0
@@ -122,6 +124,7 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
             stctl       psw1, .temp0            ; stash the saved psw's
             ld          .temp0
             movrz       ac, x0, 8, 32
+            addr        x0, x0
             ld          xy, saves(x0)
             st          xy, 18(sp)
             ld          xy, saves1(x0)
@@ -130,13 +133,20 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; At this point all the necessary state is saved, so we need to enter
         ; an exception handler at priority level 1. TODO
+        
+            ldea        x0, .msg_except
+            calls       .writeld
+            xorrts      ac, ac, 1
+            rets
 
 exc_tpl:    ldctl       psw1, .zero
             
-            ldea        #ffff
-            push        ac
-            ldea        ac, .etp_next
-            push        ac
+            ldea        xy, #ffff
+            push        xy
+            ldea        xy, .etp_next
+            movr.rn     ac, ac
+            ldea        xy, .etp_skip
+            push        xy
             
             ld          18(sp)
             st          .saves
@@ -148,6 +158,10 @@ exc_tpl:    ldctl       psw1, .zero
 etp_next:   dectnz      .svrmode
             nop
             reti
+
+etp_skip:   dectnz      .svrmode
+            nop
+            retid       1
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
@@ -576,7 +590,8 @@ newtcs:     save        x4
             st          x4, 2(x4)
             ld          .cseg2
             st          3(x4)
-            ldea        taskstk
+            xorrts      x0, x0, 19
+            ldea        taskstk(x0)
             st          savessp(x4)
 
             movr        x4, ac
@@ -591,8 +606,6 @@ enumdone:   xorrts      ac, ac, 1
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 start:      ldea        sp, stack
-            xorrts      ac, ac, 1
-            st          ac, .svrmode
             
             ldea        x0, .msg_banner
             calls       .writeld
@@ -687,12 +700,20 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, .done
             calls       .writeld
             
-            xorrts      x0, x0, 19
-            ld          xy, .ok
-            st          xy, savepsw0(x0)
-            ld          x1, .segments
-            ld          savepsw0(x1)
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Initialize exception handler infrastructure
+        
+            ldea        x0, .msg_initeh
+            calls       .writeld
             
+            ldea        .exc_stub
+            st          .exc_vec
+            udiv        .zero
+            
+            ldea        x0, .done
+            calls       .writeld
+            
+            ld          ac, .ok
             hlt
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
