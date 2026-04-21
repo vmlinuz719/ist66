@@ -116,7 +116,7 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
             ldea        .exc_ret                ; exception return trampoline
             st          (sp)
             
-            stctl       psw1, .temp0            ; push the saved psw's
+            stctl       psw1, .temp0            ; stash the saved psw's
             ld          .temp0
             movrz       ac, x0, 8, 32
             ld          xy, saves(x0)
