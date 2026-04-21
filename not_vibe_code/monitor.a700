@@ -10,6 +10,10 @@ exc_vec:    bss         1
 
 tty_vec:    dw          tty_intr, 0
 
+            origin      32
+
+saves:      bss         0
+
             origin      62
 
 usr_save:   bss         2
@@ -18,7 +22,7 @@ usr_save:   bss         2
 
 mem_size:   bss         1                       ; memory size
 
-svrmode:    bss         1                       ; supervisor mode
+svrmode:    bss         1                       ; supervisor mode / exc depth
 
 realpool:   bss         1                       ; physical memory queue
 mp_end:     bss         1
@@ -86,33 +90,44 @@ tcslen:     dw          0377000000000
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Exception handler stub
 
-exc_stub:   tstmnz      .svrmode                ; check if already in svrmode
+exc_stub:   st          sp, .temp0
+            tstmnz      .svrmode                ; check if already in svrmode
             jmp         .exc_svr
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Exception handler stub - user entry
+        ; Exception handler
         ;
-        ;   0. Set svrmode flag
+        ;   0. Save saved PSW's
         ;   1. Save all registers
-        ;   2. Set up user return trampoline call
-
-            inctnz      .svrmode                ; set svr, test always passes
+        ;   2. Set up return trampoline call
         
-            st          sp, .temp0
+exc_hndl:   inctnz      .svrmode                ; increment exception depth
             st          x0, .temp1
             xorrts      x0, x0, 19              ; addressability of taskseg
             ld          sp, savessp(x0)
             ld          x0, .temp1
             
+exc_svr:    addi        sp, sp, -2              ; space for psw's
             calls       .1                      ; save all
             dw          #ffff
             ld          .temp0                  ; including old sp
             st          15(sp)
             
-            ldea        .usr_ret                ; user return trampoline
+            ldea        .exc_ret                ; exception return trampoline
             st          (sp)
             
-            
+            stctl       psw1, .temp0            ; push the saved psw's
+            ld          .temp0
+            movrz       ac, x0, 8, 32
+            ld          xy, saves(x0)
+            st          xy, 18(sp)
+            incr        x0, x0
+            ld          xy, saves(x0)
+            st          xy, 19(sp)
+           
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; At this point all the necessary state is saved, so we need to enter
+        ; an exception handler at priority level 1. TODO
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
