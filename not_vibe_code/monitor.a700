@@ -116,6 +116,8 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
             
             ldea        .exc_tpl                ; exception return trampoline
             st          (sp)
+            xorr        ac, ac
+            st          1(sp)
             
             stctl       psw1, .temp0            ; stash the saved psw's
             ld          .temp0
@@ -130,8 +132,20 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
         ; an exception handler at priority level 1. TODO
 
 exc_tpl:    ldctl       psw1, .zero
+            
+            ldea        #ffff
             push        ac
-            ld          
+            ldea        ac, .etp_next
+            push        ac
+            
+            ld          18(sp)
+            st          .saves
+            ld          19(sp)
+            st          .saves1
+            
+            rets
+            
+etp_next:   reti
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MEMSET - set a block of memory to a value
