@@ -79,7 +79,8 @@ dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
-msg_except: dsn         "EXCEPTION!!!", 13, 10
+msg_except: dsn         " Caught exception successfully; ",
+                        "handlers not implemented yet.", 13, 10
 
 ok:         dw          0666
 zero:       dw          0
