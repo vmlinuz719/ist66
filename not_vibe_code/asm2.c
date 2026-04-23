@@ -169,6 +169,11 @@ uint64_t assembler_set(assembler_ctx_t *ctx, uint64_t new_pc) {
     return ctx->asm_offset;
 }
 
+uint64_t assembler_reloc(assembler_ctx_t *ctx, uint64_t new_pc) {
+    ctx->pc = new_pc;
+    return ctx->asm_offset;
+}
+
 uint64_t assembler_open(assembler_ctx_t *ctx, uint64_t start_pc) {
     ctx->work_area[0] = start_pc;
     
@@ -678,6 +683,19 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
                 value |= 1L << (15 - reg);
             } while (evt == LIST_ITEM);
             ctx->work_area[assembler_next(ctx)] = value;
+        } break;
+        
+        case 4: { // reloc
+            read_symbol(ctx);
+            if (get_symbol_type(ctx) != SYMBOL) return -1;
+            
+            uint64_t new_origin;
+            int status = parse_number_or_label(
+                ctx, ctx->buf, 36, 0, 1, &new_origin, NULL
+            );
+            if (status == -1) return -1;
+            
+            assembler_reloc(ctx, new_origin);
         } break;
     }
     return 0;
