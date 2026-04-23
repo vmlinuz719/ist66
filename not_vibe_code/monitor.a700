@@ -31,6 +31,10 @@ mp_end:     bss         1
 segments:   bss         1                       ; default SDT
 savepool:   bss         2                       ; SDT queue
 
+ehtable:    bss         1                       ; pointer to supervisor
+                                                ; exception handler table
+ehdefault:  bss         32                      ; default handlers pc/psw1
+
 temp0:      bss         1
 temp1:      bss         1
 temp2:      bss         1
@@ -80,8 +84,6 @@ dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
-msg_except: dsn         " Caught exception successfully; ",
-                        "handlers not implemented yet.", 13, 10
 
 ok:         dw          0666
 zero:       dw          0
@@ -136,15 +138,19 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
             ld          xy, saves1(x0)
             st          xy, 19(sp)
            
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; At this point all the necessary state is saved, so we need to enter
-        ; an exception handler at priority level 1. TODO
-        
-            ldea        x0, .msg_except
-            calls       .writeld
+            ld          .temp0
+            movrz       ac, x0, 12, 32          ; exception number
             xorrts      ac, ac, 1
-            ; hlt
+            adds        x0, x0, x1
+            add         x1, .ehtable
+            ld          x2, (x1)
+            
+            movr.rz     x2, x2                  ; bail if no handler
             rets
+            
+            ldctl       psw1, 1(x1)
+            xorr        ac, ac
+            jmp         (x2)
 
 exc_tpl:    ldctl       psw1, .zero
             
@@ -715,7 +721,8 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             
             ldea        .exc_stub
             st          .exc_vec
-            udiv        .zero
+            ldea        x0, .ehdefault
+            st          x0, .ehtable
             
             ldea        x0, .done
             calls       .writeld
