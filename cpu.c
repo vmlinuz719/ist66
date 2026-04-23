@@ -183,6 +183,7 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
     uint8_t seg_key = seg->tag >> 28;
     
     if (
+        key &&
         seg_key != 0xFE &&
         seg_key != 0xFF &&
         seg_key != key
@@ -273,6 +274,7 @@ uint64_t write_vmem(
     uint8_t seg_key = seg->tag >> 28;
     
     if (
+        key &&
         seg_key != 0xFF &&
         seg_key != key
     ) {

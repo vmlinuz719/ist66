@@ -74,7 +74,8 @@ msg_banner: dsn         "MP-700 VERSION 1 RELEASE 0", 13, 10,
 msg_initrm: dsn         "Init RMDETECT... "
 msg_initmp: dsn         "Init REALPOOL"
 msg_initsd: dsn         "Init SEGMENTS..."
-msg_initeh: dsn         "Init EXPTHDLR..."
+msg_initeh: dsn         "Init EXCEPTHD..."
+msg_initum: dsn         "Init USERMODE (test)..."
 dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
@@ -88,6 +89,10 @@ incptr:     dw          0401000000000
 
 cseg1:      dw          01600777777
 cseg2:      dw          01600001777
+
+vseg1:      dw          03500001777
+vseg1a:     dw          03400001777
+vseg2:      dw          03500000000
 
 tcslen:     dw          0377000000000
 
@@ -138,6 +143,7 @@ exc_svr:    addi        sp, sp, -2              ; space for psw's
             ldea        x0, .msg_except
             calls       .writeld
             xorrts      ac, ac, 1
+            ; hlt
             rets
 
 exc_tpl:    ldctl       psw1, .zero
@@ -713,8 +719,53 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             
             ldea        x0, .done
             calls       .writeld
+        
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Initialize usermode (test)
+        
+            ldea        x0, .msg_initum
+            calls       .writeld
+            
+            xorrts      x7, x7, 19              ; addressability of taskseg
+            ldea        x0, pagetabs(x7)
+            calls       .getreal
+            
+            st          4(x7)                   ; start at #80000
+            addi        ac, ac, 512             ; rest of page table
+            st          6(x7)
+            ld          .vseg1a                 ; 1024 words, writable
+            st          5(x7)
+            ld          .vseg2
+            st          7(x7)
+            
+            xorrts      x6, x6, 20              ; invalidate #80000-C0000
+            invlsg      (x6)
+            xorrts      ac, ac, 19
+            adds        ac, x6, x1
+            invlsg      (x1)
+            
+            ldea        x0, pages(x7)           ; get two pages
+            calls       .getreal
+            movr        ac, x5
+            
+            movr        ac, x0                  ; this memset is undefined
+            ldea        x1, 1024                ; behavior - but we can be
+            ld          x2, .ok                 ; reasonably sure it works for
+            calls       .memset                 ; this test
+            
+            bisi        x5, x5, #180            ; present, writable
+            st          x5, (x6)
+            addi        x5, ac, 512
+            st          1(x6)
+            
+            ld          .vseg1                  ; 1024 words, writable, paged
+            st          5(x7)
+            invlsg      (x6)
+            
+            ldea        x0, .done
+            calls       .writeld
 
-            ld          ac, .ok
+            ld          ac, (x6)
             hlt
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
