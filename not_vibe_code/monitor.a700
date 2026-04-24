@@ -214,8 +214,7 @@ mcpy_l:     ld          @(sp)
             addi.rn     x2, x2, -1
             jmp         .mcpy_l
             
-            addi        sp, sp, 2
-            rets
+            retsd       2
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; LEFT_PAD - you already know
