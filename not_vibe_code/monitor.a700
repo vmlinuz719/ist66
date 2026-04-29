@@ -511,6 +511,10 @@ freereal:   save        x7, lr
             ld          x0, 2(x7)               ; get owning queue
             cmpne       x0, x1                  ; check if match
             jmp         .rlp_fail
+            
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+            
             movr        x7, x1
             movr.rn     x0, x0                  ; dequeue if it has an owner
             callr       .delque
@@ -519,6 +523,8 @@ freereal:   save        x7, lr
             movr        x7, x1
             st          x0, 2(x1)
             callr       .insque                 ; add to realpool
+            
+            popcr       psw1
             
             xorrts      ac, ac, 1
             rets
@@ -538,6 +544,10 @@ getreal:    save        x7, lr
             movr        x0, x7                  ; save argument
             
             ldea        x0, .realpool
+            
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+            
             callr       .remque
             movr.rz     ac, ac
             jmp         .aqp_fail               ; did we get anything
@@ -553,7 +563,8 @@ getreal:    save        x7, lr
             subrrs      xy, x7, 8, 8
             movr        x7, ac
 
-aqp_fail:   rets
+aqp_fail:   popcr       psw1
+            rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MOVEREAL - change owner of a block
@@ -567,9 +578,13 @@ movereal:   save        x6, x7, lr
             addea       x7, coretab             ; address of queue entry
             movr        x1, x6
 
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+
             ld          x0, 2(x7)               ; get owning queue
             movr        x7, x1
             movr.rn     x0, x0                  ; dequeue if it has an owner
+
             callr       .delque
 
             movr        x6, x0
@@ -577,6 +592,7 @@ movereal:   save        x6, x7, lr
             st          x0, 2(x1)
             callr       .insque                 ; add to destination
 
+            popcr       psw1
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
