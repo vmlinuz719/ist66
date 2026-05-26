@@ -98,6 +98,8 @@ vseg2:      dw          03500000000
 
 tcslen:     dw          0377000000000
 
+crc_poly:   dw          #1000000fc
+
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Exception handler stub
 
@@ -626,6 +628,33 @@ newtcs:     save        x4
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MKCRCTAB - make CRC-36 table for 9-bit bytes
+        ;
+        ;   X0:     Address of table
+        ;   X1:     CRC-36 polynomial
+
+mkcrctab:   dw          0
+
+            xorr        mq, mq                  ; mq -> count register, 0 to 511
+
+crc_nine:   movr        mq, ac
+            ldea        xy, 9                   ; iterate over 9 bits
+
+crc_bit:    movrtz.cn   ac, ac, 36
+            xorr        x1, ac
+            addi.rn     xy, xy, -1
+            jmp         .crc_bit
+
+            adds        mq, x0, x2
+            st          ac, (x2)
+
+            incr        mq, mq
+            addin.rn    mq, mq, -512
+            jmp         .crc_nine
+
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
 
 enumdone:   xorrts      ac, ac, 1
@@ -769,6 +798,7 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, pages(x7)           ; get two pages
             calls       .getreal
             movr        ac, x5
+            movr        ac, x4                  ; save (R7) for testing
             
             movr        ac, x0                  ; this memset is undefined
             ldea        x1, 1024                ; behavior - but we can be
@@ -787,7 +817,12 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, .done
             calls       .writeld
 
-            ld          ac, (x6)
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+            xorrts      x0, x0, 20
+            ld          x1, .crc_poly
+            calls       .mkcrctab
+
             hlt
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
