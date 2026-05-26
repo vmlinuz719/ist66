@@ -84,6 +84,9 @@ dot:        dsn         "."
 bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
+msg_licens: dsn         13, 10,
+                        "        *** COPYRIGHT VIOLATION DETECTED ***", 13, 10,
+                        "        ***  STARTUP WILL NOT CONTINUE!  ***", 13, 10
 
 ok:         dw          0666
 zero:       dw          0
@@ -99,6 +102,7 @@ vseg2:      dw          03500000000
 tcslen:     dw          0377000000000
 
 crc_poly:   dw          #8000000fc
+banner_crc: dw          0355510514236
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Exception handler stub
@@ -628,17 +632,17 @@ newtcs:     save        x4
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; MKCRCTAB - make CRC-36 table for 9-bit bytes
+        ; MKCRCTAB - make CRC-36 table for 7-bit bytes
         ;
         ;   X0:     Address of table
         ;   X1:     CRC-36 polynomial
 
 mkcrctab:   dw          0
 
-            xorr        mq, mq                  ; mq -> count register, 0 to 511
+            xorr        mq, mq                  ; count register, 0 to 127
 
-crc_nine:   movr        mq, ac
-            ldea        xy, 9                   ; iterate over 9 bits
+crc_seven:  movr        mq, ac
+            ldea        xy, 7                   ; iterate over 7 bits
 
 crc_bit:    movrtz.cn   ac, ac, 36
             xorr        x1, ac
@@ -649,9 +653,34 @@ crc_bit:    movrtz.cn   ac, ac, 36
             st          ac, (x2)
 
             incr        mq, mq
-            addin.rn    mq, mq, -512
-            jmp         .crc_nine
+            addin.rn    mq, mq, -128
+            jmp         .crc_seven
 
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; CRC36B7 - calculate CRC-36 for a 7-bit length+data string
+        ;
+        ;   X0:     Address of string
+        ;   X1:     Address of CRC-36 table
+        ;
+        ;   Return: CRC-36
+
+crc36b7:    dw          0
+
+            xorms       ac, ac, 36              ; initialize remainder to -1
+            ldneg       xy, (x0)                ; get count
+
+c36b7_l:    incldb      x2, x0, 7               ; get data
+            xormz       ac, x2, 29              ; get table index
+            movrz       ac, ac, 29, 7           ; shift remainder 7 bits
+            addr        x1, x2                  ; xor with table value
+            xor         ac, (x2)
+            
+            incr.rn     xy, xy
+            jmp         .c36b7_l
+            
+            comr        ac, ac
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -818,11 +847,25 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             calls       .writeld
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Piracy check...
 
             xorrts      x0, x0, 20
             ld          x1, .crc_poly
             calls       .mkcrctab
+            
+            xorrts      x1, x1, 20
+            ldea        x0, .msg_banner
+            calls       .crc36b7
+            movr        ac, x5                  ; save (R8) for testing
+            
+            sub         ac, .banner_crc
+            movr.rn     ac, ac
+            jmp         .lic_fail
 
+            hlt
+            
+lic_fail:   ldea        x0, .msg_licens
+            calls       .writeld
             hlt
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
