@@ -85,7 +85,7 @@ bang:       dsn         "!"
 done:       dsn         " Done.", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
 msg_licens: dsn         13, 10,
-                        "        *** COPYRIGHT VIOLATION DETECTED ***", 13, 10,
+                        "        ***  LICENSE VIOLATION DETECTED  ***", 13, 10,
                         "        ***  STARTUP WILL NOT CONTINUE!  ***", 13, 10
 
 ok:         dw          0666
