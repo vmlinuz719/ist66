@@ -1560,7 +1560,7 @@ int main(int argc, char *argv[]) {
     
     assembler_close(assembler);
     
-    output_r(work_area, assembler->current_label, stdout);
+    output_c(work_area, assembler->current_label, stdout);
     
     delete_assembler(assembler);
     return 0;

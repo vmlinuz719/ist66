@@ -5,17 +5,11 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
-#include <SDL2/SDL.h>
 
 #include "alu.h"
 #include "fpu.h"
 #include "cpu.h"
-#include "ppt.h"
-#include "pch.h"
-#include "lpt.h"
 #include "tty.h"
-#include "panel.h"
-#include "bishop.h"
 
 seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
     uint8_t cache_row = selector & 0x1F;
@@ -2312,7 +2306,7 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
 void *run(void *vctx) {
     ist66_cu_t *cpu = (ist66_cu_t *) vctx;
     
-    fprintf(stderr, "CPU: starting\n");
+    // fprintf(stderr, "CPU: starting\n");
     
     do {
         if (cpu->throttle) {
@@ -2383,8 +2377,8 @@ void *run(void *vctx) {
     } while (!cpu->exit || cpu->do_edit);
     
     cpu->running = 0;
-    fprintf(stderr, "CPU: halted, code %012lo after %ld instructions\n", 
-        cpu->stop_code, cpu->cycles);
+    //fprintf(stderr, "CPU: halted, code %012lo after %ld instructions\n", 
+    //    cpu->stop_code, cpu->cycles);
     cpu->cycles = 0;
     return NULL;
 }
@@ -2402,10 +2396,11 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     cpu->mask = 0xFFFF;
     cpu->min_pending = 0xFFFF;
     cpu->exit = 1;
+    cpu->c[0] = 1024;
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
-    fprintf(stderr, "CPU: RDC700 %ldW memory, %d devices\n", mem_size, max_io);
+    // fprintf(stderr, "CPU: RDC700 %ldW memory, %d devices\n", mem_size, max_io);
 }
 
 void start_cpu(ist66_cu_t *cpu, int do_step) {
@@ -2455,7 +2450,7 @@ void destroy_cpu(ist66_cu_t *cpu) {
     pthread_mutex_destroy(&cpu->lock);
     pthread_cond_destroy(&cpu->intr_cond);
     
-    fprintf(stderr, "CPU: deinitialized\n");
+    // fprintf(stderr, "CPU: deinitialized\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -2463,194 +2458,568 @@ int main(int argc, char *argv[]) {
     
     
     
-    init_cpu(&cpu, 262144, 512);
+    init_cpu(&cpu, 32768, 512);
 
-    init_panel(&cpu, 0);
-    init_bishop(&cpu, 32);
+    // init_panel(&cpu, 0);
+    // init_bishop(&cpu, 32);
 
 
-    init_ppt_ex(&cpu, 012, 9, "monitor.ppt");
-    init_lpt(&cpu, 013, 8, stdout);
+    // init_ppt_ex(&cpu, 012, 9, "monitor.ppt");
+    // init_lpt(&cpu, 013, 8, stdout);
     // init_pch(&cpu, 014, 6);
     init_tty(&cpu, 060, 10, 8080);
     
-    char cmd[512];
-    int running = 1;
-    uint64_t ptr = 0;
+    // char cmd[512];
+    // int running = 1;
+    // uint64_t ptr = 0;
     
-    start_render(&(cpu.render_ctx));
-    
-    printf("Ready. Relocatable loader at 01000:\n");
-    
-    printf("    640000,370012\n");
-    printf("    704212,004400\n");
-    printf("    740032,120023\n");
-    printf("    740032,020001\n");
-    printf("    640000,560012\n");
-    printf("    000002,777777\n");
-    printf("    640100,200012\n");
-    printf("    722130,577600\n");
-    printf("    000002,777771\n");
-    printf("    700011,020006\n");
-    printf("    742010,300000\n");
-    printf("    000002,777771\n");
-    printf("    704214,500000\n");
-    printf("    700650,100000\n");
-    printf("    053016,000001\n");
-    printf("    000002,777764\n");
+    // start_render(&(cpu.render_ctx));
         
-    cpu.memory[512] = 0640000370012;
-    cpu.memory[513] = 0704212004400;
-    cpu.memory[514] = 0740032120023;
-    cpu.memory[515] = 0740032020001;
-    cpu.memory[516] = 0640000560012;
-    cpu.memory[517] = 0000002777777;
-    cpu.memory[518] = 0640100200012;
-    cpu.memory[519] = 0722130577600;
-    cpu.memory[520] = 0000002777771;
-    cpu.memory[521] = 0700011020006;
-    cpu.memory[522] = 0742010300000;
-    cpu.memory[523] = 0000002777771;
-    cpu.memory[524] = 0704214500000;
-    cpu.memory[525] = 0700650100000;
-    cpu.memory[526] = 0053016000001;
-    cpu.memory[527] = 0000002777764;
+    cpu.memory[20] = 0000000002014;
+    cpu.memory[21] = 0000000000000;
+    cpu.memory[1024] = 0043142000010;
+    cpu.memory[1025] = 0043202776075;
+    cpu.memory[1026] = 0052003000000;
+    cpu.memory[1027] = 0053004000000;
+    cpu.memory[1028] = 0052003000001;
+    cpu.memory[1029] = 0053004000001;
+    cpu.memory[1030] = 0074042000004;
+    cpu.memory[1031] = 0010042000004;
+    cpu.memory[1032] = 0000000002653;
+    cpu.memory[1033] = 0740000000000;
+    cpu.memory[1034] = 0036000000000;
+    cpu.memory[1035] = 0000000002000;
+    cpu.memory[1036] = 0640000570060;
+    cpu.memory[1037] = 0053002000006;
+    cpu.memory[1038] = 0740032020001;
+    cpu.memory[1039] = 0053002000003;
+    cpu.memory[1040] = 0052002000003;
+    cpu.memory[1041] = 0010000000000;
+    cpu.memory[1044] = 0000000000002;
+    cpu.memory[1045] = 0064240000000;
+    cpu.memory[1046] = 0000000000136;
+    cpu.memory[1047] = 0466405533540;
+    cpu.memory[1048] = 0301012642644;
+    cpu.memory[1049] = 0516231747100;
+    cpu.memory[1050] = 0305012242630;
+    cpu.memory[1051] = 0426032342500;
+    cpu.memory[1052] = 0300321224206;
+    cpu.memory[1053] = 0245006230144;
+    cpu.memory[1054] = 0331016666730;
+    cpu.memory[1055] = 0647356575156;
+    cpu.memory[1056] = 0305625620202;
+    cpu.memory[1057] = 0663304071322;
+    cpu.memory[1058] = 0637216471500;
+    cpu.memory[1059] = 0713136362744;
+    cpu.memory[1060] = 0733134427100;
+    cpu.memory[1061] = 0423364067336;
+    cpu.memory[1062] = 0721016262710;
+    cpu.memory[1063] = 0647476471322;
+    cpu.memory[1064] = 0613536462502;
+    cpu.memory[1065] = 0064241505000;
+    cpu.memory[1066] = 0000000000021;
+    cpu.memory[1067] = 0447355172100;
+    cpu.memory[1068] = 0512330442650;
+    cpu.memory[1069] = 0426072427134;
+    cpu.memory[1070] = 0271000000000;
+    cpu.memory[1071] = 0000000000015;
+    cpu.memory[1072] = 0447355172100;
+    cpu.memory[1073] = 0512130146240;
+    cpu.memory[1074] = 0476371400000;
+    cpu.memory[1075] = 0000000000020;
+    cpu.memory[1076] = 0447355172100;
+    cpu.memory[1077] = 0516130746612;
+    cpu.memory[1078] = 0472512327134;
+    cpu.memory[1079] = 0270000000000;
+    cpu.memory[1080] = 0000000000020;
+    cpu.memory[1081] = 0447355172100;
+    cpu.memory[1082] = 0426610342640;
+    cpu.memory[1083] = 0522210427134;
+    cpu.memory[1084] = 0270000000000;
+    cpu.memory[1085] = 0000000000027;
+    cpu.memory[1086] = 0447355172100;
+    cpu.memory[1087] = 0526470551232;
+    cpu.memory[1088] = 0476110520120;
+    cpu.memory[1089] = 0723136372122;
+    cpu.memory[1090] = 0271345600000;
+    cpu.memory[1091] = 0000000000001;
+    cpu.memory[1092] = 0270000000000;
+    cpu.memory[1093] = 0000000000001;
+    cpu.memory[1094] = 0204000000000;
+    cpu.memory[1095] = 0000000000010;
+    cpu.memory[1096] = 0202115767312;
+    cpu.memory[1097] = 0270321200000;
+    cpu.memory[1098] = 0000000000022;
+    cpu.memory[1099] = 0535012242602;
+    cpu.memory[1100] = 0461011542632;
+    cpu.memory[1101] = 0476453120236;
+    cpu.memory[1102] = 0454321200000;
+    cpu.memory[1103] = 0000000000136;
+    cpu.memory[1104] = 0064244020100;
+    cpu.memory[1105] = 0201004020100;
+    cpu.memory[1106] = 0251245220206;
+    cpu.memory[1107] = 0476413151222;
+    cpu.memory[1108] = 0436212420254;
+    cpu.memory[1109] = 0446371440650;
+    cpu.memory[1110] = 0446371620210;
+    cpu.memory[1111] = 0426510541650;
+    cpu.memory[1112] = 0426104025124;
+    cpu.memory[1113] = 0250321220100;
+    cpu.memory[1114] = 0201004020100;
+    cpu.memory[1115] = 0201245225100;
+    cpu.memory[1116] = 0202472440644;
+    cpu.memory[1117] = 0522532020256;
+    cpu.memory[1118] = 0446311420234;
+    cpu.memory[1119] = 0476504041636;
+    cpu.memory[1120] = 0472511147252;
+    cpu.memory[1121] = 0425024020124;
+    cpu.memory[1122] = 0251241505000;
+    cpu.memory[1123] = 0000000000666;
+    cpu.memory[1124] = 0000000000000;
+    cpu.memory[1125] = 0401000000000;
+    cpu.memory[1126] = 0001600777777;
+    cpu.memory[1127] = 0001600001777;
+    cpu.memory[1128] = 0003500001777;
+    cpu.memory[1129] = 0003400001777;
+    cpu.memory[1130] = 0003500000000;
+    cpu.memory[1131] = 0377000000000;
+    cpu.memory[1132] = 0400000000374;
+    cpu.memory[1133] = 0355510514236;
+    cpu.memory[1134] = 0153466602421;
+    cpu.memory[1135] = 0000000000002;
+    cpu.memory[1136] = 0455740000000;
+    cpu.memory[1137] = 0000000000007;
+    cpu.memory[1138] = 0352410151646;
+    cpu.memory[1139] = 0064240000000;
+    cpu.memory[1140] = 0000000000007;
+    cpu.memory[1141] = 0352150144630;
+    cpu.memory[1142] = 0064240000000;
+    cpu.memory[1143] = 0000002001000;
+    cpu.memory[1144] = 0053642775760;
+    cpu.memory[1145] = 0000202775710;
+    cpu.memory[1146] = 0000002000006;
+    cpu.memory[1147] = 0000102775706;
+    cpu.memory[1148] = 0053142775755;
+    cpu.memory[1149] = 0743172020023;
+    cpu.memory[1150] = 0052643001006;
+    cpu.memory[1151] = 0052142775752;
+    cpu.memory[1152] = 0715670077776;
+    cpu.memory[1153] = 0000702000001;
+    cpu.memory[1154] = 0000000177777;
+    cpu.memory[1155] = 0052002775745;
+    cpu.memory[1156] = 0053015000017;
+    cpu.memory[1157] = 0043002000027;
+    cpu.memory[1158] = 0053015000000;
+    cpu.memory[1159] = 0740030000000;
+    cpu.memory[1160] = 0053015000001;
+    cpu.memory[1161] = 0075042775737;
+    cpu.memory[1162] = 0052002775736;
+    cpu.memory[1163] = 0700151004010;
+    cpu.memory[1164] = 0703170000000;
+    cpu.memory[1165] = 0052103000040;
+    cpu.memory[1166] = 0053115000022;
+    cpu.memory[1167] = 0052103000041;
+    cpu.memory[1168] = 0053115000023;
+    cpu.memory[1169] = 0052002775727;
+    cpu.memory[1170] = 0700151004014;
+    cpu.memory[1171] = 0740032020001;
+    cpu.memory[1172] = 0703170040400;
+    cpu.memory[1173] = 0056202775662;
+    cpu.memory[1174] = 0052244000000;
+    cpu.memory[1175] = 0705250500000;
+    cpu.memory[1176] = 0000740000000;
+    cpu.memory[1177] = 0074044000001;
+    cpu.memory[1178] = 0740030000000;
+    cpu.memory[1179] = 0000005000000;
+    cpu.memory[1180] = 0074042777710;
+    cpu.memory[1181] = 0043100177777;
+    cpu.memory[1182] = 0053117000001;
+    cpu.memory[1183] = 0043102000011;
+    cpu.memory[1184] = 0700010400000;
+    cpu.memory[1185] = 0043102000012;
+    cpu.memory[1186] = 0053117000001;
+    cpu.memory[1187] = 0052015000022;
+    cpu.memory[1188] = 0053002775574;
+    cpu.memory[1189] = 0052015000023;
+    cpu.memory[1190] = 0053002775573;
+    cpu.memory[1191] = 0000740000000;
+    cpu.memory[1192] = 0000142775631;
+    cpu.memory[1193] = 0000002000001;
+    cpu.memory[1194] = 0010000000000;
+    cpu.memory[1195] = 0000142775626;
+    cpu.memory[1196] = 0000002000001;
+    cpu.memory[1197] = 0010000000001;
+    cpu.memory[1198] = 0000000001000;
+    cpu.memory[1199] = 0715310000000;
+    cpu.memory[1200] = 0703650000000;
+    cpu.memory[1201] = 0053256000001;
+    cpu.memory[1202] = 0704230477777;
+    cpu.memory[1203] = 0000002777776;
+    cpu.memory[1204] = 0706650000000;
+    cpu.memory[1205] = 0000740000000;
+    cpu.memory[1206] = 0000000000000;
+    cpu.memory[1207] = 0062202777656;
+    cpu.memory[1208] = 0053217000001;
+    cpu.memory[1209] = 0062142777654;
+    cpu.memory[1210] = 0053157000001;
+    cpu.memory[1211] = 0052035000000;
+    cpu.memory[1212] = 0053035000001;
+    cpu.memory[1213] = 0705270477777;
+    cpu.memory[1214] = 0000002777775;
+    cpu.memory[1215] = 0000740000002;
+    cpu.memory[1216] = 0000000000000;
+    cpu.memory[1217] = 0052004000000;
+    cpu.memory[1218] = 0055003000000;
+    cpu.memory[1219] = 0720011404301;
+    cpu.memory[1220] = 0000002000020;
+    cpu.memory[1221] = 0700010500000;
+    cpu.memory[1222] = 0000002000005;
+    cpu.memory[1223] = 0700004000000;
+    cpu.memory[1224] = 0104244000007;
+    cpu.memory[1225] = 0700014400000;
+    cpu.memory[1226] = 0000002777776;
+    cpu.memory[1227] = 0051003000000;
+    cpu.memory[1228] = 0700010500000;
+    cpu.memory[1229] = 0000740000000;
+    cpu.memory[1230] = 0103243000007;
+    cpu.memory[1231] = 0104244000007;
+    cpu.memory[1232] = 0700014400000;
+    cpu.memory[1233] = 0000002777775;
+    cpu.memory[1234] = 0740030000000;
+    cpu.memory[1235] = 0000740000000;
+    cpu.memory[1236] = 0043000777777;
+    cpu.memory[1237] = 0000740000000;
+    cpu.memory[1238] = 0000000060000;
+    cpu.memory[1239] = 0053257000001;
+    cpu.memory[1240] = 0715250000000;
+    cpu.memory[1241] = 0740030000000;
+    cpu.memory[1242] = 0053003000000;
+    cpu.memory[1243] = 0704010000000;
+    cpu.memory[1244] = 0001345000000;
+    cpu.memory[1245] = 0053117000001;
+    cpu.memory[1246] = 0000103000000;
+    cpu.memory[1247] = 0701010400000;
+    cpu.memory[1248] = 0000002777774;
+    cpu.memory[1249] = 0703250000000;
+    cpu.memory[1250] = 0043040000072;
+    cpu.memory[1251] = 0052216000001;
+    cpu.memory[1252] = 0704230060060;
+    cpu.memory[1253] = 0724065700000;
+    cpu.memory[1254] = 0704230060007;
+    cpu.memory[1255] = 0104203000007;
+    cpu.memory[1256] = 0045005000000;
+    cpu.memory[1257] = 0000002777772;
+    cpu.memory[1258] = 0715654000000;
+    cpu.memory[1259] = 0000740000000;
+    cpu.memory[1260] = 0000000000600;
+    cpu.memory[1261] = 0703350000000;
+    cpu.memory[1262] = 0740030000000;
+    cpu.memory[1263] = 0053007000000;
+    cpu.memory[1264] = 0707350500000;
+    cpu.memory[1265] = 0000740000000;
+    cpu.memory[1266] = 0704404000000;
+    cpu.memory[1267] = 0053357000001;
+    cpu.memory[1268] = 0000002000004;
+    cpu.memory[1269] = 0043142000045;
+    cpu.memory[1270] = 0043202777434;
+    cpu.memory[1271] = 0000702000030;
+    cpu.memory[1272] = 0640000040060;
+    cpu.memory[1273] = 0720011503400;
+    cpu.memory[1274] = 0000002777773;
+    cpu.memory[1275] = 0000135000000;
+    cpu.memory[1276] = 0640000000060;
+    cpu.memory[1277] = 0104007000007;
+    cpu.memory[1278] = 0710414400000;
+    cpu.memory[1279] = 0720024560012;
+    cpu.memory[1280] = 0000002000002;
+    cpu.memory[1281] = 0000002777767;
+    cpu.memory[1282] = 0052036000001;
+    cpu.memory[1283] = 0000740000000;
+    cpu.memory[1284] = 0000000000000;
+    cpu.memory[1285] = 0051203000000;
+    cpu.memory[1286] = 0704210500000;
+    cpu.memory[1287] = 0000740000000;
+    cpu.memory[1288] = 0640000360060;
+    cpu.memory[1289] = 0000002777777;
+    cpu.memory[1290] = 0103003000007;
+    cpu.memory[1291] = 0640000210060;
+    cpu.memory[1292] = 0704214400000;
+    cpu.memory[1293] = 0000002777773;
+    cpu.memory[1294] = 0000740000000;
+    cpu.memory[1295] = 0000000000010;
+    cpu.memory[1296] = 0010217000001;
+    cpu.memory[1297] = 0010102000010;
+    cpu.memory[1298] = 0000043000000;
+    cpu.memory[1299] = 0700010400000;
+    cpu.memory[1300] = 0000002000003;
+    cpu.memory[1301] = 0010155000000;
+    cpu.memory[1302] = 0000002777773;
+    cpu.memory[1303] = 0010116000001;
+    cpu.memory[1304] = 0000740000000;
+    cpu.memory[1305] = 0000000000000;
+    cpu.memory[1306] = 0052004000000;
+    cpu.memory[1307] = 0700010500000;
+    cpu.memory[1308] = 0000002000005;
+    cpu.memory[1309] = 0053117000001;
+    cpu.memory[1310] = 0742130000000;
+    cpu.memory[1311] = 0053104000000;
+    cpu.memory[1312] = 0052116000001;
+    cpu.memory[1313] = 0000014000000;
+    cpu.memory[1314] = 0000243000000;
+    cpu.memory[1315] = 0000002000010;
+    cpu.memory[1316] = 0052243000000;
+    cpu.memory[1317] = 0053203000000;
+    cpu.memory[1318] = 0053244000000;
+    cpu.memory[1319] = 0053205000001;
+    cpu.memory[1320] = 0740030000000;
+    cpu.memory[1321] = 0053004000001;
+    cpu.memory[1322] = 0000014000000;
+    cpu.memory[1323] = 0740030000000;
+    cpu.memory[1324] = 0053004000000;
+    cpu.memory[1325] = 0053004000001;
+    cpu.memory[1326] = 0053203000000;
+    cpu.memory[1327] = 0053203000001;
+    cpu.memory[1328] = 0000014000000;
+    cpu.memory[1329] = 0052003000000;
+    cpu.memory[1330] = 0700210500000;
+    cpu.memory[1331] = 0000014000000;
+    cpu.memory[1332] = 0000002000004;
+    cpu.memory[1333] = 0052003000001;
+    cpu.memory[1334] = 0700210500000;
+    cpu.memory[1335] = 0000014000000;
+    cpu.memory[1336] = 0052244000000;
+    cpu.memory[1337] = 0052304000001;
+    cpu.memory[1338] = 0705250400000;
+    cpu.memory[1339] = 0053305000001;
+    cpu.memory[1340] = 0706310400000;
+    cpu.memory[1341] = 0053246000000;
+    cpu.memory[1342] = 0052103000000;
+    cpu.memory[1343] = 0722224500000;
+    cpu.memory[1344] = 0053243000000;
+    cpu.memory[1345] = 0052103000001;
+    cpu.memory[1346] = 0722224500000;
+    cpu.memory[1347] = 0053303000001;
+    cpu.memory[1348] = 0000014000000;
+    cpu.memory[1349] = 0000000000050;
+    cpu.memory[1350] = 0703511001034;
+    cpu.memory[1351] = 0044500004000;
+    cpu.memory[1352] = 0052152000002;
+    cpu.memory[1353] = 0723224400000;
+    cpu.memory[1354] = 0000002000015;
+    cpu.memory[1355] = 0075057000001;
+    cpu.memory[1356] = 0074042777430;
+    cpu.memory[1357] = 0712210000000;
+    cpu.memory[1358] = 0703150400000;
+    cpu.memory[1359] = 0000042777751;
+    cpu.memory[1360] = 0043142775362;
+    cpu.memory[1361] = 0712210000000;
+    cpu.memory[1362] = 0053144000002;
+    cpu.memory[1363] = 0000042777717;
+    cpu.memory[1364] = 0074056000001;
+    cpu.memory[1365] = 0740032020001;
+    cpu.memory[1366] = 0000740000000;
+    cpu.memory[1367] = 0740030000000;
+    cpu.memory[1368] = 0000740000000;
+    cpu.memory[1369] = 0000000000050;
+    cpu.memory[1370] = 0703510000000;
+    cpu.memory[1371] = 0043142775347;
+    cpu.memory[1372] = 0075057000001;
+    cpu.memory[1373] = 0074042777407;
+    cpu.memory[1374] = 0000042777727;
+    cpu.memory[1375] = 0700010500000;
+    cpu.memory[1376] = 0000002000012;
+    cpu.memory[1377] = 0700210000000;
+    cpu.memory[1378] = 0712250000000;
+    cpu.memory[1379] = 0053504000002;
+    cpu.memory[1380] = 0700510000000;
+    cpu.memory[1381] = 0705150400000;
+    cpu.memory[1382] = 0000042777674;
+    cpu.memory[1383] = 0043102001231;
+    cpu.memory[1384] = 0702526011010;
+    cpu.memory[1385] = 0712010000000;
+    cpu.memory[1386] = 0074056000001;
+    cpu.memory[1387] = 0000740000000;
+    cpu.memory[1388] = 0000000000150;
+    cpu.memory[1389] = 0703511001034;
+    cpu.memory[1390] = 0044500004000;
+    cpu.memory[1391] = 0704450000000;
+    cpu.memory[1392] = 0075057000001;
+    cpu.memory[1393] = 0074042777363;
+    cpu.memory[1394] = 0052152000002;
+    cpu.memory[1395] = 0712210000000;
+    cpu.memory[1396] = 0703150400000;
+    cpu.memory[1397] = 0000042777703;
+    cpu.memory[1398] = 0711150000000;
+    cpu.memory[1399] = 0712210000000;
+    cpu.memory[1400] = 0053144000002;
+    cpu.memory[1401] = 0000042777651;
+    cpu.memory[1402] = 0074056000001;
+    cpu.memory[1403] = 0000740000000;
+    cpu.memory[1404] = 0000000000400;
+    cpu.memory[1405] = 0043142775310;
+    cpu.memory[1406] = 0000702777733;
+    cpu.memory[1407] = 0700150500000;
+    cpu.memory[1408] = 0000740000000;
+    cpu.memory[1409] = 0700350000000;
+    cpu.memory[1410] = 0043200002000;
+    cpu.memory[1411] = 0745270000000;
+    cpu.memory[1412] = 0000702777452;
+    cpu.memory[1413] = 0052002777341;
+    cpu.memory[1414] = 0053007000001;
+    cpu.memory[1415] = 0053347000002;
+    cpu.memory[1416] = 0052002777337;
+    cpu.memory[1417] = 0053007000003;
+    cpu.memory[1418] = 0743172020023;
+    cpu.memory[1419] = 0043003002000;
+    cpu.memory[1420] = 0053007001006;
+    cpu.memory[1421] = 0707010000000;
+    cpu.memory[1422] = 0000740000000;
+    cpu.memory[1423] = 0000000000000;
+    cpu.memory[1424] = 0741070000000;
+    cpu.memory[1425] = 0701010000000;
+    cpu.memory[1426] = 0043100000007;
+    cpu.memory[1427] = 0700011220044;
+    cpu.memory[1428] = 0744030000000;
+    cpu.memory[1429] = 0702130477777;
+    cpu.memory[1430] = 0000002777775;
+    cpu.memory[1431] = 0701170040500;
+    cpu.memory[1432] = 0053005000000;
+    cpu.memory[1433] = 0701054000000;
+    cpu.memory[1434] = 0721070477600;
+    cpu.memory[1435] = 0000002777766;
+    cpu.memory[1436] = 0000740000000;
+    cpu.memory[1437] = 0000000000000;
+    cpu.memory[1438] = 0740032004400;
+    cpu.memory[1439] = 0051103000000;
+    cpu.memory[1440] = 0103243000007;
+    cpu.memory[1441] = 0740271003500;
+    cpu.memory[1442] = 0700011000735;
+    cpu.memory[1443] = 0704270000000;
+    cpu.memory[1444] = 0066005000000;
+    cpu.memory[1445] = 0702114400000;
+    cpu.memory[1446] = 0000002777772;
+    cpu.memory[1447] = 0700000000000;
+    cpu.memory[1448] = 0000740000000;
+    cpu.memory[1449] = 0740032020001;
+    cpu.memory[1450] = 0010000000001;
+    cpu.memory[1451] = 0043640004000;
+    cpu.memory[1452] = 0043240004000;
+    cpu.memory[1453] = 0062242777270;
+    cpu.memory[1454] = 0053257000001;
+    cpu.memory[1455] = 0043002777772;
+    cpu.memory[1456] = 0053002775120;
+    cpu.memory[1457] = 0740030000000;
+    cpu.memory[1458] = 0052135000000;
+    cpu.memory[1459] = 0700010500000;
+    cpu.memory[1460] = 0000002777775;
+    cpu.memory[1461] = 0740030000000;
+    cpu.memory[1462] = 0053002775112;
+    cpu.memory[1463] = 0052016000001;
+    cpu.memory[1464] = 0700211001100;
+    cpu.memory[1465] = 0053202775207;
+    cpu.memory[1466] = 0715670077774;
+    cpu.memory[1467] = 0043000000017;
+    cpu.memory[1468] = 0715150000000;
+    cpu.memory[1469] = 0043240000012;
+    cpu.memory[1470] = 0000702777430;
+    cpu.memory[1471] = 0715670060004;
+    cpu.memory[1472] = 0052002775200;
+    cpu.memory[1473] = 0700011001232;
+    cpu.memory[1474] = 0752530000000;
+    cpu.memory[1475] = 0053017000001;
+    cpu.memory[1476] = 0712150000012;
+    cpu.memory[1477] = 0744230000000;
+    cpu.memory[1478] = 0000702777577;
+    cpu.memory[1479] = 0045515000000;
+    cpu.memory[1480] = 0000002777774;
+    cpu.memory[1481] = 0052016000001;
+    cpu.memory[1482] = 0752532020003;
+    cpu.memory[1483] = 0056502775170;
+    cpu.memory[1484] = 0712511001232;
+    cpu.memory[1485] = 0712514000000;
+    cpu.memory[1486] = 0743170000000;
+    cpu.memory[1487] = 0000702777612;
+    cpu.memory[1488] = 0712530477777;
+    cpu.memory[1489] = 0000002777775;
+    cpu.memory[1490] = 0000702777652;
+    cpu.memory[1491] = 0053002775161;
+    cpu.memory[1492] = 0062002777227;
+    cpu.memory[1493] = 0053017000001;
+    cpu.memory[1494] = 0074256000001;
+    cpu.memory[1495] = 0043002777241;
+    cpu.memory[1496] = 0053002775050;
+    cpu.memory[1497] = 0043142775157;
+    cpu.memory[1498] = 0053142775155;
+    cpu.memory[1499] = 0752532020023;
+    cpu.memory[1500] = 0043152001000;
+    cpu.memory[1501] = 0000702777574;
+    cpu.memory[1502] = 0053012000004;
+    cpu.memory[1503] = 0700030061000;
+    cpu.memory[1504] = 0053012000006;
+    cpu.memory[1505] = 0052002777210;
+    cpu.memory[1506] = 0053012000005;
+    cpu.memory[1507] = 0052002777207;
+    cpu.memory[1508] = 0053012000007;
+    cpu.memory[1509] = 0751472020024;
+    cpu.memory[1510] = 0010251000000;
+    cpu.memory[1511] = 0740032020023;
+    cpu.memory[1512] = 0700470040400;
+    cpu.memory[1513] = 0010244000000;
+    cpu.memory[1514] = 0043152001002;
+    cpu.memory[1515] = 0000702777556;
+    cpu.memory[1516] = 0700410000000;
+    cpu.memory[1517] = 0700350000000;
+    cpu.memory[1518] = 0700150000000;
+    cpu.memory[1519] = 0043200002000;
+    cpu.memory[1520] = 0052242777163;
+    cpu.memory[1521] = 0000702777275;
+    cpu.memory[1522] = 0750410060600;
+    cpu.memory[1523] = 0053411000000;
+    cpu.memory[1524] = 0710030061000;
+    cpu.memory[1525] = 0053011000001;
+    cpu.memory[1526] = 0052002777162;
+    cpu.memory[1527] = 0053012000005;
+    cpu.memory[1528] = 0010251000000;
+    cpu.memory[1529] = 0743172020024;
+    cpu.memory[1530] = 0052202777162;
+    cpu.memory[1531] = 0000702777624;
+    cpu.memory[1532] = 0744232020024;
+    cpu.memory[1533] = 0043142777031;
+    cpu.memory[1534] = 0000702777637;
+    cpu.memory[1535] = 0700410000000;
+    cpu.memory[1536] = 0055002777155;
+    cpu.memory[1537] = 0700010400000;
+    cpu.memory[1538] = 0000002000025;
+    cpu.memory[1539] = 0043000001400;
+    cpu.memory[1540] = 0640000030060;
+    cpu.memory[1541] = 0043142777152;
+    cpu.memory[1542] = 0000702777376;
+    cpu.memory[1543] = 0052142777160;
+    cpu.memory[1544] = 0043200000030;
+    cpu.memory[1545] = 0000702777343;
+    cpu.memory[1546] = 0052142777155;
+    cpu.memory[1547] = 0744232020024;
+    cpu.memory[1548] = 0000702777621;
+    cpu.memory[1549] = 0055002777141;
+    cpu.memory[1550] = 0700010400000;
+    cpu.memory[1551] = 0000002000004;
+    cpu.memory[1552] = 0043142777141;
+    cpu.memory[1553] = 0000702777363;
+    cpu.memory[1554] = 0000002777763;
+    cpu.memory[1555] = 0043142777141;
+    cpu.memory[1556] = 0000702777360;
+    cpu.memory[1557] = 0000002777760;
+    cpu.memory[1558] = 0070002000001;
+    cpu.memory[1559] = 0043142777070;
+    cpu.memory[1560] = 0000702777354;
+    cpu.memory[1561] = 0070002000001;
     
-    while (running) {
-        printf("> ");
-        if (fgets(cmd, sizeof(cmd), stdin) == NULL) break;
-        cmd[strcspn(cmd, "\n")] = 0;
-        cmd[sizeof(cmd) - 1] = 0;
-        
-        int i = 0;
-        while ((cmd[i] == ' ' || cmd[i] == '\t') && i < sizeof(cmd) - 1) i++;
-        
-        if (cmd[i]) {
-            if (cmd[i] == '/') {
-                char *end;
-                uint64_t new_ptr = strtol(cmd + i + 1, &end, 8);
-                if (end > cmd + i + 1 && new_ptr <= 0777777777) {
-                    ptr = new_ptr;
-                    i += end - (cmd + i);
-                }
-                else {
-                    printf("? Bad address\n");
-                    continue;
-                }
-            }
-            
-            while ((cmd[i] == ' ' || cmd[i] == '\t') && i < sizeof(cmd) - 1)
-                i++;
-            
-            if (cmd[i] == '?') {
-                printf("%09lo\n", ptr & MASK_ADDR);
-            }
-            
-            else if (cmd[i] == '.') {
-                i++;
-                while (
-                    (cmd[i] == ' ' || cmd[i] == '\t')
-                    && i < sizeof(cmd) - 1
-                ) i++;
-                
-                uint64_t to_print;
-                if (cmd[i] == '\0') to_print = 1;
-                else {
-                    char *end;
-                    to_print = strtol(cmd + i, &end, 8);
-                    if (!(end > cmd + i && to_print <= 0777777777)) {
-                        printf("? Bad count\n");
-                        continue;
-                    }
-                }
-                
-                for (int j = 0; j < to_print; j++) {
-                    if (j == 0) printf("%09lo: ", ptr & MASK_ADDR);
-                    else if (j % 4 == 0) printf("\n%09lo: ", ptr & MASK_ADDR);
-                    uint64_t data = read_mem
-                        (&cpu, 0, ptr++ & MASK_ADDR);
-                    if (data & MEM_FAULT) {
-                        printf("? Bad address\n");
-                        break;
-                    } else {
-                        printf("%012lo ", data & MASK_36);
-                    }
-                }
-                printf("\n");
-            }
-            
-            else if (cmd[i] == '=') {
-                char *saveptr = NULL;
-                char *rest = cmd + i + 1;
-                char *tok = NULL;
-                
-                while ((tok = strtok_r(rest, " \t", &saveptr))) {
-                    rest = NULL;
-                    char *end = NULL;
-                    uint64_t data = strtol(tok, &end, 8);
-                    if (!(end > tok && data <= 0777777777777)) {
-                        printf("? Bad data\n");
-                        break;
-                    }
-                    
-                    uint64_t result = write_mem
-                        (&cpu, 0, ptr++ & MASK_ADDR, data);
-                    if (result & MEM_FAULT) {
-                        printf("? Bad address\n");
-                        break;
-                    }
-                }
-            }
-            
-            else if (cmd[i] == 'W') {
-                start_cpu(&cpu, 0);
-                wait_for_cpu(&cpu);
-                int c;
-                while ((c = getchar()) != '\n' && c != EOF) { }
-            }
-            
-            else if (cmd[i] == 'S') {
-                start_cpu(&cpu, 1);
-                ptr = get_pc(&cpu);
-            }
-
-            else if (cmd[i] == 'F') {
-                for (int i = 0; i < 16; i++) {
-                    printf("F%02d = ", i);
-                    print_rdc_float(&cpu.f[i]);
-                    printf("\n");
-                }
-            }
-            
-            else if (cmd[i] == 'T') {
-                cpu.throttle ^= 1;
-            }
-            
-            else if (cmd[i] == 'P') {
-                if (cpu.running)
-                    stop_cpu(&cpu);
-                ptr = get_pc(&cpu);
-            }
-            
-            else if (cmd[i] == 'G') {
-                set_pc(&cpu, ptr);
-                if (cmd[i + 1] == 'W') {
-                    start_cpu(&cpu, 0);
-                    wait_for_cpu(&cpu);
-                    int c;
-                    while ((c = getchar()) != '\n' && c != EOF) { }
-                } else if (cmd[i + 1] == 'S') {
-                    start_cpu(&cpu, 0);
-                }
-            }
-            
-            else if (cmd[i] == 'X') {
-                running = 0;
-            }
-        }
-    }
+    start_cpu(&cpu, 0);
+    wait_for_cpu(&cpu);
     
-    kill_render(&(cpu.render_ctx));
+    
+    
+    // kill_render(&(cpu.render_ctx));
     destroy_cpu(&cpu);
     
     return 0;
