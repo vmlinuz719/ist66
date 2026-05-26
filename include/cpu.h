@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include "fpu.h"
 #include "sdlctx.h"

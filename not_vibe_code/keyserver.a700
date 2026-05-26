@@ -1,0 +1,928 @@
+        ; Fastcall: X0-X3 for first args, caller saved
+        
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+            origin      0
+
+exc_vec:    bss         1
+
+            origin      20                      ; tty handler
+
+tty_vec:    dw          tty_intr, 0
+
+            origin      32
+
+saves:      bss         1
+saves1:     bss         1
+
+            origin      62
+
+usr_save:   bss         2
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+mem_size:   bss         1                       ; memory size
+
+svrmode:    bss         1                       ; supervisor mode / exc depth
+
+realpool:   bss         1                       ; physical memory queue
+mp_end:     bss         1
+
+segments:   bss         1                       ; default SDT
+savepool:   bss         2                       ; SDT queue
+
+ehtable:    bss         1                       ; pointer to supervisor
+                                                ; exception handler table
+ehdefault:  bss         32                      ; default handlers pc/psw1
+
+temp0:      bss         1
+temp1:      bss         1
+temp2:      bss         1
+temp3:      bss         1
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        
+            origin      1024
+
+ipl:        ldea        x0, .usr_rst
+            ldea        x1, .usr_save
+            ld          0(x0)
+            st          0(x1)
+            ld          1(x0)
+            st          1(x1)
+            ldctl       psw1, .cw
+            retlmi      .mask
+            
+usr_rst:    dw          start, 0740000000000
+cw:         dw          0036000000000           ; return to irql 15
+mask:       dw          02000                   ; enable console irq
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+tty_intr:   nioc        #030                    ; clear intr
+            st          .tty_acsv
+            xorrts      ac, ac, 1               ; console has data
+            st          .tty_stat
+            ld          .tty_acsv
+            reti
+
+tty_stat:   bss         1
+tty_acsv:   bss         1
+
+crlf:       dsn         13, 10
+msg_banner: dsn         "MP-700 VERSION 1 RELEASE 0", 13, 10,
+                        "(C) 2026 vmlinuz719. ", 
+                        "All rights reserved. Do not redistribute!",
+                        13, 10, 13, 10
+                        
+msg_initrm: dsn         "Init RMDETECT... "
+msg_initmp: dsn         "Init REALPOOL"
+msg_initsd: dsn         "Init SEGMENTS..."
+msg_initeh: dsn         "Init EXCEPTHD..."
+msg_initum: dsn         "Init USERMODE (test)..."
+dot:        dsn         "."
+bang:       dsn         "!"
+done:       dsn         " Done.", 13, 10
+msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
+msg_licens: dsn         13, 10,
+                        "        *** COPYRIGHT VIOLATION DETECTED ***", 13, 10,
+                        "        ***  STARTUP WILL NOT CONTINUE!  ***", 13, 10
+
+ok:         dw          0666
+zero:       dw          0
+incptr:     dw          0401000000000
+
+cseg1:      dw          01600777777
+cseg2:      dw          01600001777
+
+vseg1:      dw          03500001777
+vseg1a:     dw          03400001777
+vseg2:      dw          03500000000
+
+tcslen:     dw          0377000000000
+
+crc_poly:   dw          #8000000fc
+banner_crc: dw          0355510514236
+key_crc:    dw          0153466602421           ; WjLpWCy=2e+RpNt&[jj@~etz
+
+key_prompt: dsn         "K>"
+key_good:   dsn         ":PASS", 13, 10
+key_bad:    dsn         ":FAIL", 13, 10
+key_buf:    dw          #80200
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Exception handler stub
+
+exc_stub:   st          sp, .temp0
+            tstmnz      .svrmode                ; check if already in svrmode
+            jmp         .exc_svr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Exception handler
+        ;
+        ;   0. Save saved PSW's
+        ;   1. Save all registers
+        ;   2. Set up return trampoline call
+        
+exc_hndl:   inctnz      .svrmode                ; increment exception depth
+            st          x0, .temp1
+            xorrts      x0, x0, 19              ; addressability of taskseg
+            ld          sp, savessp(x0)
+            ld          x0, .temp1
+            
+exc_svr:    addi        sp, sp, -2              ; space for psw's
+            calls       .1                      ; save all
+            dw          #ffff
+            ld          .temp0                  ; including old sp
+            st          15(sp)
+            
+            ldea        .exc_tpl                ; exception return trampoline
+            st          (sp)
+            xorr        ac, ac
+            st          1(sp)
+            
+            stctl       psw1, .temp0            ; stash the saved psw's
+            ld          .temp0
+            movrz       ac, x0, 8, 32
+            addr        x0, x0
+            ld          xy, saves(x0)
+            st          xy, 18(sp)
+            ld          xy, saves1(x0)
+            st          xy, 19(sp)
+           
+            ld          .temp0
+            movrz       ac, x0, 12, 32          ; exception number
+            xorrts      ac, ac, 1
+            adds        x0, x0, x1
+            add         x1, .ehtable
+            ld          x2, (x1)
+            
+            movr.rz     x2, x2                  ; bail if no handler
+            rets
+            
+            ldctl       psw1, 1(x1)
+            xorr        ac, ac
+            jmp         (x2)
+
+exc_tpl:    ldctl       psw1, .zero
+            
+            ldea        xy, #ffff
+            push        xy
+            ldea        xy, .etp_next
+            movr.rn     ac, ac
+            ldea        xy, .etp_skip
+            push        xy
+            
+            ld          18(sp)
+            st          .saves
+            ld          19(sp)
+            st          .saves1
+            
+            rets
+            
+etp_next:   dectnz      .svrmode
+            nop
+            reti
+
+etp_skip:   dectnz      .svrmode
+            nop
+            retid       1
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MEMSET - set a block of memory to a value
+        ;
+        ;   X0:     Block address
+        ;   X1:     Size
+        ;   X2:     Value
+
+memset:     save        x3
+
+            movr        sp, x3
+            movr        x0, sp
+            
+mset_l:     st          x2, +1
+            addi.rn     x1, x1, -1
+            jmp         .mset_l
+
+            movr        x3, sp
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MEMCOPY - copy a block of memory
+        ;
+        ;   X0:     Source address
+        ;   X1:     Dest address
+        ;   X2:     Size
+
+memcopy:    dw          0
+            
+            or          x1, .incptr
+            push        x1
+            or          x0, .incptr
+            push        x0
+
+mcpy_l:     ld          @(sp)
+            st          @1(sp)
+            addi.rn     x2, x2, -1
+            jmp         .mcpy_l
+            
+            retsd       2
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; LEFT_PAD - you already know
+        ;
+        ;   X0:     Input buffer address
+        ;   X1:     Output buffer address, specifies length
+        ;   X2:     Padding character
+        ;
+        ;   Return: -1 on failure, 0 on success
+
+left_pad:   dw          0
+
+            ld          (x1)                    ; check if too big
+            sub         (x0)
+            movrzn.rn   ac, ac, 1, 35
+            jmp         .copyfail
+
+            movr.rz     ac, ac                  ; copy now if no padding
+            jmp         .cpyinput
+            
+            ngtr        ac, ac
+            
+writepad:   incstb      x2, x1, 7
+            incr.rn     ac, ac
+            jmp         .writepad
+
+cpyinput:   ldneg       (x0)                    ; done if input length 0
+            movr.rz     ac, ac
+            rets
+
+cpyiloop:   incldb      x2, x0, 7
+            incstb      x2, x1, 7
+            incr.rn     ac, ac
+            jmp         .cpyiloop
+
+            xorr        ac, ac
+            rets
+
+copyfail:   ldea        -1
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; NUM2LD - convert number to string
+        ;
+        ;   X0:     Output buffer address
+        ;   X1:     Value
+        ;   X2:     Base
+
+num2ld:     save        mq, xy
+
+            push        x2                      ; set up divisor at x2
+            movr        sp, x2
+            
+            xorr        ac, ac                  ; init string
+            st          (x0)
+            
+            movr        x1, ac
+            
+div:        udiv        (x2)                    ; grab digit and remainder
+            push        xy                      ; push digit
+            inctnz      (x0)                    ; inc string size
+            movr.rn     mq, ac                  ; test if done
+            jmp         .div                    ; loop until zero
+            
+            movr        x0, x2
+            ldea        mq, 58
+
+convert:    pop         x1                      ; pop digits into string
+            addi        x1, x1, 48
+            cmpge       x1, mq
+            addi        x1, x1, 7
+            incstb      x1, x0, 7
+            inctne      (x2)
+            jmp         .convert
+            
+            incr        sp, sp
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; READLD - read up to n characters from the support console
+        ;
+        ;   X0:     Output buffer address
+        ;   X1:     Max size
+        ;
+        ;   Return: Size of input
+
+readld:     save        x4, x5
+
+            movr        x0, x4                  ; x4: buffer
+            xorr        ac, ac                  ; clear count field
+            st          (x4)
+            
+            movr.rz     x4, x4                  ; don't read if count 0
+            rets
+            
+            ngtr        x1, x5                  ; x5: max length
+            
+            push        x4                      ; push head of string
+            
+            jmp         .readloop
+
+idleloop:   ldea        x0, .test_rst
+            ldea        x1, .tty_stat           ; await full buffer or crlf
+            calls       .idle
+
+readloop:   rio         ac, 2, #030             ; get buffer count
+            movmzn.rz   ac, ac, 28              ; idle if no data
+            jmp         .idleloop
+            
+            inctnz      @(sp)                   ; increment length
+            rio         ac, 0, #030             ; get a byte
+            incstb      ac, x4, 7
+            
+            incr.rn     x5, x5                  ; is buffer full
+            subin.rz    ac, ac, 10              ; or do we have LF
+            jmp         .readdone
+            
+            jmp         .readloop
+
+readdone:   ld          @+1
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; WRITELD - write a length-data string to the support console
+        ;
+        ;   X0:     Buffer address
+
+writeld:    dw          0
+
+            ldneg       x1, (x0)
+            movr.rz     x1, x1
+            rets
+            
+wrt_loop:   tiobz       #030
+            jmp         .wrt_loop
+            
+            incldb      ac, x0, 7
+            wios        ac, 0, #030
+            
+            incr.rn     x1, x1
+            jmp         .wrt_loop
+            
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; IDLE - wait until we have something to do
+        ;
+        ;      X0 -> test subroutine
+        ;      X1, X2, X3 -> arguments to subroutine (optional, will not
+        ;                    be modified by IDLE)
+        ;      Return -> whatever the subroutine puts in AC
+
+idle:       save        lr
+
+            pushim
+            
+doidle:     ldmask      .maskall
+
+            callr       (x0)
+            movr.rn     ac, ac
+            jmp         .dontidle
+            
+            lmwait      (sp)
+            jmp         .doidle
+            
+dontidle:   popim
+            rets
+
+maskall:    dw          0
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; TEST_RST - if (X1) != 0 then AC := (X1), (X1) := 0; return AC
+
+test_rst:   ld          (x1)
+            movr.rz     ac, ac
+            jmp         .dont_rst
+
+            push        xy
+            xorr        xy, xy
+            st          xy, (x1)
+            pop         xy
+
+dont_rst:   retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Queue structure:
+        ;
+        ;   (q):    Head pointer (0 if queue empty)
+        ;   1(q):   Tail pointer (0 if queue empty)
+        ;
+        ; Queue item structure:
+        ;
+        ;   (i):    Next pointer (0 if at end)
+        ;   1(i):   Prev pointer (0 if at start)
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; INSQUE - add an item to a queue
+        ;
+        ;   X0:     Queue structure
+        ;   X1:     Address of new queue item
+
+insque:     tstmz       (x0)                    ; no items in queue yet?
+            jmp         .enq_empty
+
+            ld          x2, (x0)                ; get current head
+            st          x1, (x0)                ; place new head
+            st          x2, (x1)                ; new.next = old
+            st          x1, 1(x2)               ; old.prev = new
+            xorr        ac, ac                  ; new.prev = null
+            st          1(x1)
+            
+            retr
+
+enq_empty:  xorr        ac, ac                  ; no next or prev yet
+            st          (x1)
+            st          1(x1)
+            
+            st          x1, (x0)                ; head and tail same
+            st          x1, 1(x0)
+            
+            retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; POPQUE - remove an item from a queue (last in)
+        ;
+        ;   X0:     Queue structure
+        ;   Return: Address of queue item else 0
+
+popque:     ld          (x0)                    ; get start of queue
+
+            movr.rz     ac, x1
+            retr
+
+            jmp         .delque
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; REMQUE - remove an item from a queue (first in)
+        ;
+        ;   X0:     Queue structure
+        ;   Return: Address of queue item else 0
+
+remque:     ld          1(x0)                   ; get end of queue
+            
+            movr.rz     ac, x1
+            retr                                ; intentional fallthrough
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; DELQUE - remove an item from a queue at any position
+        ;
+        ;   X0:     Queue structure
+        ;   X1:     List item *MUST ACTUALLY BE IN QUEUE AT X0*
+
+delque:     ld          x2, (x1)                ; x2: next
+            ld          x3, 1(x1)               ; x3: prev
+
+            movr.rn     x2, x2                  ; do we have next
+            st          x3, 1(x2)               ; then next.prev = prev
+
+            movr.rn     x3, x3                  ; do we have prev
+            st          x2, (x3)                ; prev.next = next
+
+            ld          xy, (x0)                ; check if delisting head
+            cmp         xy, x1
+            st          x2, (x0)                ; if so then new head = next
+
+            ld          xy, 1(x0)
+            cmp         xy, x1
+            st          x3, 1(x0)               ; same for tail
+
+            retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Memory descriptor: queue entry (2), owner pointer (1), flags (1)
+        ;
+        ; To get a 1024-word block's 4-word descriptor:
+        ;           descriptor_list_base + (address >> 8)
+        ;
+        ; To get the block described:
+        ;           (address - descriptor_list_base) << 8
+        
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; FREEREAL - release a 1024-word page to REALPOOL
+        ;
+        ;   X0:     Address of block to release
+        ;   X1:     Expected owner
+        ;
+        ;   Return: 0 on failure (owner mismatch), 1 on success
+        
+freereal:   save        x7, lr
+
+            movrz       x0, x7, 28, 8           ; descriptor offset to x7
+            addea       x7, coretab             ; address of queue entry
+            
+            ld          x0, 2(x7)               ; get owning queue
+            cmpne       x0, x1                  ; check if match
+            jmp         .rlp_fail
+            
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+            
+            movr        x7, x1
+            movr.rn     x0, x0                  ; dequeue if it has an owner
+            callr       .delque
+            
+            ldea        x0, .realpool           ; get realpool
+            movr        x7, x1
+            st          x0, 2(x1)
+            callr       .insque                 ; add to realpool
+            
+            popcr       psw1
+            
+            xorrts      ac, ac, 1
+            rets
+
+rlp_fail:   xorr        ac, ac
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; GETREAL - get a 1024-word page from REALPOOL
+        ;
+        ;   X0:     Address of new owner queue
+        ;
+        ;   Return: 0 on failure (realpool empty), else address of a page
+
+getreal:    save        x7, lr
+
+            movr        x0, x7                  ; save argument
+            
+            ldea        x0, .realpool
+            
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+            
+            callr       .remque
+            movr.rz     ac, ac
+            jmp         .aqp_fail               ; did we get anything
+            
+            movr        ac, x1                  ; queue page if new owner
+            movr        x7, x2
+            st          x7, 2(x1)
+            movr        ac, x7
+            movr.rn     x2, x0
+            callr       .insque
+            
+            ldea        xy, .coretab
+            subrrs      xy, x7, 8, 8
+            movr        x7, ac
+
+aqp_fail:   popcr       psw1
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MOVEREAL - change owner of a block
+        ;
+        ;   X0:     Address of block to transfer ownership
+        ;   X1:     New owner
+
+movereal:   save        x6, x7, lr
+
+            movrz       x0, x7, 28, 8           ; descriptor offset to x7
+            addea       x7, coretab             ; address of queue entry
+            movr        x1, x6
+
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+
+            ld          x0, 2(x7)               ; get owning queue
+            movr        x7, x1
+            movr.rn     x0, x0                  ; dequeue if it has an owner
+
+            callr       .delque
+
+            movr        x6, x0
+            movr        x7, x1
+            st          x0, 2(x1)
+            callr       .insque                 ; add to destination
+
+            popcr       psw1
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; NEWTCS - generate a task context segment - see TASKSEG structure
+        ;
+        ;   Return: 0 on failure (realpool empty), else address of a page
+
+newtcs:     save        x4
+
+            ldea        x0, .savepool
+            calls       .getreal
+
+            movr.rz     ac, x0
+            rets
+
+            movr        ac, x4
+            ldea        x1, 1024
+            xorr        x2, x2
+            calls       .memset
+
+            ld          .cseg1
+            st          1(x4)
+            st          x4, 2(x4)
+            ld          .cseg2
+            st          3(x4)
+            xorrts      x0, x0, 19
+            ldea        taskstk(x0)
+            st          savessp(x4)
+
+            movr        x4, ac
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MKCRCTAB - make CRC-36 table for 7-bit bytes
+        ;
+        ;   X0:     Address of table
+        ;   X1:     CRC-36 polynomial
+
+mkcrctab:   dw          0
+
+            xorr        mq, mq                  ; count register, 0 to 127
+
+crc_seven:  movr        mq, ac
+            ldea        xy, 7                   ; iterate over 7 bits
+
+crc_bit:    movrtz.cn   ac, ac, 36
+            xorr        x1, ac
+            addi.rn     xy, xy, -1
+            jmp         .crc_bit
+
+            adds        mq, x0, x2
+            st          ac, (x2)
+
+            incr        mq, mq
+            addin.rn    mq, mq, -128
+            jmp         .crc_seven
+
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; CRC36B7 - calculate CRC-36 for a 7-bit length+data string
+        ;
+        ;   X0:     Address of string
+        ;   X1:     Address of CRC-36 table
+        ;
+        ;   Return: CRC-36
+
+crc36b7:    dw          0
+
+            xorms       ac, ac, 36              ; initialize remainder to -1
+            ldneg       xy, (x0)                ; get count
+
+c36b7_l:    incldb      x2, x0, 7               ; get data
+            xormz       ac, x2, 29              ; get table index
+            movrz       ac, ac, 29, 7           ; shift remainder 7 bits
+            addr        x1, x2                  ; xor with table value
+            xor         ac, (x2)
+            
+            incr.rn     xy, xy
+            jmp         .c36b7_l
+            
+            comr        ac, ac
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; ENUMDONE - break out of memory count loop
+
+enumdone:   xorrts      ac, ac, 1
+            retid       1
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+start:      ldea        sp, stack
+            
+            ; ldea        x0, .msg_banner
+            ; calls       .writeld
+            
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Count memory
+            
+            ; ldea        x0, .msg_initrm
+            ; calls       .writeld
+            
+            ldea        x2, stack
+            or          x2, .incptr
+            push        x2
+            ldea        .enumdone
+            st          .exc_vec
+            
+memtest:    xorr        ac, ac
+            ld          xy, @(sp)
+            movr.rz     ac, ac
+            jmp         .memtest
+            
+            xorr        ac, ac
+            st          .exc_vec
+            
+            pop         ac
+            movmz       ac, x1, 9
+            st          x1, .mem_size
+            
+            addi        sp, sp, -4
+            ldea        15
+            
+            movr        sp, x0
+            ldea        x2, 10
+            calls       .num2ld
+            
+            ; movr        sp, x0
+            ; calls       .writeld
+            ; ldea        x0, .msg_rmdone
+            ; calls       .writeld
+            
+            addi        sp, sp, 4
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Initialize REALPOOL
+        
+            ld          .mem_size
+            movrz       ac, ac, 26, 10
+            xorr        x7, x7
+            push        ac
+            
+            ; ldea        x0, .msg_initmp
+            ; calls       .writeld
+            
+mp_init0:   ; ldea        x0, .dot                ; phase 0: list all memory
+            ; calls       .writeld
+            movr        x7, x0, 10
+            xorr        x1, x1
+            calls       .freereal
+            inctne      x7, (sp)
+            jmp         .mp_init0
+            
+            pop         ac
+            
+            xorrts      x7, x7, 3
+            add         x7, .mp_end
+            movrz       x7, x7, 26, 10
+            incr        x7, x7
+            
+mp_init1:   ; ldea        x0, .bang               ; phase 1: dump unusable pages
+            ; calls       .writeld
+            xorr        x0, x0
+            calls       .getreal
+            addi.rn     x7, x7, -1
+            jmp         .mp_init1
+            
+            ; ldea        x0, .done
+            ; calls       .writeld
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Initialize a task context segment
+        
+            ; ldea        x0, .msg_initsd
+            ; calls       .writeld
+        
+            calls       .newtcs
+            st          .segments
+            
+            or          .tcslen
+            push        ac
+            popcr       sdr
+            
+            ; ldea        x0, .done
+            ; calls       .writeld
+            
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Initialize exception handler infrastructure
+        
+            ; ldea        x0, .msg_initeh
+            ; calls       .writeld
+            
+            ldea        .exc_stub
+            st          .exc_vec
+            ldea        x0, .ehdefault
+            st          x0, .ehtable
+            
+            ; ldea        x0, .done
+            ; calls       .writeld
+        
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Initialize usermode (test)
+        
+            ; ldea        x0, .msg_initum
+            ; calls       .writeld
+            
+            xorrts      x7, x7, 19              ; addressability of taskseg
+            ldea        x0, pagetabs(x7)
+            calls       .getreal
+            
+            st          4(x7)                   ; start at #80000
+            addi        ac, ac, 512             ; rest of page table
+            st          6(x7)
+            ld          .vseg1a                 ; 1024 words, writable
+            st          5(x7)
+            ld          .vseg2
+            st          7(x7)
+            
+            xorrts      x6, x6, 20              ; invalidate #80000-C0000
+            invlsg      (x6)
+            xorrts      ac, ac, 19
+            adds        ac, x6, x1
+            invlsg      (x1)
+            
+            ldea        x0, pages(x7)           ; get two pages
+            calls       .getreal
+            movr        ac, x5
+            movr        ac, x4                  ; save (R7) for testing
+            
+            movr        ac, x0                  ; this memset is undefined
+            ldea        x1, 1024                ; behavior - but we can be
+            ld          x2, .ok                 ; reasonably sure it works for
+            calls       .memset                 ; this test
+            
+            bisi        x5, x5, #180            ; present, writable
+            st          x5, (x6)
+            addi        x5, ac, 512
+            st          1(x6)
+            
+            ld          .vseg1                  ; 1024 words, writable, paged
+            st          5(x7)
+            invlsg      (x6)
+            
+            ; ldea        x0, .done
+            ; calls       .writeld
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Piracy check...
+
+            xorrts      x0, x0, 20
+            ld          x1, .crc_poly
+            calls       .mkcrctab
+            
+            xorrts      x1, x1, 20
+            ldea        x0, .msg_banner
+            calls       .crc36b7
+            movr        ac, x5                  ; save (R8) for testing
+            
+            sub         ac, .banner_crc
+            movr.rn     ac, ac
+            jmp         .lic_fail
+            
+            ldea        ac, 768
+            wio         ac, 1, #030
+            
+key_loop:   ldea        x0, .key_prompt
+            calls       .writeld
+            
+            ld          x0, .key_buf
+            ldea        x1, 24
+            calls       .readld
+            
+            ld          x0, .key_buf
+            xorrts      x1, x1, 20
+            calls       .crc36b7
+            sub         ac, .key_crc
+            movr.rn     ac, ac
+            jmp         .key_fail
+            
+            ldea        x0, .key_good
+            calls       .writeld
+            
+            jmp         .key_loop
+            
+key_fail:   ldea        x0, .key_bad
+            calls       .writeld
+            
+            jmp         .key_loop
+
+            hlt
+            
+lic_fail:   ldea        x0, .msg_licens
+            calls       .writeld
+            hlt
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+            origin      2048
+
+stack:      
+coretab:    bss         0
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Task context segment - see NEWTCS
+
+            origin      #40000
+
+taskseg:    bss         512
+
+pagetabs:   bss         2                       ; page tables
+pages:      bss         2                       ; owned real memory
+
+savepsw0:   bss         1
+savepsw1:   bss         1
+
+savessp:    bss         1
+
+            origin      #40400
+
+taskstk:    bss         1
