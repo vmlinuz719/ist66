@@ -20,7 +20,7 @@
 #define INTR_ESC    4
 #define INTR_RET    8
 #define DESTRUCT    16
-// #define BSNOECHO    32
+#define INTR_OUT    32
 #define ECHO_RET    64
 #define ECHO_TAB    128
 #define ECHO_ALL    256
@@ -191,6 +191,12 @@ void *tty_writer(void *vctx) {
         
         send(ctx->sock_console, &ctx->send, 1, 0);
         ctx->command = 0;
+        
+        if (ctx->control & INTR_OUT && !(ctx->done)) {
+            ctx->done = 1;
+            intr_assert(ctx->cpu, ctx->irq);
+        }
+        
         pthread_mutex_unlock(&ctx->intr_lock);
     }
     
