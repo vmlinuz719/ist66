@@ -193,6 +193,7 @@ void *tty_writer(void *vctx) {
         ctx->command = 0;
         
         if (ctx->control & INTR_OUT) {
+            ctx->done = 1;
             intr_assert(ctx->cpu, ctx->irq);
         }
         
