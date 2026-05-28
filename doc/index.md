@@ -13,6 +13,7 @@
 9. [TTY Console Device](tty.md) — Telnet-based serial console, I/O register model, interrupt-driven and polled patterns
 10. [Bishop Bitmap Display](bishop.md) — monochrome raster display, DMA read and pattern fill, scroll register, rect/base tiling
 11. [Paper Tape Reader and Punch](papertape.md) — byte-at-a-time file-backed I/O, timing, RIM loader usage
+12. [Line Printer](lpt.md) — 132-column line buffer, flush conditions, interrupt on line completion
 
 ## Quick Reference
 
