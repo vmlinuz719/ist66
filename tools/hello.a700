@@ -34,6 +34,9 @@ start:      xorr        ac, ac
             ldea        x0, .prompt
             callr       .writestr       ; print "What is your name? "
 
+            ld          ac, .ttycfg
+            wio         ac, 1, #030     ; enable receive (ENABLED flag + defaults)
+
             callr       .readname       ; read a line into namebuf
 
             ldea        x0, .greeting
@@ -130,6 +133,7 @@ rn_store:   st          ac, (x4)        ; namebuf[n] = ac
 ; ------------------------------------------------------------------
 
 nomask:     dw          0               ; interrupt mask = 0 (all disabled)
+ttycfg:     dw          #1D9A0          ; ENABLED|ECHO_ALL|ECHO_TAB|ECHO_RET|DESTRUCT|INTR_RET, thresh=160
 
 prompt:     dsn         "What is your name? "
 greeting:   dsn         "Hello, "

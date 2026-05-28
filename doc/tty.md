@@ -24,8 +24,10 @@ On initialization the device starts listening and spawns a listener thread.
 When a client connects, reader and writer threads are created for that session.
 The console is removed cleanly via `destroy_tty`.
 
-**Default state at init**: receive enabled, echo all characters, interrupt on
-LF, destructive backspace, threshold 160 bytes.
+**Default state at init**: receive **disabled** (ENABLED not set), echo all
+characters, interrupt on LF, destructive backspace, threshold 160 bytes.
+Software must write the config word with the ENABLED flag set before the device
+will accept input.
 
 ---
 
