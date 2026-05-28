@@ -192,7 +192,7 @@ void *tty_writer(void *vctx) {
         send(ctx->sock_console, &ctx->send, 1, 0);
         ctx->command = 0;
         
-        if (ctx->control & INTR_OUT) {
+        if (ctx->control & INTR_OUT && !(ctx->done)) {
             ctx->done = 1;
             intr_assert(ctx->cpu, ctx->irq);
         }
