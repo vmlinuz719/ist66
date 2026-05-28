@@ -1,0 +1,143 @@
+; hello.a700
+;
+; Prompts the user for their name, prints a greeting, then halts.
+; Standalone program: loaded from RIM paper tape via rimldr.
+;
+; Assumptions:
+;   TTY console at device #030 (octal)
+;   Loaded into a supervisor-mode CPU (key = 0)
+;
+; Calling convention: callr / retr (lightweight, no register save).
+;   Callers own LR; subroutines must not issue callr themselves.
+
+; ------------------------------------------------------------------
+; Exception vector table (physical address 0)
+; ------------------------------------------------------------------
+
+            origin      0
+
+exc_vec:    dw          exc_halt, 0     ; level 0: PC=exc_halt, key=0, CW=0
+
+; ------------------------------------------------------------------
+; Program (entry point at 1024)
+; ------------------------------------------------------------------
+
+            origin      1024
+
+start:      xorr        ac, ac
+            ldmask      .nomask         ; disable all external interrupts
+
+            ldea        sp, .stack      ; initialise stack pointer
+
+            nioc        #030            ; clear any stale TTY interrupt state
+
+            ldea        x0, .prompt
+            callr       .writestr       ; print "What is your name? "
+
+            callr       .readname       ; read a line into namebuf
+
+            ldea        x0, .greeting
+            callr       .writestr       ; print "Hello, "
+
+            ld          ac, .namelen    ; ac = number of chars read
+            movr.rz     ac, ac          ; skip next if ac != 0 (name present)
+            jmp         .print_suffix   ; no name: skip to suffix
+
+            ngtr        ac, x5          ; x5 = -namelen (loop counter)
+            ldea        x6, .namebuf    ; x6 = read pointer into namebuf
+
+prn_loop:   ld          ac, (x6)        ; ac = next character
+            incr        x6, x6          ; advance read pointer
+prn_wait:   tiobz       #030            ; skip if TTY not busy
+            jmp         .prn_wait
+            wios        ac, 0, #030     ; send character (ctl=1: load+start)
+            incr.rn     x5, x5          ; x5++; skip jmp when x5 reaches 0
+            jmp         .prn_loop
+
+print_suffix:
+            ldea        x0, .suffix
+            callr       .writestr       ; print "!\r\n"
+
+            xorr        ac, ac
+            hlt                         ; stop (stop code = 0)
+
+; ------------------------------------------------------------------
+; exc_halt — entered on any unhandled exception; halt immediately.
+; ------------------------------------------------------------------
+
+exc_halt:   hlt
+
+; ------------------------------------------------------------------
+; writestr — send a dsn string to the TTY (polled output).
+;
+;   x0:  address of dsn string (length word followed by packed bytes).
+;        Modified in place by incldb; caller must not reuse x0 after.
+;   x1:  clobbered (loop counter).
+;   ac:  clobbered.
+;   Returns via LR (call with callr).
+; ------------------------------------------------------------------
+
+writestr:   ldneg       x1, (x0)        ; x1 = -(byte count)
+            movr.rz     x1, x1          ; if x1 != 0: skip return
+            retr                        ; empty string: return immediately
+
+ws_loop:    tiobz       #030            ; skip if not busy
+            jmp         .ws_loop        ; busy: spin
+            incldb      ac, x0, 7       ; advance x0 BX pointer, load next byte
+            wios        ac, 0, #030     ; send byte (ctl=1: load+start)
+            incr.rn     x1, x1          ; x1++; skip jmp when x1 reaches 0
+            jmp         .ws_loop
+            retr
+
+; ------------------------------------------------------------------
+; readname — read one line from TTY into namebuf (one word per char).
+;
+;   Stops on CR (13) or LF (10).  Stores character count in namelen.
+;   The TTY echo (ECHO_ALL default) shows the input to the user.
+;   x4:  clobbered (write pointer into namebuf).
+;   ac:  clobbered.
+;   Returns via LR (call with callr).
+; ------------------------------------------------------------------
+
+readname:   xorr        ac, ac
+            st          ac, .namelen    ; namelen = 0
+            ldea        x4, .namebuf    ; x4 = write pointer
+
+rn_wait:    rio         ac, 2, #030     ; ac = receive buffer fill count
+            movr.rz     ac, ac          ; if ac != 0: skip jmp (data available)
+            jmp         .rn_wait        ; no data yet: spin
+
+rn_get:     rio         ac, 0, #030     ; pop one byte from receive buffer
+
+            subin.rn    ac, ac, 13      ; result = 13 - ac; skip jmp if ac = CR (13)
+            jmp         .rn_chklf       ; ac != CR: check for LF
+            retr                        ; ac = CR: done
+
+rn_chklf:   subin.rn    ac, ac, 10      ; result = 10 - ac; skip jmp if ac = LF (10)
+            jmp         .rn_store       ; ac != LF: store it
+            retr                        ; ac = LF: done
+
+rn_store:   st          ac, (x4)        ; namebuf[n] = ac
+            incr        x4, x4          ; advance write pointer
+            inctnz      .namelen        ; ++namelen; (skip next if namelen wraps to 0)
+
+            rio         ac, 2, #030     ; check for more buffered data
+            movr.rz     ac, ac          ; if ac != 0: skip jmp
+            jmp         .rn_wait        ; no more data: wait
+            jmp         .rn_get         ; more data available: get next byte
+
+; ------------------------------------------------------------------
+; Data
+; ------------------------------------------------------------------
+
+nomask:     dw          0               ; interrupt mask = 0 (all disabled)
+
+prompt:     dsn         "What is your name? "
+greeting:   dsn         "Hello, "
+suffix:     dsn         "!", 13, 10
+
+namelen:    bss         1               ; number of characters read
+namebuf:    bss         32              ; name buffer: one word per character
+
+            bss         64              ; stack space (grows downward from stack:)
+stack:
