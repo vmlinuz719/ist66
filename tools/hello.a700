@@ -41,7 +41,7 @@ start:      xorr        ac, ac
 
             ld          ac, .namelen    ; ac = number of chars read
             movr.rz     ac, ac          ; skip next if ac != 0 (name present)
-            jmp         .print_suffix   ; no name: skip to suffix
+            jmp         .prt_suffix     ; no name: skip to suffix
 
             ngtr        ac, x5          ; x5 = -namelen (loop counter)
             ldea        x6, .namebuf    ; x6 = read pointer into namebuf
@@ -54,8 +54,7 @@ prn_wait:   tiobz       #030            ; skip if TTY not busy
             incr.rn     x5, x5          ; x5++; skip jmp when x5 reaches 0
             jmp         .prn_loop
 
-print_suffix:
-            ldea        x0, .suffix
+prt_suffix: ldea        x0, .suffix
             callr       .writestr       ; print "!\r\n"
 
             xorr        ac, ac
