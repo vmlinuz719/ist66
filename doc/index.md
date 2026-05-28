@@ -10,6 +10,7 @@
 6. [Floating-Point Architecture](fpu.md) — formats, registers, FM/FR instructions, special values
 7. [Interrupt and Exception System](interrupts.md) — priority levels, vector table, dispatch, exceptions
 8. [Assembler Reference](assembler.md) — syntax, directives, address fields, output format, calling conventions
+9. [TTY Console Device](tty.md) — Telnet-based serial console, I/O register model, interrupt-driven and polled patterns
 
 ## Quick Reference
 
