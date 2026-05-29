@@ -120,6 +120,7 @@ with func=1.
 | 10 | `INTR_ESC` | Assert interrupt on ESC (0x1B) |
 | 11 | `INTR_RET` | Assert interrupt on LF (0x0A) — **default** |
 | 12 | `DESTRUCT` | Enable destructive backspace: DEL (0x7F) or BS (0x08) removes the last buffered character and echoes it back; bell if buffer empty — **default** |
+| 13 | `INTR_OUT` | Assert interrupt after each transmitted character completes |
 | 14 | `ECHO_RET` | Echo CR (0x0D) and LF (0x0A) back to the terminal — **default** |
 | 15 | `ECHO_TAB` | Echo TAB (0x09) — **default** |
 | 16 | `ECHO_ALL` | Echo all received characters — **default** |
@@ -161,15 +162,25 @@ characters are discarded and a bell character (0x07) is sent back to the termina
 
 ## Interrupt Behavior
 
-The interrupt fires once per "input event." Exactly one interrupt is outstanding
-at a time: once asserted, further characters accumulate in the buffer without
-generating additional interrupts until the current one is cleared.
+The device has one shared interrupt line used for both input and output events.
+Exactly one interrupt is outstanding at a time: once asserted, no further
+interrupt is generated until the current one is cleared.
 
-The interrupt is asserted when any of the following occurs:
-- `INTR_ANY` is set (every character)
+**Input**: the interrupt is asserted when any of the following occurs:
+- `INTR_ANY` is set (every received character)
 - `INTR_ESC` is set and an ESC (0x1B) arrives
 - `INTR_RET` is set and a LF (0x0A) arrives
 - The buffer fill count reaches the threshold
+
+**Output**: when `INTR_OUT` is set, the interrupt is asserted after each
+transmitted character completes (the writer thread finishes the `send` call).
+The `wios` instruction (ctl=1) clears any pending interrupt and starts
+transmission; the interrupt re-fires when the send is done. This enables
+interrupt-driven output without polling.
+
+Because input and output share one interrupt and one done flag, `INTR_OUT`
+should not be used simultaneously with receive interrupt conditions unless the
+handler can distinguish the source by checking the receive buffer fill count.
 
 The interrupt is cleared by executing any I/O instruction to the device with
 ctl=1 (s suffix) or ctl=2 (c suffix).
@@ -230,6 +241,38 @@ wrt_wait:   tiobz   TTY_DEV     ; skip if NOT busy
 
             wios    ac, 0, TTY_DEV  ; load byte and start (func=0, ctl=1)
             retr
+```
+
+### Interrupt-Driven Output
+
+Enable `INTR_OUT` in the config word, then send the first byte. The interrupt
+fires when each character is sent; the handler sends the next one:
+
+```asm
+; Start an output transfer (foreground: point X0 at string, set X1 = -length)
+            ; configure TTY with INTR_OUT set
+            or      ac, .out_cfg
+out_cfg:    dw      #1F9A0      ; INTR_OUT|ECHO_ALL|ECHO_TAB|ECHO_RET|DESTRUCT|INTR_RET|ENABLED, thresh=160
+
+            wio     ac, 1, TTY_DEV
+            ; ... then kick off first byte:
+            incldb  ac, x0, 7
+            wios    ac, 0, TTY_DEV  ; send first byte, clears any pending interrupt
+
+; Interrupt handler — fires after each byte is sent
+tty_out_ih: st      .ih_acsv        ; save AC
+            incr.rz x1, x1          ; x1++; skip jmp if x1 reached 0 (done)
+            jmp     .out_done
+
+            ld      .ih_acsv        ; (restore AC not needed — about to overwrite)
+            incldb  ac, x0, 7       ; load next byte
+            wios    ac, 0, TTY_DEV  ; send it (ctl=1 clears interrupt, starts next)
+            reti
+
+out_done:   nioc    TTY_DEV         ; clear interrupt without sending
+            ; signal foreground that output is complete ...
+            ld      .ih_acsv
+            reti
 ```
 
 ### Writing a Length-Data String
