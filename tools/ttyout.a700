@@ -1,0 +1,115 @@
+; ttyout.a700
+;
+; Demonstrates interrupt-driven TTY output using the INTR_OUT flag.
+; The interrupt handler chains character sends: each wios clears the
+; current interrupt and starts the next send; INTR_OUT re-fires when
+; the send completes.  The foreground sleeps in lmwait until done.
+;
+; Assumptions:
+;   TTY console at device #030 (octal)
+;   Loaded into a supervisor-mode CPU (key = 0)
+;   IRQ level 10 used for TTY (vector at address 20; mask bit 02000)
+
+; ------------------------------------------------------------------
+; Exception vector table (physical address 0)
+; ------------------------------------------------------------------
+
+            origin      0
+
+exc_vec:    dw          exc_halt, 0     ; level 0: halt on any exception
+
+            origin      20              ; level 10 vector (2 × 10)
+
+tty_vec:    dw          tty_intr, 0    ; TTY interrupt handler
+
+; ------------------------------------------------------------------
+; Program (entry point at 1024)
+; ------------------------------------------------------------------
+
+            origin      1024
+
+start:      xorr        ac, ac
+            ldmask      .nomask         ; interrupts off during setup
+
+            ldea        sp, .stack
+
+            nioc        #030            ; clear stale TTY interrupt state
+
+            ld          ac, .outcfg
+            wio         ac, 1, #030     ; configure TTY: INTR_OUT, no receive
+
+            ; Load string pointer and character count
+            ldea        x0, .message    ; x0: BX pointer, shift=0
+                                        ;   first incldb wraps to shift=29 at ea+1
+            ldneg       x1, (x0)        ; x1 = -(byte count)
+            movr.rz     x1, x1          ; skip next if count != 0
+            jmp         .done           ; empty string: nothing to send
+
+            ; Kick off the chain: send the first character
+            incldb      ac, x0, 7       ; advance x0 to first data byte
+            wios        ac, 0, #030     ; send byte (ctl=1: start writer)
+
+            ; Race-free idle: disable interrupts, check flag, then lmwait
+            ; (lmwait atomically re-enables level 10 and halts, so a pending
+            ;  interrupt between the check and the halt is never lost)
+idle:       ldmask      .nomask         ; disable interrupts before flag check
+            ld          .outflag        ; load completion flag
+            movr.rn     ac, ac          ; skip lmwait if flag != 0 (done)
+            jmp         .done
+            lmwait      .irqmask        ; enable level 10 and halt atomically
+            jmp         .idle           ; woke on interrupt; re-check
+
+done:       xorr        ac, ac
+            hlt
+
+; ------------------------------------------------------------------
+; exc_halt — catch any unexpected exception and stop.
+; ------------------------------------------------------------------
+
+exc_halt:   hlt
+
+; ------------------------------------------------------------------
+; tty_intr — INTR_OUT interrupt handler.
+;
+; Fires after each character transmission completes.
+; x0: BX pointer into message string (persistent across calls).
+; x1: character countdown, negative, increments toward 0.
+;
+; wios inside the handler both clears the current interrupt (ctl=1)
+; and queues the next character in one instruction, so no separate
+; nioc is needed until the final character is done.
+; ------------------------------------------------------------------
+
+tty_intr:   st          ac, .th_acsv    ; save AC
+
+            incr.rz     x1, x1          ; x1++; if now 0: execute next else skip
+            jmp         .out_done       ; x1 reached 0: last char was sent
+
+            incldb      ac, x0, 7       ; load next byte (advances BX pointer)
+            wios        ac, 0, #030     ; send byte; ctl=1 clears intr, queues send
+                                        ; INTR_OUT will re-fire when send completes
+            ld          .th_acsv        ; restore AC
+            reti
+
+out_done:   nioc        #030            ; clear interrupt without sending (done)
+            xorr        ac, ac
+            incr        ac, ac
+            st          .outflag        ; signal foreground: output complete
+            ld          .th_acsv        ; restore AC
+            reti
+
+; ------------------------------------------------------------------
+; Data
+; ------------------------------------------------------------------
+
+nomask:     dw          0               ; interrupt mask: all disabled
+irqmask:    dw          02000           ; interrupt mask: level 10 (TTY) enabled
+outcfg:     dw          #2000           ; TTY config: INTR_OUT only, thresh=0
+
+message:    dsn         "Hello from the interrupt handler!", 13, 10
+
+outflag:    bss         1               ; set nonzero by handler when done
+th_acsv:    bss         1               ; AC save area for interrupt handler
+
+            bss         64              ; stack space (grows downward)
+stack:
