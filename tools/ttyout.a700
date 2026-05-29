@@ -3,10 +3,18 @@
 ; Demonstrates interrupt-driven TTY output using the INTR_OUT flag.
 ; The interrupt handler chains character sends: each wios clears the
 ; current interrupt and starts the next send; INTR_OUT re-fires when
-; the send completes.  The foreground sleeps in lmwait until done.
+; the send completes.  The foreground spin-waits on outflag.
+;
+; Key setup requirement:
+;   C_CW (psw1) must have IRQL > 10 before lmwait is usable.  The CPU
+;   initialises to IRQL 0, and halt() only suspends when
+;   min_pending >= current_irql; at IRQL 0 that is always true, making
+;   every halt permanent.  ldctl psw1 sets IRQL to 15 so a pending
+;   level-10 interrupt (min_pending=10) satisfies 10 < 15 and halt()
+;   skips the suspend, letting the interrupt dispatch immediately.
 ;
 ; Assumptions:
-;   TTY console at device #030 (octal)
+;   TTY console at device #030
 ;   Loaded into a supervisor-mode CPU (key = 0)
 ;   IRQ level 10 used for TTY (vector at address 20; mask bit 02000)
 
@@ -29,7 +37,8 @@ tty_vec:    dw          tty_intr, 0    ; TTY interrupt handler
             origin      1024
 
 start:      xorr        ac, ac
-            ldmask      .nomask         ; interrupts off during setup
+            ldmask      .irqmask        ; enable level 10 interrupt
+            ldctl       psw1, .fgcw    ; IRQL = 15 (device interrupts can preempt)
 
             ldea        sp, .stack
 
@@ -49,9 +58,10 @@ start:      xorr        ac, ac
             incldb      ac, x0, 7       ; advance x0 to first data byte
             wios        ac, 0, #030     ; send byte (ctl=1: start writer)
 
-            ; Race-free idle: disable interrupts, check flag, then lmwait
-            ; (lmwait atomically re-enables level 10 and halts, so a pending
-            ;  interrupt between the check and the halt is never lost)
+            ; Race-free idle: disable interrupts, check flag, lmwait.
+            ; halt() skips the suspend when min_pending < current_irql,
+            ; so a pending interrupt caught by lmwait's intr_set_mask
+            ; dispatches immediately without ever sleeping.
 idle:       ldmask      .nomask         ; disable interrupts before flag check
             ld          .outflag        ; load completion flag
             movr.rn     ac, ac          ; skip lmwait if flag != 0 (done)
@@ -59,7 +69,8 @@ idle:       ldmask      .nomask         ; disable interrupts before flag check
             lmwait      .irqmask        ; enable level 10 and halt atomically
             jmp         .idle           ; woke on interrupt; re-check
 
-done:       xorr        ac, ac
+done:       ldmask      .nomask         ; mask=0 makes halt permanent at IRQL 15
+            xorr        ac, ac
             hlt
 
 ; ------------------------------------------------------------------
@@ -71,13 +82,12 @@ exc_halt:   hlt
 ; ------------------------------------------------------------------
 ; tty_intr — INTR_OUT interrupt handler.
 ;
-; Fires after each character transmission completes.
-; x0: BX pointer into message string (persistent across calls).
+; Fires after each character transmission completes (INTR_OUT set).
+; x0: BX pointer into message string (persistent across handler calls).
 ; x1: character countdown, negative, increments toward 0.
 ;
-; wios inside the handler both clears the current interrupt (ctl=1)
-; and queues the next character in one instruction, so no separate
-; nioc is needed until the final character is done.
+; wios (ctl=1) clears the current interrupt and queues the next send
+; in one instruction, so no separate nioc is needed mid-chain.
 ; ------------------------------------------------------------------
 
 tty_intr:   st          ac, .th_acsv    ; save AC
@@ -94,7 +104,6 @@ tty_intr:   st          ac, .th_acsv    ; save AC
 
 snd_next:   incldb      ac, x0, 7       ; load next byte (advances BX pointer)
             wios        ac, 0, #030     ; send byte; ctl=1 clears intr, queues send
-                                        ; INTR_OUT will re-fire when send completes
             ld          .th_acsv        ; restore AC
             reti
 
@@ -104,6 +113,7 @@ snd_next:   incldb      ac, x0, 7       ; load next byte (advances BX pointer)
 
 nomask:     dw          0               ; interrupt mask: all disabled
 irqmask:    dw          02000           ; interrupt mask: level 10 (TTY) enabled
+fgcw:       dw          0740000000000   ; psw1 for foreground: IRQL=15, no dp base
 outcfg:     dw          #2000           ; TTY config: INTR_OUT only, thresh=0
 
 message:    dsn         "Hello from the interrupt handler!", 13, 10
