@@ -82,19 +82,19 @@ exc_halt:   hlt
 
 tty_intr:   st          ac, .th_acsv    ; save AC
 
-            incr.rz     x1, x1          ; x1++; if now 0: execute next else skip
-            jmp         .out_done       ; x1 reached 0: last char was sent
+            incr.rn     x1, x1          ; x1++; skip jmp if x1 == 0 (done)
+            jmp         .snd_next       ; x1 != 0: more chars to send
 
-            incldb      ac, x0, 7       ; load next byte (advances BX pointer)
-            wios        ac, 0, #030     ; send byte; ctl=1 clears intr, queues send
-                                        ; INTR_OUT will re-fire when send completes
-            ld          .th_acsv        ; restore AC
-            reti
-
-out_done:   nioc        #030            ; clear interrupt without sending (done)
+            nioc        #030            ; done: clear interrupt without sending
             xorr        ac, ac
             incr        ac, ac
             st          .outflag        ; signal foreground: output complete
+            ld          .th_acsv        ; restore AC
+            reti
+
+snd_next:   incldb      ac, x0, 7       ; load next byte (advances BX pointer)
+            wios        ac, 0, #030     ; send byte; ctl=1 clears intr, queues send
+                                        ; INTR_OUT will re-fire when send completes
             ld          .th_acsv        ; restore AC
             reti
 
