@@ -57,7 +57,7 @@ echo:       ldea        x0, .pmt_buf   ; x0 = prompt buffer ("> ")
             ld          x1, .maxline   ; x1 = 80
             callr       .con_gets      ; ac = chars read (including LF)
 
-            movr        x1, ac         ; x1 = char count for con_putl
+            movr        ac, x1         ; x1 = char count for con_putl
             ldea        x0, .linebuf
             callr       .con_putl      ; echo the line back
 
@@ -164,7 +164,7 @@ con_putl:   movr.rz     x1, x1          ; skip retr if count != 0
             incr        ac, ac
             st          .out_actv        ; mark output in progress
 
-            movr        ac, x4
+            movr        x4, ac
             wios        ac, 0, #030      ; send first char; starts the chain
 
             ; race-free wait: check flag with interrupts off, then lmwait
@@ -205,7 +205,7 @@ cg_lm:      lmwait      .irqmask
             jmp         .cg_wait
 
             ; drain TTY receive buffer into caller's word-per-char buffer
-cg_read:    movr        x4, x0          ; x4 = write pointer (= x0)
+cg_read:    movr        x0, x4          ; x4 = write pointer (= x0)
             ngtr        x1, x5          ; x5 = -max_count
 
 cg_loop:    rio         ac, 2, #030     ; TTY receive buffer fill count
