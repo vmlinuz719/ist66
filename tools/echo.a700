@@ -1,0 +1,284 @@
+; echo.a700
+;
+; Interrupt-driven console I/O demo.
+; Prompts for a line, echoes it back, repeats.
+;
+; Routines:
+;   con_init  — initialise TTY and CPU (call once at startup)
+;   con_putl  — interrupt-driven output of a word-per-char buffer
+;   con_gets  — interrupt-driven line input into a word-per-char buffer
+;
+; Calling convention: callr / retr (no register save).
+;   Callers own LR; routines must not use callr themselves.
+;
+; Register use:
+;   ac        scratch / return value
+;   x0        first argument (buffer address)
+;   x1        second argument (count)
+;   x4, x5    scratch within routines
+;   x2, x3    output state — transparent across interrupts (handler
+;             saves to memory and restores on every entry/exit)
+;   lr (x12)  link register (callr sets it; retr jumps to it)
+;   sp (x13)  stack pointer (set at start; not used further)
+;
+; Assumptions:
+;   TTY console at device #030
+;   IRQ level 10 (vector at address 20; mask bit 02000)
+;   Loaded into supervisor mode (key = 0)
+
+; ------------------------------------------------------------------
+; Exception / interrupt vector table (physical addresses 0–31)
+; ------------------------------------------------------------------
+
+            origin      0
+
+exc_vec:    dw          exc_halt, 0     ; level 0: halt on any exception
+
+            origin      20              ; level 10: TTY interrupt (2 × 10)
+
+tty_vec:    dw          tty_intr, 0
+
+; ------------------------------------------------------------------
+; Main program
+; ------------------------------------------------------------------
+
+            origin      1024
+
+start:      xorr        ac, ac
+            ldea        sp, .stack
+            callr       .con_init       ; initialise TTY, IRQL, and mask
+
+            ; Echo loop: prompt → read line → echo line → repeat
+echo:       ldea        x0, .pmt_buf   ; x0 = prompt buffer ("> ")
+            ld          x1, .pmt_len   ; x1 = 2
+            callr       .con_putl
+
+            ldea        x0, .linebuf   ; x0 = line buffer
+            ld          x1, .maxline   ; x1 = 80
+            callr       .con_gets      ; ac = chars read (including LF)
+
+            movr        x1, ac         ; x1 = char count for con_putl
+            ldea        x0, .linebuf
+            callr       .con_putl      ; echo the line back
+
+            jmp         .echo
+
+exc_halt:   hlt
+
+; ------------------------------------------------------------------
+; tty_intr — shared interrupt handler for output and input events.
+;
+; Output path (out_actv != 0):
+;   Sends the next character from the word-per-char buffer at
+;   out_ptr.  Decrements out_cnt (negative, toward 0).  When
+;   out_cnt reaches 0, clears out_actv and sets out_done.
+;
+; Input path (out_actv == 0):
+;   Clears the interrupt and sets inp_rdy.  con_gets then drains
+;   the TTY receive buffer directly.
+;
+; Registers ac, x2, x3 are saved to memory and restored on exit.
+; ------------------------------------------------------------------
+
+tty_intr:   st          ac, .th_ac     ; save registers used by handler
+            st          x2, .th_x2
+            st          x3, .th_x3
+
+            ld          ac, .out_actv
+            movr.rz     ac, ac          ; skip jmp if out_actv != 0
+            jmp         .ti_inp         ; output idle → handle input
+
+            ; --- OUTPUT PATH ---
+            ld          x2, .out_ptr    ; restore output state
+            ld          x3, .out_cnt
+
+            incr.rn     x3, x3          ; x3++; skip jmp if x3 == 0 (done)
+            jmp         .ti_tx
+
+            ; output complete
+            nioc        #030            ; clear interrupt (no more sends)
+            st          x3, .out_cnt   ; save 0
+            xorr        ac, ac
+            st          .out_actv      ; clear active
+            incr        ac, ac
+            st          .out_done      ; signal done
+            jmp         .ti_ret
+
+ti_tx:      ld          ac, (x2)        ; load next word-per-char value
+            incr        x2, x2          ; advance pointer
+            st          x2, .out_ptr   ; save updated state
+            st          x3, .out_cnt
+            wios        ac, 0, #030     ; send; ctl=1 clears intr, starts write
+            jmp         .ti_ret         ; INTR_OUT re-fires when write completes
+
+            ; --- INPUT PATH ---
+ti_inp:     nioc        #030            ; clear INTR_RET interrupt
+            xorr        ac, ac
+            incr        ac, ac
+            st          .inp_rdy        ; signal: a line has arrived
+
+ti_ret:     ld          x3, .th_x3    ; restore registers
+            ld          x2, .th_x2
+            ld          ac, .th_ac
+            reti
+
+; ------------------------------------------------------------------
+; con_init — initialise console.  Call once before any I/O.
+;
+; Sets IRQL to 15 (allows level-10 interrupts to preempt the
+; foreground; the CPU initialises to IRQL 0 which makes every
+; halt permanent).  Enables the level-10 mask and writes the
+; TTY config word.
+; ------------------------------------------------------------------
+
+con_init:   ldctl       psw1, .fgcw    ; IRQL = 15
+            ldmask      .irqmask        ; enable level 10
+            ld          ac, .ttyconf
+            wio         ac, 1, #030     ; write TTY config
+            nioc        #030            ; clear any stale interrupt
+            retr
+
+; ------------------------------------------------------------------
+; con_putl — interrupt-driven output of a word-per-char buffer.
+;
+;   x0  address of first word in buffer
+;   x1  character count
+;
+; Sends x1 characters from the array at x0 (one ASCII value per
+; 36-bit word).  Blocks until all characters have been transmitted.
+; Returns via retr with no useful value in ac.
+; ------------------------------------------------------------------
+
+con_putl:   movr.rz     x1, x1          ; skip retr if count != 0
+            retr                         ; count = 0: nothing to do
+
+            ld          x4, (x0)         ; x4 = first char
+            incr        x0, x0           ; advance to second char
+            st          x0, .out_ptr     ; handler will start here
+
+            ngtr        x1, x3           ; x3 = -count
+            st          x3, .out_cnt     ; out_cnt = -count
+
+            xorr        ac, ac
+            st          .out_done        ; clear done
+            incr        ac, ac
+            st          .out_actv        ; mark output in progress
+
+            movr        ac, x4
+            wios        ac, 0, #030      ; send first char; starts the chain
+
+            ; race-free wait: check flag with interrupts off, then lmwait
+cpl_wait:   ldmask      .nomask
+            ld          .out_done
+            movr.rz     ac, ac           ; skip jmp if out_done != 0 (done)
+            jmp         .cpl_lm
+            retr                         ; out_done set: output finished
+
+cpl_lm:     lmwait      .irqmask        ; enable level 10 and halt atomically
+            jmp         .cpl_wait
+
+; ------------------------------------------------------------------
+; con_gets — interrupt-driven line input into a word-per-char buffer.
+;
+;   x0  address of output buffer (one word per character)
+;   x1  maximum characters to store
+;
+; Blocks until INTR_RET fires (the user pressed Enter / sent LF).
+; Then drains the TTY receive buffer: CR (13) is discarded, LF (10)
+; is stored and terminates the read, other bytes are stored.
+; Stops early if the buffer fills.
+; Returns character count (including LF) in ac.
+; ------------------------------------------------------------------
+
+con_gets:   xorr        ac, ac
+            st          .inp_rdy        ; clear ready flag
+            st          .linelen        ; clear character count
+
+            ; race-free wait for interrupt-driven input
+cg_wait:    ldmask      .nomask
+            ld          .inp_rdy
+            movr.rz     ac, ac          ; skip jmp if inp_rdy != 0
+            jmp         .cg_lm
+            ldmask      .irqmask        ; re-enable before draining
+            jmp         .cg_read
+cg_lm:      lmwait      .irqmask
+            jmp         .cg_wait
+
+            ; drain TTY receive buffer into caller's word-per-char buffer
+cg_read:    movr        x4, x0          ; x4 = write pointer (= x0)
+            ngtr        x1, x5          ; x5 = -max_count
+
+cg_loop:    rio         ac, 2, #030     ; TTY receive buffer fill count
+            movr.rz     ac, ac          ; skip jmp if count != 0
+            jmp         .cg_done        ; no more data: done
+
+            rio         ac, 0, #030     ; pop one byte into ac
+
+            ; discard CR (13) — no-write compare, ac unchanged
+            subin.rn    ac, ac, 13      ; skip if ac != 13
+            jmp         .cg_notcr
+            jmp         .cg_loop        ; ac == 13 (CR): discard
+
+cg_notcr:   ; check for LF (10) — no-write compare, ac unchanged
+            subin.rn    ac, ac, 10      ; skip if ac != 10
+            jmp         .cg_store       ; ac != 10: store regular char
+
+            ; LF: store it and terminate
+            st          ac, (x4)
+            ld          ac, .linelen
+            incr        ac, ac
+            st          .linelen
+            jmp         .cg_done
+
+cg_store:   st          ac, (x4)        ; store regular char
+            incr        x4, x4
+            ld          ac, .linelen
+            incr        ac, ac
+            st          .linelen
+
+            incr.rn     x5, x5          ; x5++; skip jmp if x5 == 0 (buffer full)
+            jmp         .cg_loop
+
+cg_done:    ld          ac, .linelen    ; return character count
+            retr
+
+; ------------------------------------------------------------------
+; Data
+; ------------------------------------------------------------------
+
+; Output interrupt state (managed by tty_intr and con_putl)
+out_ptr:    bss         1               ; pointer into word-per-char output buffer
+out_cnt:    bss         1               ; countdown (negative, increments toward 0)
+out_actv:   bss         1               ; nonzero while output is in progress
+out_done:   bss         1               ; set by handler when output completes
+
+; Input interrupt state (managed by tty_intr and con_gets)
+inp_rdy:    bss         1               ; set by handler when a line arrives (LF seen)
+
+; Handler register save area
+th_ac:      bss         1
+th_x2:      bss         1
+th_x3:      bss         1
+
+; con_gets working variable
+linelen:    bss         1               ; characters read in current con_gets call
+
+; CPU / TTY configuration
+fgcw:       dw          0740000000000   ; psw1: IRQL = 15, no direct-page base
+irqmask:    dw          02000           ; interrupt mask: level 10 (TTY) enabled
+nomask:     dw          0               ; interrupt mask: all disabled
+ttyconf:    dw          #1F9A0          ; TTY config: ENABLED | INTR_RET | INTR_OUT |
+                                        ;   DESTRUCT | ECHO_ALL | ECHO_TAB | ECHO_RET,
+                                        ;   threshold = 160 (0xA0)
+
+; Prompt (word-per-char: one ASCII code per 36-bit word)
+pmt_len:    dw          2
+pmt_buf:    dw          62, 32          ; '>' (62), ' ' (32)
+
+; Line buffer (up to maxline chars; word-per-char)
+maxline:    dw          80
+linebuf:    bss         80
+
+; Stack (grows downward; sp set at start, not used by these routines)
+            bss         64
+stack:
