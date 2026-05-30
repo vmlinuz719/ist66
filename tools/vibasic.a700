@@ -53,6 +53,11 @@ start:      xorr        ac, ac
             ldea        ac, .strendl
             st          ac, .strend
 
+            ldea        ac, .arrheap     ; init array heap
+            st          ac, .arrnext
+            ldea        ac, .arrendl
+            st          ac, .arrend
+
             ldea        x0, .msg_ban    ; "VIBASIC V0.1"
             callr       .io_puts
             callr       .io_crlf
@@ -1221,6 +1226,8 @@ st_new:     save        x4
             st          ac, .varbot
             ldea        ac, .strheap     ; reset string heap
             st          ac, .strnext
+            ldea        ac, .arrheap     ; reset array heap
+            st          ac, .arrnext
             xorr        ac, ac
             st          ac, .for_sp
             st          ac, .gosub_sp
@@ -1346,6 +1353,219 @@ vl_tok:     bss         1
 vl_cnt:     bss         1
 vl_nm0:     bss         1
 vl_nm1:     bss         1
+
+
+; ==========================================================================
+; Array support.  An array variable is an ordinary 4-word table entry whose
+; packed name has bit 35 set (arrbit) — distinct from the same-named scalar.
+;   word 0,1  packed name (bit 35 of word 0 = array marker)
+;   word 2    element type (0 = integer, 1 = string)
+;   word 3    pointer to a data block in the array heap
+; Data block: [N, elem0 .. elem(N-1)], N = upper bound + 1.
+; ==========================================================================
+
+; arr_name — x0 = VAR token pointer.  Fills ar_nm0/ar_nm1 with the packed
+; name, bit 35 of ar_nm0 set to mark it as an array.
+arr_name:   save        x4, x5, x6
+            movr        x0, x4
+            ld          ac, (x4)
+            and          ac, .cntmask
+            st          ac, .ar_cnt
+            ld          ac, 1(x4)        ; body word 0
+            or          ac, .arrbit      ; mark as array
+            st          ac, .ar_nm0
+            ld          x5, .ar_cnt
+            ld          x6, .fivew
+            cmpgt       x5, x6           ; count > 5 ?
+            jmp         .an_two
+            xorr        ac, ac
+            st          ac, .ar_nm1
+            rets
+an_two:     ld          ac, 2(x4)        ; body word 1
+            st          ac, .ar_nm1
+            rets
+
+; arr_find — scan the variable table for an array entry matching
+; ar_nm0/ar_nm1.  Returns entry pointer in ac, or 0 if not found.
+arr_find:   save        x4, x5
+            ld          x4, .varbot
+af_lp:      ld          x5, .memtop
+            cmplt       x4, x5           ; ptr < memtop ?
+            jmp         .af_chk
+            xorr        ac, ac           ; reached top: not found
+            rets
+af_chk:     ld          ac, (x4)
+            sub         ac, .ar_nm0
+            movr.rn     ac, ac
+            jmp         .af_next
+            ld          ac, 1(x4)
+            sub         ac, .ar_nm1
+            movr.rn     ac, ac
+            jmp         .af_next
+            movr        x4, ac           ; found
+            rets
+af_next:    addi        x4, x4, 4
+            jmp         .af_lp
+
+; arr_alloc — x0 = element count N, x1 = initial element value.
+; Allocates an N+1 word block from the array heap, sets block[0]=N and
+; fills the N elements with the init value.  Returns block pointer in ac.
+arr_alloc:  save        x4, x5
+            st          x1, .aa_init
+            st          x0, .aa_n
+            ld          x4, .arrnext
+            st          x4, .aa_blk
+            ld          ac, .aa_n        ; new top = arrnext + N + 1
+            addi        ac, ac, 1
+            addr        x4, ac
+            st          ac, .aa_top
+            ld          x4, .aa_top
+            ld          x5, .arrend
+            cmple       x4, x5           ; new top <= arrend ?
+            jmp         .al_ok
+            ldea        x0, .msg_oom
+            jmp         .err_show
+al_ok:      ld          ac, .aa_top
+            st          ac, .arrnext
+            ld          x4, .aa_blk
+            ld          ac, .aa_n
+            st          ac, (x4)         ; block[0] = N
+            addi        x4, x4, 1
+            ld          x5, .aa_n
+            ngtr        x5, x5           ; x5 = -N
+            ld          ac, .aa_init
+al_fl:      movr.rz     x5, x5           ; elements remaining ?
+            jmp         .al_done
+            st          ac, (x4)
+            addi        x4, x4, 1
+            incr        x5, x5
+            jmp         .al_fl
+al_done:    ld          ac, .aa_blk
+            rets
+
+; arr_get — x0 = VAR token pointer.  Returns the array entry pointer in ac,
+; auto-creating an 11-element (DIM ..(10)) array if it does not yet exist.
+arr_get:    save        x4
+            st          x0, .ag_tok
+            calls       .arr_name
+            ld          x4, .ag_tok      ; element type from the $ flag
+            ld          ac, (x4)
+            and         ac, .strvbit
+            movr.rz     ac, ac
+            jmp         .ag_int
+            ldea        ac, 1
+            st          ac, .ar_str
+            jmp         .ag_find
+ag_int:     xorr        ac, ac
+            st          ac, .ar_str
+ag_find:    calls       .arr_find        ; ac = entry or 0
+            movr.rz     ac, ac           ; skip jmp when found
+            jmp         .ag_make
+            rets                          ; found
+ag_make:    ld          ac, .ar_str      ; init value: "" for string, 0 for int
+            movr.rz     ac, ac
+            jmp         .ag_ci
+            ldea        ac, .emptystr
+            jmp         .ag_al
+ag_ci:      xorr        ac, ac
+ag_al:      movr        ac, x1           ; x1 = init value
+            ldea        x0, 11           ; default upper bound 10 -> 11 elements
+            calls       .arr_alloc
+            st          ac, .ag_blk
+            ld          ac, .varbot      ; allocate a 4-word entry
+            addi        ac, ac, -4
+            st          ac, .varbot
+            movr        ac, x4
+            ld          ac, .ar_nm0
+            st          ac, (x4)
+            ld          ac, .ar_nm1
+            st          ac, 1(x4)
+            ld          ac, .ar_str
+            st          ac, 2(x4)
+            ld          ac, .ag_blk
+            st          ac, 3(x4)
+            movr        x4, ac
+            rets
+
+; arr_addr — ep_tok is at a VAR token known to be followed by '('.
+; Consumes  VAR ( index ) , evaluates the index, bounds-checks it, and
+; returns the element's memory address in ac.  The element type (0/1) is
+; left in aa_etype (read it immediately, before any further evaluation).
+; The entry pointer is held in a saved register across the index eval, so
+; nested array references such as A(B(I)) work correctly.
+arr_addr:   save        x4, x5, x6, x7
+            st          x0, .aa_tok
+            calls       .arr_get
+            movr        ac, x5           ; x5 = entry (survives ex_expr)
+            ld          x0, .aa_tok      ; advance ep_tok past the VAR token
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4           ; x4 = ep_tok + size  (at '(')
+            ld          ac, (x4)         ; consume '('
+            sub         ac, .v_lpar
+            movr.rn     ac, ac
+            jmp         .aa_serr
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; index value in ac
+            movr        ac, x6           ; x6 = index
+            ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .aa_serr
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            movr        x6, ac           ; index < 0 ?
+            and         ac, .signbit
+            movr.rn     ac, ac           ; skip jmp when non-negative
+            jmp         .aa_sub
+            ld          x4, 3(x5)        ; block pointer
+            ld          ac, (x4)         ; N
+            movr        ac, x7           ; x7 = N
+            cmplt       x6, x7           ; index < N ?
+            jmp         .aa_inb
+            jmp         .aa_sub
+aa_inb:     ld          x4, 3(x5)        ; element address = block + 1 + index
+            addi        x4, x4, 1
+            addr        x6, x4
+            ld          ac, 2(x5)        ; element type
+            st          ac, .aa_etype
+            movr        x4, ac
+            rets
+aa_sub:     ldea        x0, .msg_subr
+            jmp         .err_show
+aa_serr:    ldea        x0, .msg_synt
+            jmp         .err_show
+
+; is_array — x0 = VAR token pointer.  Returns 1 in ac if the token after
+; the variable is '(' (an array reference), else 0.  Does not advance.
+is_array:   save        x4, x5
+            movr        x0, x5
+            calls       .tok_size
+            movr        x5, x4
+            addr        ac, x4           ; x4 = VAR ptr + size = next token
+            ld          ac, (x4)
+            sub         ac, .v_lpar
+            movr.rn     ac, ac           ; '(' ?
+            jmp         .ia_no
+            ldea        ac, 1
+            rets
+ia_no:      xorr        ac, ac
+            rets
+
+ar_cnt:     bss         1
+ar_nm0:     bss         1
+ar_nm1:     bss         1
+ar_str:     bss         1
+aa_tok:     bss         1
+aa_n:       bss         1
+aa_init:    bss         1
+aa_blk:     bss         1
+aa_top:     bss         1
+aa_etype:   bss         1
+ag_tok:     bss         1
+ag_blk:     bss         1
 
 
 ; ==========================================================================
@@ -1737,7 +1957,20 @@ exp_nI:     ld          ac, .ex_t
             sub         ac, .tknvar
             movr.rn     ac, ac           ; VAR ?
             jmp         .exp_nVc
-            ld          x0, .ep_tok
+            ld          x0, .ep_tok      ; array element reference?
+            calls       .is_array
+            movr.rz     ac, ac
+            jmp         .exp_scal
+            ld          x0, .ep_tok      ; VAR ( index ) -> element value
+            calls       .arr_addr
+            movr        ac, x4
+            ld          ac, (x4)
+            st          ac, .ex_val
+            ld          ac, .aa_etype
+            st          ac, .vtype
+            ld          ac, .ex_val
+            rets
+exp_scal:   ld          x0, .ep_tok
             calls       .var_lookup      ; ac = entry
             st          ac, .exp_ent
             ld          x0, .ep_tok      ; advance past the VAR token
@@ -2518,7 +2751,34 @@ st_let:     save        x4
             sub         ac, .tknvar
             movr.rn     ac, ac           ; VAR ?
             jmp         .sl_err
+            ld          x0, .ep_tok      ; array element assignment?
+            calls       .is_array
+            movr.rz     ac, ac
+            jmp         .sl_scal
+            ; array:  VAR ( index ) = expr
             ld          x0, .ep_tok
+            calls       .arr_addr        ; ac = element address; consumes ')'
+            st          ac, .sl_ent
+            ld          ac, .aa_etype    ; capture element type before value eval
+            st          ac, .sl_etype
+            ld          x4, .ep_tok      ; expect '='
+            ld          ac, (x4)
+            sub         ac, .v_eq
+            movr.rn     ac, ac
+            jmp         .sl_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            st          ac, .sl_val
+            ld          ac, .sl_etype    ; element type must match value type
+            sub         ac, .vtype
+            movr.rn     ac, ac
+            jmp         .sl_tmm
+            ld          x4, .sl_ent
+            ld          ac, .sl_val
+            st          ac, (x4)         ; store into element
+            rets
+sl_scal:    ld          x0, .ep_tok
             calls       .var_lookup
             st          ac, .sl_ent
             ld          x0, .ep_tok      ; advance past variable
@@ -2550,6 +2810,110 @@ sl_err:     ldea        x0, .msg_synt
 
 sl_ent:     bss         1
 sl_val:     bss         1
+sl_etype:   bss         1
+
+
+; ==========================================================================
+; st_dim — DIM name(ub) [, name(ub)]...   Declares one or more arrays with
+; subscripts 0..ub (ub+1 elements).  Element type follows the $ suffix.
+; ==========================================================================
+st_dim:     save        x4
+sd_one:     ld          x4, .ep_tok      ; expect a VAR
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .sd_err
+            ld          x0, .ep_tok      ; packed, array-marked name
+            calls       .arr_name
+            ld          x4, .ep_tok      ; element type from the $ flag
+            ld          ac, (x4)
+            and         ac, .strvbit
+            movr.rz     ac, ac
+            jmp         .sd_int
+            ldea        ac, 1
+            st          ac, .ar_str
+            jmp         .sd_chk
+sd_int:     xorr        ac, ac
+            st          ac, .ar_str
+sd_chk:     calls       .arr_find        ; already dimensioned ?
+            movr.rz     ac, ac
+            jmp         .sd_cap
+            ldea        x0, .msg_redim
+            jmp         .err_show
+sd_cap:     ld          ac, .ar_nm0      ; capture name/type before evaluating
+            st          ac, .sd_nm0      ;   the bound (which may itself index
+            ld          ac, .ar_nm1      ;   another array and clobber ar_*)
+            st          ac, .sd_nm1
+            ld          ac, .ar_str
+            st          ac, .sd_str
+            ld          x0, .ep_tok      ; advance past the VAR
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; expect '('
+            sub         ac, .v_lpar
+            movr.rn     ac, ac
+            jmp         .sd_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; upper bound
+            st          ac, .sd_ub
+            ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .sd_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          ac, .sd_ub       ; bound must be >= 0
+            and         ac, .signbit
+            movr.rn     ac, ac           ; skip jmp when non-negative
+            jmp         .sd_sub
+            ld          ac, .sd_str      ; init value: "" for string else 0
+            movr.rz     ac, ac
+            jmp         .sd_ci
+            ldea        ac, .emptystr
+            jmp         .sd_al
+sd_ci:      xorr        ac, ac
+sd_al:      movr        ac, x1           ; x1 = init value
+            ld          ac, .sd_ub       ; x0 = N = ub + 1
+            addi        ac, ac, 1
+            movr        ac, x0
+            calls       .arr_alloc       ; ac = block pointer
+            st          ac, .sd_blk
+            ld          ac, .varbot      ; allocate the 4-word entry
+            addi        ac, ac, -4
+            st          ac, .varbot
+            movr        ac, x4
+            ld          ac, .sd_nm0
+            st          ac, (x4)
+            ld          ac, .sd_nm1
+            st          ac, 1(x4)
+            ld          ac, .sd_str
+            st          ac, 2(x4)
+            ld          ac, .sd_blk
+            st          ac, 3(x4)
+            ld          x4, .ep_tok      ; another declaration ?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .sd_done
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .sd_one
+sd_done:    rets
+sd_sub:     ldea        x0, .msg_subr
+            jmp         .err_show
+sd_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+sd_ub:      bss         1
+sd_blk:     bss         1
+sd_nm0:     bss         1
+sd_nm1:     bss         1
+sd_str:     bss         1
 
 
 ; ==========================================================================
@@ -2602,9 +2966,16 @@ re_done:    xorr        ac, ac
 ; st_run — RUN: execute the program from the first line.
 ; ==========================================================================
 st_run:     save        x4
+            ld          ac, .memtop      ; RUN clears all variables and arrays
+            st          ac, .varbot      ;   (program text is kept)
+            ldea        ac, .strheap
+            st          ac, .strnext
+            ldea        ac, .arrheap
+            st          ac, .arrnext
             ldea        ac, .progbase
             st          ac, .cur_line
             xorr        ac, ac
+            st          ac, .for_sp
             st          ac, .gosub_sp
             calls       .run_exec
             rets
@@ -2993,6 +3364,8 @@ msg_nfor:   dsn         "?NEXT WITHOUT FOR"
 msg_inq:    dsn         "? "
 msg_tmm:    dsn         "?TYPE MISMATCH"
 msg_oom:    dsn         "?OUT OF MEMORY"
+msg_subr:   dsn         "?BAD SUBSCRIPT"
+msg_redim:  dsn         "?REDIM'D ARRAY"
 
 ; Statement dispatch table: [keyword tag value, handler], terminated by 0.
 ; New statements are added here plus one handler — no change to par_exec.
@@ -3012,6 +3385,7 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #2E0000000, st_for       ; FOR
             dw          #2F0000000, st_next      ; NEXT
             dw          #320000000, st_input     ; INPUT
+            dw          #330000000, st_dim       ; DIM
             dw          0, 0
 
 
@@ -3023,6 +3397,11 @@ tagmask:    dw          #FF0000000       ; bits 35:28
 cntmask:    dw          #FFFFFF          ; bits 23:0 (packed-token char count)
 strvbit:    dw          #1000000         ; bit 24 (TKN_VAR string-type flag)
 signbit:    dw          #800000000       ; bit 35 (sign)
+arrbit:     dw          #1               ; bit 0 of a packed name marks an array
+                                         ;   entry.  Names pack 5 chars x 7 bits
+                                         ;   into bits 35:1 (char 0 at 35:29), so
+                                         ;   bit 0 is always free and keeps array
+                                         ;   A distinct from scalar A
 emptystr:   dw          0                ; the empty string (count = 0)
 
 tknint:     dw          #10000000        ; tag 0x01
@@ -3087,6 +3466,7 @@ s_next:     dsn         "NEXT"
 s_to:       dsn         "TO"
 s_step:     dsn         "STEP"
 s_input:    dsn         "INPUT"
+s_dim:      dsn         "DIM"
 s_abs:      dsn         "ABS"
 s_sgn:      dsn         "SGN"
 s_rnd:      dsn         "RND"
@@ -3137,6 +3517,7 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_to,     #300000000
             dw          s_step,   #310000000
             dw          s_input,  #320000000
+            dw          s_dim,    #330000000
             dw          s_peek,   #400000000
             dw          s_abs,    #410000000
             dw          s_sgn,    #420000000
@@ -3200,6 +3581,7 @@ rev_tab:    dw          #100000000, o_plus
             dw          #300000000, s_to
             dw          #310000000, s_step
             dw          #320000000, s_input
+            dw          #330000000, s_dim
             dw          #400000000, s_peek
             dw          #410000000, s_abs
             dw          #420000000, s_sgn
@@ -3258,6 +3640,14 @@ strnext:    bss         1
 strend:     bss         1
 strheap:    bss         4096
 strendl:
+
+; Array heap (bump-allocated; reset on NEW).  Each array block is
+; [N, elem0 .. elem(N-1)]; data lives here, never in the variable table,
+; so the fixed-stride variable scan is unaffected.
+arrnext:    bss         1
+arrend:     bss         1
+arrheap:    bss         4096
+arrendl:
 
 ; Stack
             bss         256
