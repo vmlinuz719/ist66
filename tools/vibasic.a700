@@ -80,7 +80,9 @@ ready:      ldea        sp, .topstk      ; reset stack each command
             calls       .do_edit         ; program line edit (silent)
             jmp         .ready
 
-rdy_dir:    calls       .tok_line        ; tokenize linebuf -> tokbuf
+rdy_dir:    ldea        x0, .linebuf     ; tokenize the whole line
+            ld          x1, .linelen
+            calls       .tok_line
             ldea        x0, .tokbuf
             calls       .par_exec
             ldea        x0, .msg_rdy
@@ -714,14 +716,13 @@ ts2_done:   retr
 
 
 ; ==========================================================================
-; tok_line — tokenize linebuf (linelen chars) into tokbuf, ending TKN_EOL.
+; tok_line — tokenize x1 chars starting at x0 into tokbuf, ending TKN_EOL.
 ; Returns ac = 0 on success, 1 on error.
 ; ==========================================================================
 tok_line:   save        x4, x5
-            ldea        x4, .linebuf
-            st          x4, .tk_src
-            ld          x5, .linelen
-            addr        x5, x4           ; linebuf + linelen
+            st          x0, .tk_src
+            movr        x0, x4
+            addr        x1, x4           ; start + count
             st          x4, .tk_send
             ldea        x4, .tokbuf
             st          x4, .tk_dst
@@ -879,25 +880,338 @@ rv_w:       bss         1
 
 
 ; ==========================================================================
-; par_exec — execute the tokenized statement at x0.
-; (Stage A placeholder: detokenize and print, to verify the tokenizer.)
+; tok_size — size in words of the token at x0.  Returns size in ac.
 ; ==========================================================================
-par_exec:   save        x4
-            calls       .detok
+tok_size:   save        x4
+            ld          ac, (x0)
+            st          ac, .tz_word
+            and         ac, .tagmask
+            st          ac, .tz_tag
+            sub         ac, .tknint
+            movr.rn     ac, ac           ; INT ?
+            jmp         .tz_nI
+            ldea        ac, 2
+            rets
+tz_nI:      ld          ac, .tz_tag
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; VAR ?
+            jmp         .tz_nV
+            jmp         .tz_pk
+tz_nV:      ld          ac, .tz_tag
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; STR ?
+            jmp         .tz_nS
+            jmp         .tz_pk
+tz_nS:      ldea        ac, 1            ; operator / keyword
+            rets
+tz_pk:      ld          ac, .tz_word     ; 1 + ceil(count/5)
+            and         ac, .cntmask
+            addi        ac, ac, 4
+            div         .fivew
+            movr        mq, ac
+            addi        ac, ac, 1
+            rets
+
+tz_word:    bss         1
+tz_tag:     bss         1
+
+
+; ==========================================================================
+; tok_blklen — count words in the tokbuf statement (including TKN_EOL).
+; Result in toklen.  Walks by token structure so embedded 0 data words
+; (e.g. the literal 0) are not mistaken for the end marker.
+; ==========================================================================
+tok_blklen: save        x4, x5
+            ldea        x4, .tokbuf
+            xorr        x5, x5
+tb_lp:      ld          ac, (x4)
+            movr.rz     ac, ac           ; word != 0 ?
+            jmp         .tb_eol
+            movr        x4, x0
+            st          x4, .tb_save
+            calls       .tok_size        ; ac = token size
+            ld          x4, .tb_save
+            addr        ac, x4           ; advance ptr
+            addr        ac, x5           ; total += size
+            jmp         .tb_lp
+tb_eol:     incr        x5, x5           ; count the EOL word
+            st          x5, .toklen
+            rets
+
+tb_save:    bss         1
+toklen:     bss         1
+
+
+; ==========================================================================
+; ln_find — locate line lnum (x0).  Sets ln_ptr = first line with number
+; >= lnum (the insertion point) and ln_match = 1 if an exact match exists.
+; ==========================================================================
+ln_find:    save        x4, x5, x6
+            st          x0, .lf_num
+            ldea        x4, .progbase
+lf_lp:      ld          x5, .progend
+            cmplt       x4, x5           ; ptr < progend ?
+            jmp         .lf_chk
+            jmp         .lf_end
+lf_chk:     ld          x6, (x4)         ; this line number
+            ld          x5, .lf_num
+            cmpge       x6, x5           ; lineno >= lnum ?
+            jmp         .lf_here
+            ld          ac, 1(x4)        ; advance: header(2) + token count
+            addi        ac, ac, 2
+            addr        ac, x4
+            jmp         .lf_lp
+lf_here:    st          x4, .ln_ptr
+            ld          ac, (x4)
+            sub         ac, .lf_num
+            movr.rn     ac, ac           ; exact match ?
+            jmp         .lf_nomat
+            ldea        ac, 1
+            st          ac, .ln_match
+            rets
+lf_nomat:   xorr        ac, ac
+            st          ac, .ln_match
+            rets
+lf_end:     st          x4, .ln_ptr      ; past last line (append point)
+            xorr        ac, ac
+            st          ac, .ln_match
+            rets
+
+lf_num:     bss         1
+ln_ptr:     bss         1
+ln_match:   bss         1
+
+
+; ==========================================================================
+; shift_up — open a gap of x1 words at address x0; progend += x1.
+; ==========================================================================
+shift_up:   save        x4, x5, x6, x7
+            movr        x0, x6           ; lower bound
+            ld          x4, .progend
+            addi        x4, x4, -1       ; src = progend - 1
+su_lp:      cmpge       x4, x6           ; src >= at ?
+            jmp         .su_do
+            jmp         .su_fin
+su_do:      ld          ac, (x4)
+            movr        x4, x5
+            addr        x1, x5           ; dst = src + cnt
+            st          ac, (x5)
+            addi        x4, x4, -1
+            jmp         .su_lp
+su_fin:     ld          ac, .progend
+            addr        x1, ac
+            st          ac, .progend
             rets
 
 
 ; ==========================================================================
-; do_edit / st_new — placeholders (real versions in Stage B).
+; shift_dn — remove x1 words at address x0; progend -= x1.
 ; ==========================================================================
-do_edit:    save        x4
+shift_dn:   save        x4, x5, x6, x7
+            movr        x0, x4
+            addr        x1, x4           ; src = at + cnt
+            ld          x6, .progend
+sd_lp:      cmplt       x4, x6           ; src < progend ?
+            jmp         .sd_do
+            jmp         .sd_fin
+sd_do:      ld          ac, (x4)
+            movr        x4, x5
+            ngtr        x1, x7
+            addr        x7, x5           ; dst = src - cnt
+            st          ac, (x5)
+            incr        x4, x4
+            jmp         .sd_lp
+sd_fin:     ld          ac, .progend
+            ngtr        x1, x7
+            addr        x7, ac
+            st          ac, .progend
             rets
 
-st_new:     ldea        ac, .progbase
+
+; ==========================================================================
+; ln_delete — remove line lnum (x0) if present.
+; ==========================================================================
+ln_delete:  save        x4
+            calls       .ln_find
+            ld          ac, .ln_match
+            movr.rz     ac, ac           ; skip jmp when match present
+            jmp         .lde_no
+            ld          x4, .ln_ptr
+            ld          ac, 1(x4)
+            addi        ac, ac, 2        ; size = header + tokens
+            st          ac, .lde_sz
+            ld          x0, .ln_ptr
+            ld          x1, .lde_sz
+            calls       .shift_dn
+lde_no:     rets
+
+lde_sz:     bss         1
+
+
+; ==========================================================================
+; ln_insert — store line lnum (x0); tokbuf/toklen hold its token block.
+; Replaces any existing line with the same number.
+; ==========================================================================
+ln_insert:  save        x4, x5, x6
+            st          x0, .li_num
+            calls       .ln_delete       ; remove old copy if any
+            ld          x0, .li_num
+            calls       .ln_find         ; insertion point -> ln_ptr
+            ld          ac, .toklen
+            addi        ac, ac, 2        ; new line size
+            st          ac, .li_sz
+            ld          x0, .ln_ptr
+            ld          x1, .li_sz
+            calls       .shift_up
+            ld          x4, .ln_ptr
+            ld          ac, .li_num
+            st          ac, (x4)         ; line number
+            ld          ac, .toklen
+            st          ac, 1(x4)        ; token count
+            addi        x4, x4, 2
+            ldea        x5, .tokbuf
+            ld          x6, .toklen
+            ngtr        x6, x6
+            movr.rz     x6, x6           ; no tokens?
+            jmp         .li_done
+li_cp:      ld          ac, (x5)
+            st          ac, (x4)
+            incr        x4, x4
+            incr        x5, x5
+            incr.rn     x6, x6
+            jmp         .li_cp
+li_done:    rets
+
+li_num:     bss         1
+li_sz:      bss         1
+
+
+; ==========================================================================
+; do_edit — store or delete a numbered program line from linebuf.
+; ==========================================================================
+do_edit:    save        x4, x5
+            ; parse the leading line number
+            ldea        x4, .linebuf
+            xorr        x5, x5           ; value
+de_num:     ld          ac, (x4)
+            callr       .id_digit        ; clobbers x6,x7 (x4,x5 safe)
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .de_done
+            ld          ac, (x4)
+            addi        ac, ac, -48
+            st          ac, .de_dig
+            movr        x5, mq
+            mul         .tenw
+            add         ac, .de_dig
+            movr        ac, x5
+            incr        x4, x4
+            jmp         .de_num
+de_done:    st          x5, .de_lnum     ; line number
+            st          x4, .de_rest     ; pointer to remaining text
+            ldea        x4, .linebuf     ; remaining count = (linebuf+linelen) - rest
+            ld          x5, .linelen
+            addr        x5, x4           ; x4 = end of line
+            ld          x5, .de_rest
+            ngtr        x5, x5
+            addr        x5, x4           ; x4 = end - rest
+            st          x4, .de_cnt
+            ld          x0, .de_rest     ; tokenize the remainder
+            ld          x1, .de_cnt
+            calls       .tok_line
+            calls       .tok_blklen      ; -> toklen
+            ; empty statement (toklen == 1, just EOL) -> delete
+            ld          ac, .toklen
+            subin.rn    ac, ac, 1        ; toklen == 1 ?
+            jmp         .de_store
+            ld          x0, .de_lnum
+            calls       .ln_delete
+            rets
+de_store:   ld          x0, .de_lnum
+            calls       .ln_insert
+            rets
+
+de_dig:     bss         1
+de_lnum:    bss         1
+de_rest:    bss         1
+de_cnt:     bss         1
+
+
+; ==========================================================================
+; st_list — LIST the stored program.
+; ==========================================================================
+st_list:    save        x4, x5
+            ldea        x4, .progbase
+sl_lp:      ld          x5, .progend
+            cmplt       x4, x5           ; ptr < progend ?
+            jmp         .sl_line
+            jmp         .sl_done
+sl_line:    st          x4, .sl_save
+            ld          ac, (x4)         ; line number
+            callr       .io_putn
+            ldea        ac, 32           ; space
+            callr       .io_putc
+            ld          x4, .sl_save
+            movr        x4, x0
+            addi        x0, x0, 2        ; token block
+            calls       .detok           ; prints tokens + CRLF
+            ld          x4, .sl_save
+            ld          ac, 1(x4)
+            addi        ac, ac, 2
+            addr        ac, x4           ; next line
+            jmp         .sl_lp
+sl_done:    rets
+
+sl_save:    bss         1
+
+
+; ==========================================================================
+; st_new — clear the program and all variables.
+; ==========================================================================
+st_new:     save        x4
+            ldea        ac, .progbase
             st          ac, .progend
             ld          ac, .memtop
             st          ac, .varbot
-            retr
+            rets
+
+
+; ==========================================================================
+; st_rem — REM: ignore the rest of the line.
+; ==========================================================================
+st_rem:     save        x4
+            rets
+
+
+; ==========================================================================
+; par_exec — execute the tokenized statement at x0 via the dispatch table.
+; ==========================================================================
+par_exec:   save        x4
+            st          x0, .cur_tok
+            ld          x4, .cur_tok
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; skip rets when statement present
+            rets                          ; empty line: nothing to do
+            st          ac, .pe_w
+            ldea        x4, .st_tab
+pe_lp:      ld          ac, (x4)         ; tag (0 = end)
+            movr.rz     ac, ac
+            jmp         .pe_unk
+            ld          ac, .pe_w
+            sub         ac, (x4)
+            movr.rn     ac, ac           ; match ?
+            jmp         .pe_next
+            ld          x0, 1(x4)        ; handler address
+            calls       (x0)             ; mask word lives at handler[0]
+            rets
+pe_next:    addi        x4, x4, 2
+            jmp         .pe_lp
+pe_unk:     ldea        x0, .msg_synt    ; unknown / not-yet-implemented
+            callr       .io_puts
+            callr       .io_crlf
+            rets
+
+pe_w:       bss         1
+cur_tok:    bss         1
 
 
 ; ==========================================================================
@@ -914,6 +1228,14 @@ crlfbuf:    dw          13, 10
 msg_ban:    dsn         "VIBASIC V0.1"
 msg_free:   dsn         " WORDS FREE"
 msg_rdy:    dsn         "READY."
+msg_synt:   dsn         "?SYNTAX ERROR"
+
+; Statement dispatch table: [keyword tag value, handler], terminated by 0.
+; New statements are added here plus one handler — no change to par_exec.
+st_tab:     dw          #280000000, st_list      ; LIST
+            dw          #290000000, st_new       ; NEW
+            dw          #200000000, st_rem       ; REM
+            dw          0, 0
 
 
 ; ==========================================================================
