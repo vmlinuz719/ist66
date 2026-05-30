@@ -1960,6 +1960,213 @@ poke_a:     bss         1
 
 
 ; ==========================================================================
+; st_for — FOR var = start TO limit [STEP step]
+; ==========================================================================
+st_for:     save        x4, x5
+            ld          x4, .ep_tok      ; loop variable
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .sf_err
+            ld          x0, .ep_tok
+            calls       .var_lookup
+            addi        ac, ac, 2        ; value address
+            st          ac, .sf_va
+            ld          x0, .ep_tok      ; advance past variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; expect '='
+            sub         ac, .v_eq
+            movr.rn     ac, ac
+            jmp         .sf_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; start
+            ld          x4, .sf_va
+            st          ac, (x4)
+            ld          x4, .ep_tok      ; expect TO
+            ld          ac, (x4)
+            sub         ac, .v_to
+            movr.rn     ac, ac
+            jmp         .sf_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; limit
+            st          ac, .sf_lim
+            ld          x4, .ep_tok      ; optional STEP
+            ld          ac, (x4)
+            sub         ac, .v_step
+            movr.rn     ac, ac
+            jmp         .sf_nos
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            st          ac, .sf_step
+            jmp         .sf_push
+sf_nos:     ldea        ac, 1
+            st          ac, .sf_step
+sf_push:    ld          x4, .cur_line    ; resume = line after the FOR line
+            ld          ac, 1(x4)
+            addi        ac, ac, 2
+            addr        ac, x4
+            st          x4, .sf_res
+            ld          ac, .for_sp      ; frame = for_st + sp*4
+            addr        ac, ac
+            addr        ac, ac
+            ldea        x5, .for_st
+            addr        ac, x5
+            ld          ac, .sf_va
+            st          ac, (x5)
+            ld          ac, .sf_lim
+            st          ac, 1(x5)
+            ld          ac, .sf_step
+            st          ac, 2(x5)
+            ld          ac, .sf_res
+            st          ac, 3(x5)
+            ld          ac, .for_sp
+            incr        ac, ac
+            st          ac, .for_sp
+            rets
+sf_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+sf_va:      bss         1
+sf_lim:     bss         1
+sf_step:    bss         1
+sf_res:     bss         1
+
+
+; ==========================================================================
+; st_next — NEXT [var]: step the loop variable; loop or fall through.
+; ==========================================================================
+st_next:    save        x4, x5
+            ld          ac, .for_sp
+            movr.rz     ac, ac           ; skip jmp when stack non-empty
+            jmp         .sn_err
+            ld          ac, .for_sp      ; top frame
+            addi        ac, ac, -1
+            addr        ac, ac
+            addr        ac, ac
+            ldea        x5, .for_st
+            addr        ac, x5
+            ld          x4, (x5)         ; value address
+            ld          ac, (x4)
+            add         ac, 2(x5)        ; var += step
+            st          ac, (x4)
+            ld          ac, 2(x5)        ; step sign
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when step negative
+            jmp         .sn_pos
+            ld          x4, (x5)         ; negative step: continue if var >= limit
+            ld          ac, (x4)
+            sub         ac, 1(x5)        ; var - limit
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when var < limit
+            jmp         .sn_cont
+            jmp         .sn_end
+sn_pos:     ld          x4, (x5)         ; positive step: continue if var <= limit
+            ld          ac, (x4)
+            sub         ac, 1(x5)        ; var - limit
+            st          ac, .sn_d
+            movr.rz     ac, ac           ; skip jmp when nonzero
+            jmp         .sn_cont
+            ld          ac, .sn_d
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .sn_end
+            jmp         .sn_cont
+sn_cont:    ld          ac, 3(x5)        ; loop back to body
+            st          ac, .cur_line
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+sn_end:     ld          ac, .for_sp      ; pop frame, continue after NEXT
+            addi        ac, ac, -1
+            st          ac, .for_sp
+            rets
+sn_err:     ldea        x0, .msg_nfor
+            jmp         .err_show
+
+sn_d:       bss         1
+
+
+; ==========================================================================
+; parse_int — parse a signed integer from linebuf.  Returns value in ac.
+; ==========================================================================
+parse_int:  save        x4, x5
+            ldea        x4, .linebuf
+            xorr        x5, x5
+            xorr        ac, ac
+            st          ac, .pi_neg
+pi_sp:      ld          ac, (x4)         ; skip leading spaces
+            subin.rn    ac, ac, 32
+            jmp         .pi_chk
+            incr        x4, x4
+            jmp         .pi_sp
+pi_chk:     ld          ac, (x4)         ; optional '-'
+            subin.rn    ac, ac, 45
+            jmp         .pi_dl
+            incr        x4, x4
+            ldea        ac, 1
+            st          ac, .pi_neg
+pi_dl:      ld          ac, (x4)
+            callr       .id_digit
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .pi_done
+            ld          ac, (x4)
+            addi        ac, ac, -48
+            st          ac, .pi_d
+            movr        x5, mq
+            mul         .tenw
+            add         ac, .pi_d
+            movr        ac, x5
+            incr        x4, x4
+            jmp         .pi_dl
+pi_done:    ld          ac, .pi_neg
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .pi_ret
+            ngtr        x5, x5
+pi_ret:     movr        x5, ac
+            rets
+
+pi_neg:     bss         1
+pi_d:       bss         1
+
+
+; ==========================================================================
+; st_input — INPUT var : prompt "? ", read a line, assign an integer.
+; ==========================================================================
+st_input:   save        x4
+            ldea        x0, .msg_inq
+            callr       .io_puts
+            ldea        x0, .linebuf
+            ld          x1, .linemax
+            callr       .io_gets
+            st          ac, .linelen
+            calls       .parse_int
+            st          ac, .inp_val
+            ld          x4, .ep_tok      ; variable
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .si_err
+            ld          x0, .ep_tok
+            calls       .var_lookup
+            movr        ac, x4
+            ld          ac, .inp_val
+            st          ac, 2(x4)
+            rets
+si_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+inp_val:    bss         1
+
+
+; ==========================================================================
 ; Read-only data
 ; ==========================================================================
 
@@ -1976,6 +2183,8 @@ msg_rdy:    dsn         "READY."
 msg_synt:   dsn         "?SYNTAX ERROR"
 msg_undef:  dsn         "?UNDEF'D LINE"
 msg_rgos:   dsn         "?RETURN WITHOUT GOSUB"
+msg_nfor:   dsn         "?NEXT WITHOUT FOR"
+msg_inq:    dsn         "? "
 
 ; Statement dispatch table: [keyword tag value, handler], terminated by 0.
 ; New statements are added here plus one handler — no change to par_exec.
@@ -1992,6 +2201,9 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #2B0000000, st_return    ; RETURN
             dw          #2C0000000, st_stop      ; STOP
             dw          #2D0000000, st_poke      ; POKE
+            dw          #2E0000000, st_for       ; FOR
+            dw          #2F0000000, st_next      ; NEXT
+            dw          #320000000, st_input     ; INPUT
             dw          0, 0
 
 
@@ -2023,6 +2235,8 @@ v_comma:    dw          #160000000
 v_semi:     dw          #170000000
 v_eq:       dw          #190000000
 v_then:     dw          #250000000
+v_to:       dw          #300000000       ; TO, tag 0x30
+v_step:     dw          #310000000       ; STEP, tag 0x31
 v_peek:     dw          #400000000       ; PEEK function, tag 0x40
 neg1:       dw          -1
 
@@ -2042,6 +2256,11 @@ s_return:   dsn         "RETURN"
 s_stop:     dsn         "STOP"
 s_poke:     dsn         "POKE"
 s_peek:     dsn         "PEEK"
+s_for:      dsn         "FOR"
+s_next:     dsn         "NEXT"
+s_to:       dsn         "TO"
+s_step:     dsn         "STEP"
+s_input:    dsn         "INPUT"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -2075,6 +2294,11 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_return, #2B0000000
             dw          s_stop,   #2C0000000
             dw          s_poke,   #2D0000000
+            dw          s_for,    #2E0000000
+            dw          s_next,   #2F0000000
+            dw          s_to,     #300000000
+            dw          s_step,   #310000000
+            dw          s_input,  #320000000
             dw          s_peek,   #400000000
             dw          0, 0
 
@@ -2121,6 +2345,11 @@ rev_tab:    dw          #100000000, o_plus
             dw          #2B0000000, s_return
             dw          #2C0000000, s_stop
             dw          #2D0000000, s_poke
+            dw          #2E0000000, s_for
+            dw          #2F0000000, s_next
+            dw          #300000000, s_to
+            dw          #310000000, s_step
+            dw          #320000000, s_input
             dw          #400000000, s_peek
             dw          0, 0
 
@@ -2137,6 +2366,8 @@ cur_line:   bss         1                ; current line during RUN
 jumped:     bss         1                ; set by GOTO/GOSUB to suppress advance
 gosub_sp:   bss         1                ; gosub stack pointer
 gosub_st:   bss         32               ; gosub return-address stack
+for_sp:     bss         1                ; FOR stack pointer (frame index)
+for_st:     bss         64               ; FOR stack (4 words/frame)
 
 ; I/O interrupt state
 out_ptr:    bss         1
