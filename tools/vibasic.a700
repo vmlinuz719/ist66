@@ -3392,6 +3392,19 @@ sr_val:     bss         1
 
 
 ; ==========================================================================
+; st_call — CALL <addr>: transfer control to a machine-language routine at
+; the evaluated address.  The routine runs in supervisor mode and must
+; return with retr (it links via callr).  No arguments or result are passed
+; through CALL itself; use POKE/PEEK to exchange values.
+; ==========================================================================
+st_call:    save        x4
+            calls       .ex_expr         ; routine address
+            movr        ac, x0
+            callr        (x0)             ; call it; returns here via retr
+            rets
+
+
+; ==========================================================================
 ; st_if — IF <expr> THEN <line | statement>.
 ; ==========================================================================
 st_if:      save        x4
@@ -3805,6 +3818,7 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #350000000, st_data      ; DATA
             dw          #360000000, st_read      ; READ
             dw          #370000000, st_restore   ; RESTORE
+            dw          #380000000, st_call      ; CALL
             dw          0, 0
 
 
@@ -3894,6 +3908,7 @@ s_on:       dsn         "ON"
 s_data:     dsn         "DATA"
 s_read:     dsn         "READ"
 s_restore:  dsn         "RESTORE"
+s_call:     dsn         "CALL"
 s_abs:      dsn         "ABS"
 s_sgn:      dsn         "SGN"
 s_rnd:      dsn         "RND"
@@ -3949,6 +3964,7 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_data,   #350000000
             dw          s_read,   #360000000
             dw          s_restore,#370000000
+            dw          s_call,   #380000000
             dw          s_peek,   #400000000
             dw          s_abs,    #410000000
             dw          s_sgn,    #420000000
@@ -4017,6 +4033,7 @@ rev_tab:    dw          #100000000, o_plus
             dw          #350000000, s_data
             dw          #360000000, s_read
             dw          #370000000, s_restore
+            dw          #380000000, s_call
             dw          #400000000, s_peek
             dw          #410000000, s_abs
             dw          #420000000, s_sgn
