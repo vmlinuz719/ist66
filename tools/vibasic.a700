@@ -1231,6 +1231,8 @@ st_new:     save        x4
             xorr        ac, ac
             st          ac, .for_sp
             st          ac, .gosub_sp
+            st          ac, .data_init
+            st          ac, .data_ptr
             rets
 
 
@@ -3026,6 +3028,24 @@ se_dn:      st          x0, .ep_tok
             rets
 
 
+; skip_stmt — advance ep_tok to the next statement boundary: the next ':'
+; or the TKN_EOL that ends the line (walking token by token).
+skip_stmt:  save        x4
+            ld          x0, .ep_tok
+sks_lp:     ld          ac, (x0)
+            movr.rz     ac, ac           ; nonzero token ?
+            jmp         .sks_dn          ; EOL
+            sub         ac, .v_colon
+            movr.rn     ac, ac           ; skip jmp when ':'
+            jmp         .sks_adv
+            jmp         .sks_dn          ; ':' -> stop
+sks_adv:    calls       .tok_size
+            addr        ac, x0           ; x0 += token size
+            jmp         .sks_lp
+sks_dn:     st          x0, .ep_tok
+            rets
+
+
 ; ==========================================================================
 ; st_run — RUN: execute the program from the first line.
 ; ==========================================================================
@@ -3041,6 +3061,8 @@ st_run:     save        x4
             xorr        ac, ac
             st          ac, .for_sp
             st          ac, .gosub_sp
+            st          ac, .data_init   ; RUN rewinds DATA too
+            st          ac, .data_ptr
             calls       .run_exec
             rets
 
@@ -3178,6 +3200,195 @@ on_idx:     bss         1
 on_mode:    bss         1
 on_sel:     bss         1
 on_cnt:     bss         1
+
+
+; ==========================================================================
+; READ / DATA / RESTORE.
+;   DATA is inert at run time (its values are skipped).
+;   READ pulls successive DATA values into variables.
+;   RESTORE rewinds the DATA pointer to the first DATA value.
+; data_ptr = next value token (0 = exhausted once data_init is set).
+; data_cl  = line header of the line that contains data_ptr.
+; ==========================================================================
+
+; st_data — skip the DATA values to the next statement boundary.
+st_data:    save        x4
+            calls       .skip_stmt
+            rets
+
+; st_restore — rewind the DATA pointer.
+st_restore: save        x4
+            xorr        ac, ac
+            st          ac, .data_init
+            st          ac, .data_ptr
+            rets
+
+; data_seek — x0 = token pointer to start scanning; data_cl = the line that
+; contains it.  Finds the next DATA keyword, sets data_ptr to its first
+; value token (updating data_cl across line boundaries).  ac = 1 if found,
+; 0 at end of program.
+data_seek:  save        x4, x5
+            movr        x0, x4           ; x4 = scan pointer
+ds_lp:      ld          ac, (x4)
+            movr.rz     ac, ac           ; TKN_EOL ?
+            jmp         .ds_eol
+            and         ac, .tagmask
+            sub          ac, .v_data
+            movr.rn     ac, ac           ; DATA keyword ?
+            jmp         .ds_skip
+            addi        x4, x4, 1        ; values start right after DATA
+            st          x4, .data_ptr
+            ldea        ac, 1
+            rets
+ds_skip:    movr        x4, x0           ; advance by one token
+            calls       .tok_size
+            addr        ac, x4
+            jmp         .ds_lp
+ds_eol:     ld          x5, .data_cl     ; move to the next line
+            ld          ac, 1(x5)
+            addi        ac, ac, 2
+            addr        ac, x5
+            st          x5, .data_cl
+            ld          ac, .progend
+            cmplt       x5, ac           ; data_cl < progend ?
+            jmp         .ds_more
+            jmp         .ds_none         ; reached end of program
+ds_more:    ld          x4, .data_cl
+            addi        x4, x4, 2        ; first token of the new line
+            jmp         .ds_lp
+ds_none:    xorr        ac, ac
+            rets
+
+; rd_value — fetch the next DATA value.  Returns it in ac with vtype set.
+; Raises ?OUT OF DATA when the data is exhausted.
+rd_value:   save        x4, x5
+            ld          ac, .data_init
+            movr.rn     ac, ac           ; skip jmp when not initialised
+            jmp         .rv_chk
+            ldea        ac, 1            ; first READ: seek from program start
+            st          ac, .data_init
+            ldea        ac, .progbase
+            st          ac, .data_cl
+            ldea        x0, .progbase
+            addi        x0, x0, 2
+            calls       .data_seek
+            movr.rn     ac, ac           ; skip jmp when no DATA found
+            jmp         .rv_have
+            jmp         .rv_ood
+rv_chk:     ld          ac, .data_ptr
+            movr.rz     ac, ac           ; exhausted (0) ?
+            jmp         .rv_ood
+rv_have:    ld          x4, .data_ptr    ; read value token
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknint
+            movr.rn     ac, ac           ; INT ?
+            jmp         .rv_nstr
+            ld          ac, 1(x4)
+            st          ac, .rd_val
+            xorr        ac, ac
+            st          ac, .rd_vt
+            jmp         .rv_adv
+rv_nstr:    ld          x4, .data_ptr
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; STR ?
+            jmp         .rv_err
+            ld          x0, .data_ptr    ; copy the string literal to the heap
+            ldea        x1, .emptystr
+            calls       .str_cat
+            st          ac, .rd_val
+            ldea        ac, 1
+            st          ac, .rd_vt
+rv_adv:     ld          x0, .data_ptr    ; advance past this value
+            calls       .tok_size
+            ld          x4, .data_ptr
+            addr        ac, x4           ; x4 = token after the value
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac           ; ',' -> next value in this DATA
+            jmp         .rv_seek
+            addi        x4, x4, 1
+            st          x4, .data_ptr
+            jmp         .rv_ret
+rv_seek:    movr        x4, x0           ; seek the next DATA statement
+            calls       .data_seek
+            movr.rn     ac, ac           ; skip jmp when none left
+            jmp         .rv_ret
+            xorr        ac, ac           ; exhausted
+            st          ac, .data_ptr
+rv_ret:     ld          ac, .rd_vt
+            st          ac, .vtype
+            ld          ac, .rd_val
+            rets
+rv_ood:     ldea        x0, .msg_ood
+            jmp         .err_show
+rv_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+; st_read — READ var [, var]...   Assigns successive DATA values.  Targets
+; may be scalars or array elements.
+st_read:    save        x4
+sr_one:     ld          x4, .ep_tok      ; expect a VAR
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .sr_err
+            ld          x0, .ep_tok      ; array element or scalar ?
+            calls       .is_array
+            movr.rz     ac, ac
+            jmp         .sr_scal
+            ld          x0, .ep_tok      ; array element target
+            calls       .arr_addr
+            st          ac, .sr_addr
+            ld          ac, .aa_etype
+            st          ac, .sr_etype
+            jmp         .sr_rd
+sr_scal:    ld          x0, .ep_tok      ; scalar target
+            calls       .var_lookup
+            movr        ac, x4
+            ld          ac, 2(x4)
+            st          ac, .sr_etype
+            addi        x4, x4, 3        ; value address = entry + 3
+            st          x4, .sr_addr
+            ld          x0, .ep_tok      ; advance past the variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+sr_rd:      calls       .rd_value        ; value in ac, vtype set
+            st          ac, .sr_val
+            ld          ac, .sr_etype    ; type must match
+            sub         ac, .vtype
+            movr.rn     ac, ac
+            jmp         .sr_tmm
+            ld          x4, .sr_addr
+            ld          ac, .sr_val
+            st          ac, (x4)
+            ld          x4, .ep_tok      ; another variable ?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .sr_done
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .sr_one
+sr_done:    rets
+sr_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+sr_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+data_init:  bss         1
+data_ptr:   bss         1
+data_cl:    bss         1
+rd_val:     bss         1
+rd_vt:      bss         1
+sr_addr:    bss         1
+sr_etype:   bss         1
+sr_val:     bss         1
 
 
 ; ==========================================================================
@@ -3569,6 +3780,7 @@ msg_tmm:    dsn         "?TYPE MISMATCH"
 msg_oom:    dsn         "?OUT OF MEMORY"
 msg_subr:   dsn         "?BAD SUBSCRIPT"
 msg_redim:  dsn         "?REDIM'D ARRAY"
+msg_ood:    dsn         "?OUT OF DATA"
 
 ; Statement dispatch table: [keyword tag value, handler], terminated by 0.
 ; New statements are added here plus one handler — no change to par_exec.
@@ -3590,6 +3802,9 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #320000000, st_input     ; INPUT
             dw          #330000000, st_dim       ; DIM
             dw          #340000000, st_on        ; ON
+            dw          #350000000, st_data      ; DATA
+            dw          #360000000, st_read      ; READ
+            dw          #370000000, st_restore   ; RESTORE
             dw          0, 0
 
 
@@ -3631,6 +3846,7 @@ v_eq:       dw          #190000000
 v_then:     dw          #250000000
 v_goto:     dw          #230000000
 v_gosub:    dw          #2A0000000
+v_data:     dw          #350000000       ; DATA keyword tag
 v_to:       dw          #300000000       ; TO, tag 0x30
 v_step:     dw          #310000000       ; STEP, tag 0x31
 v_peek:     dw          #400000000       ; PEEK function, tag 0x40
@@ -3675,6 +3891,9 @@ s_step:     dsn         "STEP"
 s_input:    dsn         "INPUT"
 s_dim:      dsn         "DIM"
 s_on:       dsn         "ON"
+s_data:     dsn         "DATA"
+s_read:     dsn         "READ"
+s_restore:  dsn         "RESTORE"
 s_abs:      dsn         "ABS"
 s_sgn:      dsn         "SGN"
 s_rnd:      dsn         "RND"
@@ -3727,6 +3946,9 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_input,  #320000000
             dw          s_dim,    #330000000
             dw          s_on,     #340000000
+            dw          s_data,   #350000000
+            dw          s_read,   #360000000
+            dw          s_restore,#370000000
             dw          s_peek,   #400000000
             dw          s_abs,    #410000000
             dw          s_sgn,    #420000000
@@ -3792,6 +4014,9 @@ rev_tab:    dw          #100000000, o_plus
             dw          #320000000, s_input
             dw          #330000000, s_dim
             dw          #340000000, s_on
+            dw          #350000000, s_data
+            dw          #360000000, s_read
+            dw          #370000000, s_restore
             dw          #400000000, s_peek
             dw          #410000000, s_abs
             dw          #420000000, s_sgn
