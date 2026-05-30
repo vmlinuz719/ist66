@@ -31,8 +31,7 @@ typedef struct {
     int done;
     int pending;          /* byte loaded by transfer=1 awaiting start */
     char out[200000]; int outlen;
-    unsigned char in[4096]; int inlen, inpos;
-    int delivered;        /* input interrupt already raised? */
+    unsigned char in[8192]; int inlen, inpos;
 } faketty_t;
 
 static faketty_t TTY;
@@ -67,13 +66,6 @@ static uint64_t faketty_io(void *vctx, uint64_t data, int ctl, int transfer) {
     return 0;
 }
 
-/* Raise the input interrupt once, as if INTR_RET fired on a typed line. */
-static void deliver_input(faketty_t *t) {
-    if (t->delivered || t->inlen == 0) return;
-    t->delivered = 1;
-    if (!t->done) { t->done = 1; intr_assert(t->cpu, t->irq); }
-}
-
 static void load_tape(ist66_cu_t *cpu, const char *fn) {
     FILE *f = fopen(fn, "rb");
     if (!f) { fprintf(stderr, "no tape %s\n", fn); exit(1); }
@@ -106,11 +98,15 @@ int main(int argc, char **argv) {
     TTY.cpu = &cpu; TTY.irq = 10;
     cpu.io[48] = faketty_io;
     cpu.ioctx[48] = &TTY;
-    if (argc > 2) {
-        const char *s = argv[2];
-        int n = 0;
-        while (s[n] && n < (int)sizeof(TTY.in) - 2) { TTY.in[n] = (unsigned char)s[n]; n++; }
-        TTY.in[n++] = '\r'; TTY.in[n++] = '\n';   /* telnet-style CR LF */
+    /* Each argv after the tape is one input line; each gets a CR LF. */
+    {
+        int n = 0, a;
+        for (a = 2; a < argc; a++) {
+            const char *s = argv[a];
+            int k = 0;
+            while (s[k] && n < (int)sizeof(TTY.in) - 2) TTY.in[n++] = (unsigned char)s[k++];
+            TTY.in[n++] = '\r'; TTY.in[n++] = '\n';
+        }
         TTY.inlen = n;
     }
 
@@ -133,9 +129,14 @@ int main(int argc, char **argv) {
             }
             if (cpu.do_stack) { cpu.a[13] = cpu.next_stack; cpu.do_stack = 0; }
         } else {
-            /* idle (lmwait with nothing pending): inject input once, else stop */
+            /* idle (lmwait): if input remains, raise the input interrupt;
+             * otherwise the machine is genuinely done. */
             if (cpu.min_pending < cur_irql) continue;
-            if (!TTY.delivered && TTY.inlen) { deliver_input(&TTY); cpu.running = 1; continue; }
+            if (TTY.inpos < TTY.inlen && !TTY.done) {
+                TTY.done = 1; intr_assert(&cpu, TTY.irq);
+                cpu.running = 1;
+                continue;
+            }
             break;
         }
     }

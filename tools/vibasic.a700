@@ -57,20 +57,35 @@ start:      xorr        ac, ac
             callr       .io_puts
             callr       .io_crlf
 
-; ----- READY loop (echo, for this increment) ------------------------------
-ready:      ldea        sp, .topstk     ; reset stack each command
-            ldea        x0, .msg_rdy    ; "READY."
+            ldea        x0, .msg_rdy     ; initial "READY."
             callr       .io_puts
             callr       .io_crlf
 
-            ldea        x0, .linebuf     ; read a line
+; ----- READY loop ---------------------------------------------------------
+; Read a line.  If it begins with a digit it is a program edit (store or
+; delete a numbered line); otherwise it is a direct command: tokenize and
+; execute, then print READY.
+ready:      ldea        sp, .topstk      ; reset stack each command
+            ldea        x0, .linebuf
             ld          x1, .linemax
-            callr       .io_gets         ; ac = char count (incl. CR LF)
+            callr       .io_gets
             st          ac, .linelen
 
-            ldea        x0, .linebuf     ; echo it back
-            ld          x1, .linelen
-            callr       .io_putl
+            ldea        x0, .linebuf     ; first char a digit?
+            ld          ac, (x0)
+            callr       .id_digit
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .rdy_dir
+
+            calls       .do_edit         ; program line edit (silent)
+            jmp         .ready
+
+rdy_dir:    calls       .tok_line        ; tokenize linebuf -> tokbuf
+            ldea        x0, .tokbuf
+            calls       .par_exec
+            ldea        x0, .msg_rdy
+            callr       .io_puts
+            callr       .io_crlf
             jmp         .ready
 
 
@@ -313,6 +328,579 @@ gilen:      bss         1
 
 
 ; ==========================================================================
+; Character classification (leaf; callr/retr).  Each takes a char in ac and
+; returns ac = 1/0.  All clobber x6, x7 (callers keep state elsewhere).
+; ==========================================================================
+
+id_digit:   st          ac, .cltmp
+            ld          x6, .cltmp
+            ld          x7, .c48
+            cmpge       x6, x7           ; x6 >= '0' ?
+            jmp         .idg_hi
+            jmp         .idg_no
+idg_hi:     ld          x7, .c57
+            cmple       x6, x7           ; x6 <= '9' ?
+            jmp         .idg_yes
+            jmp         .idg_no
+idg_yes:    ldea        ac, 1
+            retr
+idg_no:     xorr        ac, ac
+            retr
+
+id_alpha:   st          ac, .cltmp
+            ld          x6, .cltmp
+            ld          x7, .c65
+            cmpge       x6, x7           ; >= 'A' ?
+            jmp         .ida_uc
+            jmp         .ida_no
+ida_uc:     ld          x7, .c90
+            cmple       x6, x7           ; <= 'Z' ?
+            jmp         .ida_yes
+            ld          x7, .c97
+            cmpge       x6, x7           ; >= 'a' ?
+            jmp         .ida_lc
+            jmp         .ida_no
+ida_lc:     ld          x7, .c122
+            cmple       x6, x7           ; <= 'z' ?
+            jmp         .ida_yes
+            jmp         .ida_no
+ida_yes:    ldea        ac, 1
+            retr
+ida_no:     xorr        ac, ac
+            retr
+
+id_alnum:   st          lr, .alnlr
+            st          ac, .alnch
+            callr       .id_digit
+            movr.rz     ac, ac           ; skip next when digit
+            jmp         .aln_alp
+            ldea        ac, 1
+            ld          lr, .alnlr
+            retr
+aln_alp:    ld          ac, .alnch
+            callr       .id_alpha
+            ld          lr, .alnlr
+            retr
+
+to_upper:   st          ac, .cltmp
+            ld          x6, .cltmp
+            ld          x7, .c97
+            cmpge       x6, x7           ; >= 'a' ?
+            jmp         .tu_hi
+            retr
+tu_hi:      ld          x7, .c122
+            cmple       x6, x7           ; <= 'z' ?
+            jmp         .tu_lo
+            retr
+tu_lo:      ld          ac, .cltmp
+            addi        ac, ac, -32
+            retr
+
+cltmp:      bss         1
+alnch:      bss         1
+alnlr:      bss         1
+c48:        dw          48
+c57:        dw          57
+c65:        dw          65
+c90:        dw          90
+c97:        dw          97
+c122:       dw          122
+
+
+; ==========================================================================
+; emit_packed — append a packed (dsn-style) token to tokbuf.
+;   x0 = tag word (e.g. TKN_STR or TKN_VAR base)
+;   x1 = source pointer (word-per-char)
+;   x2 = char count
+; Emits  (tag | count)  then  ceil(count/5)  packed 7-bit body words.
+; Updates tk_dst.  No console I/O, so x-registers are safe here.
+; ==========================================================================
+
+emit_packed:save        x4, x5, x6, x7
+            st          x2, .ep_cnt
+            movr        x2, ac
+            bisr        x0, ac           ; ac = count | tag
+            ld          x6, .tk_dst
+            st          ac, (x6)         ; store tag|count word
+            st          x6, .ep_tagad    ; remember tag word address
+            movr        x6, x7           ; BX pointer = tag word addr (shift 0)
+            ngtr        x2, x5           ; x5 = -count
+            movr.rz     x5, x5           ; skip loop body when count == 0
+            jmp         .ep_fin
+ep_lp:      ld          ac, (x1)         ; source char
+            incr        x1, x1
+            incstb      ac, x7, 7        ; pack into body (advances x7)
+            incr.rn     x5, x5           ; skip jmp when all packed
+            jmp         .ep_lp
+ep_fin:     ld          ac, .ep_cnt      ; tk_dst = tagad + 1 + ceil(count/5)
+            addi        ac, ac, 4
+            div         .fivew           ; mq = (count+4)/5
+            ld          ac, .ep_tagad
+            addi        ac, ac, 1
+            addr        mq, ac           ; ac = ac + mq
+            st          ac, .tk_dst
+            rets
+
+ep_cnt:     bss         1
+ep_tagad:   bss         1
+fivew:      dw          5
+
+
+; ==========================================================================
+; tok_emit1 — append a single token word in ac to tokbuf (leaf).
+; ==========================================================================
+tok_emit1:  ld          x6, .tk_dst
+            st          ac, (x6)
+            incr        x6, x6
+            st          x6, .tk_dst
+            retr
+
+
+; ==========================================================================
+; name_eq — compare scanned identifier to a keyword dsn string.
+;   x0 = idbuf (word-per-char)   x1 = id length   x2 = dsn string pointer
+; Returns ac = 1 if equal, else 0.
+; ==========================================================================
+name_eq:    save        x4, x5, x6, x7
+            ld          ac, (x2)         ; dsn char count
+            st          x1, .ne_len
+            sub         ac, .ne_len      ; count - len
+            movr.rn     ac, ac           ; skip jmp when lengths equal
+            jmp         .ne_no
+            movr        x0, x4           ; idbuf pointer
+            movr        x2, x5           ; dsn BX pointer (count word addr)
+            ngtr        x1, x6           ; x6 = -len
+            movr.rn     x6, x6           ; skip jmp when len == 0
+            jmp         .ne_cmp
+            ldea        ac, 1            ; len 0 -> equal
+            rets
+ne_cmp:     incldb      ac, x5, 7        ; next dsn char (advances x5)
+            ld          x7, (x4)         ; id char
+            incr        x4, x4
+            st          x7, .ne_ch
+            sub         ac, .ne_ch       ; dsnchar - idchar
+            movr.rn     ac, ac           ; skip jmp when equal
+            jmp         .ne_no
+            incr.rn     x6, x6           ; skip jmp when all compared
+            jmp         .ne_cmp
+            ldea        ac, 1
+            rets
+ne_no:      xorr        ac, ac
+            rets
+
+ne_len:     bss         1
+ne_ch:      bss         1
+
+
+; ==========================================================================
+; tok_number — parse a decimal integer at tk_src; emit TKN_INT + value.
+; ==========================================================================
+tok_number: save        x4, x5
+            ld          x4, .tk_src
+            xorr        x5, x5           ; accumulated value
+tn_lp:      ld          x6, .tk_send
+            cmplt       x4, x6           ; src < send ?
+            jmp         .tn_chk
+            jmp         .tn_emit
+tn_chk:     ld          ac, (x4)
+            callr       .id_digit        ; clobbers x6,x7 (x4,x5 safe)
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .tn_emit
+            ld          ac, (x4)         ; digit char
+            addi        ac, ac, -48
+            st          ac, .tn_dig
+            movr        x5, mq           ; mq = value
+            mul         .tenw            ; ac = value * 10 (low word)
+            add         ac, .tn_dig      ; + digit
+            movr        ac, x5           ; value = ac
+            incr        x4, x4
+            jmp         .tn_lp
+tn_emit:    st          x4, .tk_src
+            ld          ac, .tknint
+            callr       .tok_emit1       ; emit tag
+            movr        x5, ac
+            callr       .tok_emit1       ; emit value
+            rets
+
+tn_dig:     bss         1
+
+
+; ==========================================================================
+; tok_string — parse "..." at tk_src; emit TKN_STR + packed chars.
+; ==========================================================================
+tok_string: save        x4, x5
+            ld          x4, .tk_src
+            incr        x4, x4           ; skip opening quote
+            movr        x4, x5           ; x5 = start of string chars
+            xorr        ac, ac
+            st          .ts_cnt
+ts_lp:      ld          x6, .tk_send
+            cmplt       x4, x6           ; src < send ?
+            jmp         .ts_chk
+            jmp         .ts_end
+ts_chk:     ld          ac, (x4)
+            subin.rn    ac, ac, 34       ; closing quote?
+            jmp         .ts_more
+            jmp         .ts_end
+ts_more:    incr        x4, x4
+            ld          ac, .ts_cnt
+            incr        ac, ac
+            st          .ts_cnt
+            jmp         .ts_lp
+ts_end:     ld          ac, .tknstr      ; tag
+            movr        ac, x0
+            movr        x5, x1           ; source ptr
+            ld          x2, .ts_cnt      ; count
+            calls       .emit_packed
+            ; advance src past closing quote (if present)
+            ld          x4, .tk_src      ; (unchanged; recompute end)
+            ld          x4, .ts_cnt
+            ld          x5, .tk_src
+            incr        x5, x5           ; past opening quote
+            addr        x4, x5           ; x5 = first char + count = closing quote
+            incr        x5, x5           ; past closing quote
+            st          x5, .tk_src
+            rets
+
+ts_cnt:     bss         1
+
+
+; ==========================================================================
+; tok_ident — parse an identifier (keyword or variable) at tk_src.
+; ==========================================================================
+tok_ident:  save        x4, x5
+            ld          x4, .tk_src
+            xorr        x5, x5           ; id length
+ti_scan:    ld          x6, .tk_send
+            cmplt       x4, x6           ; src < send ?
+            jmp         .ti_c
+            jmp         .ti_done
+ti_c:       ld          ac, (x4)
+            callr       .id_alnum        ; clobbers x6,x7 (x4,x5 safe)
+            movr.rz     ac, ac           ; skip jmp when alnum
+            jmp         .ti_done
+            ld          ac, (x4)
+            callr       .to_upper
+            ldea        x6, .idbuf
+            addr        x5, x6           ; idbuf + len
+            st          ac, (x6)
+            incr        x5, x5
+            ld          x6, .idmax
+            cmplt       x5, x6           ; len < 10 ? keep scanning
+            jmp         .ti_adv
+            jmp         .ti_done
+ti_adv:     incr        x4, x4
+            jmp         .ti_scan
+ti_done:    st          x4, .tk_src
+            st          x5, .idlen
+            ; keyword lookup
+            ldea        x6, .kw_tab
+ti_kw:      ld          ac, (x6)         ; dsn ptr (0 = end)
+            movr.rz     ac, ac           ; skip jmp when entry present
+            jmp         .ti_var
+            ldea        x0, .idbuf
+            ld          x1, .idlen
+            ld          x2, (x6)
+            st          x6, .ti_save
+            calls       .name_eq
+            ld          x6, .ti_save
+            movr.rz     ac, ac           ; skip jmp when match
+            jmp         .ti_knext
+            ld          ac, 1(x6)         ; matched: emit tag word
+            callr       .tok_emit1
+            rets
+ti_knext:   addi        x6, x6, 2
+            jmp         .ti_kw
+ti_var:     ld          ac, .tknvar      ; variable: emit TKN_VAR + packed name
+            movr        ac, x0
+            ldea        x1, .idbuf
+            ld          x2, .idlen
+            calls       .emit_packed
+            rets
+
+ti_save:    bss         1
+idmax:      dw          10
+idbuf:      bss         11
+idlen:      bss         1
+
+
+; ==========================================================================
+; tok_op — parse an operator at tk_src; emit its token.  ac = 0 ok / 1 error.
+; ==========================================================================
+tok_op:     save        x4
+            ld          x4, .tk_src
+            ld          ac, (x4)
+            st          ac, .op_ch
+            subin.rn    ac, ac, 60       ; '<' ?
+            jmp         .op_nlt
+            jmp         .op_lt
+op_nlt:     ld          ac, .op_ch
+            subin.rn    ac, ac, 62       ; '>' ?
+            jmp         .op_single
+            jmp         .op_gt
+op_lt:      ld          x4, .tk_src
+            ld          ac, 1(x4)
+            st          ac, .op_ch2
+            subin.rn    ac, ac, 61       ; '<=' ?
+            jmp         .lt_nE
+            ld          ac, .tknle
+            jmp         .op_emit2
+lt_nE:      ld          ac, .op_ch2
+            subin.rn    ac, ac, 62       ; '<>' ?
+            jmp         .lt_nNE
+            ld          ac, .tknne
+            jmp         .op_emit2
+lt_nNE:     ld          ac, .tknlt
+            jmp         .op_emit1
+op_gt:      ld          x4, .tk_src
+            ld          ac, 1(x4)
+            subin.rn    ac, ac, 61       ; '>=' ?
+            jmp         .gt_nE
+            ld          ac, .tknge
+            jmp         .op_emit2
+gt_nE:      ld          ac, .tkngt
+            jmp         .op_emit1
+op_single:  ldea        x4, .optab
+ops_lp:     ld          ac, (x4)         ; table char (0 = end)
+            movr.rz     ac, ac
+            jmp         .op_bad
+            ld          ac, .op_ch
+            sub         ac, (x4)
+            movr.rn     ac, ac           ; skip jmp when char matches
+            jmp         .ops_next
+            ld          ac, 1(x4)         ; emit tag word
+            callr       .tok_emit1
+            ld          x4, .tk_src
+            incr        x4, x4
+            st          x4, .tk_src
+            xorr        ac, ac
+            rets
+ops_next:   addi        x4, x4, 2
+            jmp         .ops_lp
+op_bad:     ldea        ac, 1            ; unknown char
+            rets
+op_emit2:   callr       .tok_emit1
+            ld          x4, .tk_src
+            addi        x4, x4, 2
+            st          x4, .tk_src
+            xorr        ac, ac
+            rets
+op_emit1:   callr       .tok_emit1
+            ld          x4, .tk_src
+            incr        x4, x4
+            st          x4, .tk_src
+            xorr        ac, ac
+            rets
+
+op_ch:      bss         1
+op_ch2:     bss         1
+
+
+; ==========================================================================
+; tok_sksp — advance tk_src past spaces (leaf).
+; ==========================================================================
+tok_sksp:   ld          x6, .tk_src
+            ld          x7, .tk_send
+ts2_lp:     cmplt       x6, x7           ; src < send ?
+            jmp         .ts2_chk
+            retr
+ts2_chk:    ld          ac, (x6)
+            subin.rn    ac, ac, 32       ; space ?
+            jmp         .ts2_done
+            incr        x6, x6
+            st          x6, .tk_src
+            jmp         .ts2_lp
+ts2_done:   retr
+
+
+; ==========================================================================
+; tok_line — tokenize linebuf (linelen chars) into tokbuf, ending TKN_EOL.
+; Returns ac = 0 on success, 1 on error.
+; ==========================================================================
+tok_line:   save        x4, x5
+            ldea        x4, .linebuf
+            st          x4, .tk_src
+            ld          x5, .linelen
+            addr        x5, x4           ; linebuf + linelen
+            st          x4, .tk_send
+            ldea        x4, .tokbuf
+            st          x4, .tk_dst
+tl_lp:      callr       .tok_sksp
+            ld          x4, .tk_src
+            ld          x5, .tk_send
+            cmplt       x4, x5           ; more chars ?
+            jmp         .tl_more
+            jmp         .tl_eol
+tl_more:    ld          ac, (x4)
+            st          ac, .tk_ch
+            subin.rn    ac, ac, 13       ; CR ?
+            jmp         .tl_n13
+            jmp         .tl_eol
+tl_n13:     ld          ac, .tk_ch
+            subin.rn    ac, ac, 10       ; LF ?
+            jmp         .tl_n10
+            jmp         .tl_eol
+tl_n10:     ld          ac, .tk_ch
+            callr       .id_digit
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .tl_nd
+            calls       .tok_number
+            jmp         .tl_lp
+tl_nd:      ld          ac, .tk_ch
+            callr       .id_alpha
+            movr.rz     ac, ac           ; skip jmp when alpha
+            jmp         .tl_na
+            calls       .tok_ident
+            jmp         .tl_lp
+tl_na:      ld          ac, .tk_ch
+            subin.rn    ac, ac, 34       ; quote ?
+            jmp         .tl_nq
+            calls       .tok_string
+            jmp         .tl_lp
+tl_nq:      calls       .tok_op
+            movr.rn     ac, ac           ; skip jmp when ok (ac == 0)
+            jmp         .tl_err
+            jmp         .tl_lp
+tl_eol:     xorr        ac, ac
+            callr       .tok_emit1       ; TKN_EOL
+            xorr        ac, ac
+            rets
+tl_err:     ldea        ac, 1
+            rets
+
+tk_ch:      bss         1
+
+
+; ==========================================================================
+; detok — de-tokenize the token list at x0 to the console.
+; (Stage A: used as the temporary par_exec body to verify the tokenizer.)
+; ==========================================================================
+detok:      save        x4
+            st          x0, .dt_ptr      ; token pointer kept in memory (io clobbers x4)
+dt_lp:      ld          x4, .dt_ptr
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; skip jmp when word != 0
+            jmp         .dt_done
+            st          ac, .dt_word
+            and         ac, .tagmask
+            st          ac, .dt_tag
+            sub         ac, .tknint
+            movr.rn     ac, ac           ; INT ?
+            jmp         .dt_nI
+            ld          x4, .dt_ptr      ; INT: value at ptr+1
+            incr        x4, x4
+            ld          ac, (x4)
+            incr        x4, x4
+            st          x4, .dt_ptr
+            callr       .io_putn
+            jmp         .dt_sp
+dt_nI:      ld          ac, .dt_tag
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; VAR ?
+            jmp         .dt_nV
+            calls       .dt_packed       ; print name body
+            jmp         .dt_sp
+dt_nV:      ld          ac, .dt_tag
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; STR ?
+            jmp         .dt_nS
+            ldea        ac, 34           ; opening quote
+            callr       .io_putc
+            calls       .dt_packed       ; print string body
+            ldea        ac, 34           ; closing quote
+            callr       .io_putc
+            jmp         .dt_sp
+dt_nS:      ld          ac, .dt_word     ; operator or keyword
+            calls       .rev_print
+            ld          x4, .dt_ptr
+            incr        x4, x4
+            st          x4, .dt_ptr
+            jmp         .dt_sp
+dt_sp:      ldea        ac, 32           ; space between tokens
+            callr       .io_putc
+            jmp         .dt_lp
+dt_done:    callr       .io_crlf
+            rets
+
+; dt_packed — print the count packed chars of the token at dt_ptr, then
+; advance dt_ptr past the token.  dt_word must hold the tag|count word.
+dt_packed:  save        x5
+            ld          ac, .dt_word
+            and         ac, .cntmask
+            st          ac, .dt_cnt
+            ld          x6, .dt_ptr      ; BX pointer = tag word address
+            ld          ac, .dt_cnt
+            ngtr        ac, x7           ; -count
+            movr.rz     x7, x7           ; count 0 -> skip body
+            jmp         .dp_adv
+dp_lp:      incldb      ac, x6, 7
+            callr       .io_putc         ; preserves x6, x7
+            incr.rn     x7, x7
+            jmp         .dp_lp
+dp_adv:     ld          x4, .dt_ptr      ; ptr += 1 + ceil(count/5)
+            incr        x4, x4
+            ld          ac, .dt_cnt
+            addi        ac, ac, 4
+            div         .fivew
+            movr        mq, ac
+            addr        ac, x4
+            st          x4, .dt_ptr
+            rets
+
+dt_ptr:     bss         1
+dt_word:    bss         1
+dt_tag:     bss         1
+dt_cnt:     bss         1
+
+
+; ==========================================================================
+; rev_print — given a token word in ac (operator or keyword), print its text.
+; ==========================================================================
+rev_print:  save        x4, x5
+            st          ac, .rv_w
+            ldea        x4, .rev_tab
+rv_lp:      ld          x5, (x4)         ; tag word (0 = end)
+            movr.rz     x5, x5
+            jmp         .rv_none
+            ld          ac, .rv_w
+            sub         ac, (x4)         ; compare token word
+            movr.rn     ac, ac           ; skip jmp when match
+            jmp         .rv_next
+            ld          x0, 1(x4)        ; dsn pointer
+            callr       .io_puts
+            rets
+rv_next:    addi        x4, x4, 2
+            jmp         .rv_lp
+rv_none:    ldea        ac, 63           ; '?'
+            callr       .io_putc
+            rets
+
+rv_w:       bss         1
+
+
+; ==========================================================================
+; par_exec — execute the tokenized statement at x0.
+; (Stage A placeholder: detokenize and print, to verify the tokenizer.)
+; ==========================================================================
+par_exec:   save        x4
+            calls       .detok
+            rets
+
+
+; ==========================================================================
+; do_edit / st_new — placeholders (real versions in Stage B).
+; ==========================================================================
+do_edit:    save        x4
+            rets
+
+st_new:     ldea        ac, .progbase
+            st          ac, .progend
+            ld          ac, .memtop
+            st          ac, .varbot
+            retr
+
+
+; ==========================================================================
 ; Read-only data
 ; ==========================================================================
 
@@ -326,6 +914,118 @@ crlfbuf:    dw          13, 10
 msg_ban:    dsn         "VIBASIC V0.1"
 msg_free:   dsn         " WORDS FREE"
 msg_rdy:    dsn         "READY."
+
+
+; ==========================================================================
+; Token tag constants (tag value in bits 35:28).  Only those referenced by
+; code are kept as named words; the rest appear as literals in the tables.
+; ==========================================================================
+tagmask:    dw          #FF0000000       ; bits 35:28
+cntmask:    dw          #FFFFFFF         ; bits 27:0 (packed-token char count)
+
+tknint:     dw          #10000000        ; tag 0x01
+tknvar:     dw          #20000000        ; tag 0x02
+tknstr:     dw          #30000000        ; tag 0x03
+tknlt:      dw          #1A0000000       ; tag 0x1A  '<'
+tkngt:      dw          #1B0000000       ; tag 0x1B  '>'
+tknle:      dw          #1C0000000       ; tag 0x1C  '<='
+tknge:      dw          #1D0000000       ; tag 0x1D  '>='
+tknne:      dw          #1E0000000       ; tag 0x1E  '<>'
+
+; Keyword name strings (for forward lookup and detok)
+s_rem:      dsn         "REM"
+s_print:    dsn         "PRINT"
+s_let:      dsn         "LET"
+s_goto:     dsn         "GOTO"
+s_if:       dsn         "IF"
+s_then:     dsn         "THEN"
+s_end:      dsn         "END"
+s_run:      dsn         "RUN"
+s_list:     dsn         "LIST"
+s_new:      dsn         "NEW"
+s_gosub:    dsn         "GOSUB"
+s_return:   dsn         "RETURN"
+s_stop:     dsn         "STOP"
+s_poke:     dsn         "POKE"
+
+; Operator symbol strings (for detok)
+o_plus:     dsn         "+"
+o_minus:    dsn         "-"
+o_mul:      dsn         "*"
+o_div:      dsn         "/"
+o_lpar:     dsn         "("
+o_rpar:     dsn         ")"
+o_comma:    dsn         ","
+o_semi:     dsn         ";"
+o_colon:    dsn         ":"
+o_eq:       dsn         "="
+o_lt:       dsn         "<"
+o_gt:       dsn         ">"
+o_le:       dsn         "<="
+o_ge:       dsn         ">="
+o_ne:       dsn         "<>"
+
+; Forward keyword table: [dsn pointer, tag value], terminated by 0.
+kw_tab:     dw          s_rem,    #200000000
+            dw          s_print,  #210000000
+            dw          s_let,    #220000000
+            dw          s_goto,   #230000000
+            dw          s_if,     #240000000
+            dw          s_then,   #250000000
+            dw          s_end,    #260000000
+            dw          s_run,    #270000000
+            dw          s_list,   #280000000
+            dw          s_new,    #290000000
+            dw          s_gosub,  #2A0000000
+            dw          s_return, #2B0000000
+            dw          s_stop,   #2C0000000
+            dw          s_poke,   #2D0000000
+            dw          0, 0
+
+; Single-char operator table: [char code, tag value], terminated by 0.
+optab:      dw          43, #100000000
+            dw          45, #110000000
+            dw          42, #120000000
+            dw          47, #130000000
+            dw          40, #140000000
+            dw          41, #150000000
+            dw          44, #160000000
+            dw          59, #170000000
+            dw          58, #180000000
+            dw          61, #190000000
+            dw          0, 0
+
+; Reverse table for detok: [tag value, dsn pointer], terminated by 0.
+rev_tab:    dw          #100000000, o_plus
+            dw          #110000000, o_minus
+            dw          #120000000, o_mul
+            dw          #130000000, o_div
+            dw          #140000000, o_lpar
+            dw          #150000000, o_rpar
+            dw          #160000000, o_comma
+            dw          #170000000, o_semi
+            dw          #180000000, o_colon
+            dw          #190000000, o_eq
+            dw          #1A0000000, o_lt
+            dw          #1B0000000, o_gt
+            dw          #1C0000000, o_le
+            dw          #1D0000000, o_ge
+            dw          #1E0000000, o_ne
+            dw          #200000000, s_rem
+            dw          #210000000, s_print
+            dw          #220000000, s_let
+            dw          #230000000, s_goto
+            dw          #240000000, s_if
+            dw          #250000000, s_then
+            dw          #260000000, s_end
+            dw          #270000000, s_run
+            dw          #280000000, s_list
+            dw          #290000000, s_new
+            dw          #2A0000000, s_gosub
+            dw          #2B0000000, s_return
+            dw          #2C0000000, s_stop
+            dw          #2D0000000, s_poke
+            dw          0, 0
 
 
 ; ==========================================================================
@@ -346,10 +1046,16 @@ th_ac:      bss         1
 th_x2:      bss         1
 th_x3:      bss         1
 
+; Tokenizer state
+tk_src:     bss         1                ; current source pointer
+tk_send:    bss         1                ; source end pointer
+tk_dst:     bss         1                ; current dest pointer (into tokbuf)
+
 ; Buffers
 linemax:    dw          120
 linelen:    bss         1
 linebuf:    bss         120              ; raw input line (word-per-char)
+tokbuf:     bss         300              ; tokenized statement
 outexp:     bss         256              ; io_puts expansion scratch
 
 ; Stack
