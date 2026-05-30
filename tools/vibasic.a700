@@ -1,0 +1,363 @@
+; vibasic.a700
+; ==========================================================================
+; VIBASIC — a single-user line-number BASIC for the RDC-700.
+; Boots from RIM paper tape; runs in supervisor mode.
+;
+; INCREMENT 1 — Foundation (this file):
+;   - Boot, IRQL setup, physical memory detection (see monitor.a700)
+;   - Interrupt-driven buffered console I/O (adapted from echo.a700)
+;   - Integer print (io_putn), string print (io_puts), line input (io_gets)
+;   - A READY loop that echoes typed input (proves the I/O path end-to-end)
+;
+; Later increments add the tokenizer, line storage, expression evaluator,
+; statements, and the remaining data types per VIBASIC_PLAN.txt.
+;
+; Conventions:
+;   Leaf I/O helpers use callr/retr.  Arguments in x0..x3; integer return
+;   in ac.  Routines that call others save their return address explicitly
+;   (callr clobbers lr) or use the hardware stack.
+;
+; Device assumptions (match the emulator's main()):
+;   TTY console at device #030 (octal 060 = 48), IRQ level 10, vector @ 20.
+; ==========================================================================
+
+
+; ==========================================================================
+; Interrupt / exception vector table
+; ==========================================================================
+
+            origin      0
+
+exc_vec:    dw          exc_hdlr, 0     ; level 0: exceptions
+
+            origin      20              ; level 10: TTY interrupt (2 x 10)
+
+tty_vec:    dw          tty_intr, 0
+
+
+; ==========================================================================
+; Boot
+; ==========================================================================
+
+            origin      1024
+
+start:      xorr        ac, ac
+            ldctl       psw1, .fgcw     ; IRQL = 15 (so lmwait is wakeable)
+            ldea        sp, .topstk     ; supervisor stack
+
+            callr       .mem_det        ; detect RAM -> memtop / varbot / progend
+            callr       .con_init       ; TTY config + clear interrupt
+
+            ldea        x0, .msg_ban    ; "VIBASIC V0.1"
+            callr       .io_puts
+            callr       .io_crlf
+            ld          ac, .memtop     ; free word count
+            callr       .io_putn
+            ldea        x0, .msg_free   ; " WORDS FREE"
+            callr       .io_puts
+            callr       .io_crlf
+
+; ----- READY loop (echo, for this increment) ------------------------------
+ready:      ldea        sp, .topstk     ; reset stack each command
+            ldea        x0, .msg_rdy    ; "READY."
+            callr       .io_puts
+            callr       .io_crlf
+
+            ldea        x0, .linebuf     ; read a line
+            ld          x1, .linemax
+            callr       .io_gets         ; ac = char count (incl. CR LF)
+            st          ac, .linelen
+
+            ldea        x0, .linebuf     ; echo it back
+            ld          x1, .linelen
+            callr       .io_putl
+            jmp         .ready
+
+
+; ==========================================================================
+; Memory detection — probe upward until X_MEMX (see monitor.a700)
+; ==========================================================================
+; Installs a temporary level-0 handler (md_done), walks memory with an
+; auto-increment indirect pointer, and on the bounds fault records the first
+; nonexistent address.  memtop = RAM size; varbot = memtop; progend = progbase.
+
+mem_det:    ldea        ac, .md_done    ; temporary exception vector
+            st          ac, .exc_vec
+
+            ldea        x6, .progbase    ; probe pointer: base = progbase,
+            or          x6, .incptr      ;   bit35=auto, mode=inc, step=1
+            st          x6, .md_ptr
+
+md_loop:    ld          ac, @.md_ptr     ; touch M[*md_ptr]; post-increment ptr
+            jmp         .md_loop         ; X_MEMX exits via md_done
+
+md_done:    ldctl       psw1, .fgcw      ; exception dropped us to IRQL 0
+            ld          ac, .md_ptr      ; pointer = step bits | first bad addr
+            and         ac, .admask      ; keep 27-bit address field
+            st          ac, .memtop
+            st          ac, .varbot
+            ldea        ac, .progbase
+            st          ac, .progend
+            ldea        ac, .exc_hdlr    ; restore real exception handler
+            st          ac, .exc_vec
+            retr
+
+incptr:     dw          0401000000000    ; auto-increment-by-1 indirect pointer
+admask:     dw          #7FFFFFF         ; 27-bit address mask
+md_ptr:     bss         1
+
+
+; ==========================================================================
+; Exception handler (level 0) — for this increment, just halt cleanly.
+; (A later increment maps faults to BASIC error codes and unwinds to READY.)
+; ==========================================================================
+
+exc_hdlr:   hlt
+
+
+; ==========================================================================
+; Console I/O layer (interrupt-driven; adapted from echo.a700)
+; ==========================================================================
+
+tty_intr:   st          ac, .th_ac
+            st          x2, .th_x2
+            st          x3, .th_x3
+
+            ld          ac, .out_actv
+            movr.rz     ac, ac          ; skip jmp if output active
+            jmp         .ti_inp
+
+            ld          x2, .out_ptr
+            ld          x3, .out_cnt
+            incr.rn     x3, x3          ; skip jmp if count reached 0
+            jmp         .ti_tx
+
+            nioc        #030            ; output complete
+            st          x3, .out_cnt
+            xorr        ac, ac
+            st          .out_actv
+            incr        ac, ac
+            st          .out_done
+            jmp         .ti_ret
+
+ti_tx:      ld          ac, (x2)
+            incr        x2, x2
+            st          x2, .out_ptr
+            st          x3, .out_cnt
+            wios        ac, 0, #030
+            jmp         .ti_ret
+
+ti_inp:     nioc        #030            ; input event
+            xorr        ac, ac
+            incr        ac, ac
+            st          .inp_rdy
+
+ti_ret:     ld          x3, .th_x3
+            ld          x2, .th_x2
+            ld          ac, .th_ac
+            reti
+
+; --- con_init -------------------------------------------------------------
+con_init:   ld          ac, .ttyconf
+            wio         ac, 1, #030
+            nioc        #030
+            retr
+
+; --- io_putl: send word-per-char buffer (x0=addr, x1=count); blocks --------
+; Clobbers ac, x0, x1, x3, x4, x5.  Returns via retr.
+io_putl:    movr.rz     x1, x1          ; skip retr if count != 0
+            retr
+            ld          x4, (x0)         ; first char
+            incr        x0, x0
+            st          x0, .out_ptr
+            ngtr        x1, x3
+            st          x3, .out_cnt
+            xorr        ac, ac
+            st          .out_done
+            incr        ac, ac
+            st          .out_actv
+            movr        x4, ac
+            wios        ac, 0, #030      ; send first char; starts the chain
+iputl_w:    ldmask      .nomask          ; race-free wait for completion
+            ld          .out_done
+            movr.rz     ac, ac           ; skip jmp if done
+            jmp         .iputl_lm
+            retr
+iputl_lm:   lmwait      .irqmask
+            jmp         .iputl_w
+
+; --- io_putc: output single char in ac ------------------------------------
+; Tail-calls io_putl, which returns to io_putc's caller.
+io_putc:    st          ac, .onechar
+            ldea        x0, .onechar
+            ldea        x1, 1
+            jmp         .io_putl
+onechar:    bss         1
+
+; --- io_crlf: output CR LF ------------------------------------------------
+io_crlf:    ldea        x0, .crlfbuf
+            ldea        x1, 2
+            jmp         .io_putl
+
+; --- io_puts: output a dsn string (x0 = pointer to count word) ------------
+; Expands the packed string into outexp, then sends it.  Returns via retr.
+io_puts:    ld          x1, (x0)         ; char count
+            st          x1, .putsn       ; remember it for the send
+            movr.rz     x1, x1           ; skip retr if nonzero
+            retr
+            ngtr        x1, x5           ; x5 = -count
+            ldea        x4, .outexp      ; write pointer
+iputs_l:    incldb      ac, x0, 7        ; next 7-bit char from dsn body
+            st          ac, (x4)
+            incr        x4, x4
+            incr.rn     x5, x5           ; skip jmp when expanded all chars
+            jmp         .iputs_l
+            ld          x1, .putsn       ; send the expanded buffer
+            ldea        x0, .outexp
+            jmp         .io_putl
+putsn:      bss         1
+
+; --- io_putn: output signed decimal integer in ac -------------------------
+; Pushes digits on the hardware stack, then prints them.  Returns via retr.
+io_putn:    st          lr, .putn_lr
+            st          ac, .putn_v
+            movr.rz     ac, ac           ; skip jmp if value != 0
+            jmp         .putn_nz
+            ldea        ac, 48           ; "0"
+            callr       .io_putc
+            ld          lr, .putn_lr
+            retr
+putn_nz:    ld          x6, .putn_v
+            ld          x7, .zerow
+            cmplt       x6, x7           ; exec next if value < 0
+            jmp         .putn_neg
+            jmp         .putn_abs
+putn_neg:   ldea        ac, 45           ; "-"
+            callr       .io_putc
+            ld          ac, .putn_v
+            ngtr        ac, ac
+            st          ac, .putn_v
+putn_abs:   xorr        ac, ac
+            st          ac, .putn_n      ; digit count = 0
+putn_dl:    ld          ac, .putn_v
+            div         .tenw            ; mq = v/10, xy = v%10
+            push        xy               ; save remainder digit
+            ld          ac, .putn_n
+            incr        ac, ac
+            st          ac, .putn_n
+            movr        mq, ac           ; ac = quotient
+            st          ac, .putn_v
+            movr.rn     mq, mq           ; skip jmp if quotient != 0
+            jmp         .putn_pr
+            jmp         .putn_dl
+putn_pr:    ld          ac, .putn_n
+            ngtr        ac, ac
+            st          ac, .putn_n      ; putn_n = -count
+putn_pl:    pop         ac               ; digit 0..9
+            addi        ac, ac, 48
+            callr       .io_putc
+            ld          ac, .putn_n
+            incr        ac, ac
+            st          ac, .putn_n
+            movr.rn     ac, ac           ; skip jmp when count reaches 0
+            jmp         .putn_pl
+            ld          lr, .putn_lr
+            retr
+
+tenw:       dw          10
+zerow:      dw          0
+putn_v:     bss         1
+putn_n:     bss         1
+putn_lr:    bss         1
+
+; --- io_gets: read one line, word-per-char (x0=buf, x1=max) -> ac=count ----
+io_gets:    st          x0, .gets_buf
+            st          x1, .gets_max
+            xorr        ac, ac
+            st          .inp_rdy
+            st          .gilen
+ig_wait:    ldmask      .nomask
+            ld          .inp_rdy
+            movr.rz     ac, ac           ; skip jmp if ready
+            jmp         .ig_lm
+            ldmask      .irqmask
+            jmp         .ig_read
+ig_lm:      lmwait      .irqmask
+            jmp         .ig_wait
+ig_read:    ld          x4, .gets_buf    ; write pointer
+            ld          ac, .gets_max
+            ngtr        ac, x5           ; x5 = -max
+ig_loop:    rio         ac, 2, #030      ; receive fill count
+            movr.rz     ac, ac           ; skip jmp if data available
+            jmp         .ig_done
+            rio         ac, 0, #030      ; pop byte
+            subin.rn    ac, ac, 10       ; skip store-branch if LF
+            jmp         .ig_store
+            st          ac, (x4)         ; store LF and finish
+            ld          ac, .gilen
+            incr        ac, ac
+            st          .gilen
+            jmp         .ig_done
+ig_store:   st          ac, (x4)
+            incr        x4, x4
+            ld          ac, .gilen
+            incr        ac, ac
+            st          .gilen
+            incr.rn     x5, x5           ; skip jmp if buffer full
+            jmp         .ig_loop
+ig_done:    ld          ac, .gilen
+            retr
+
+gets_buf:   bss         1
+gets_max:   bss         1
+gilen:      bss         1
+
+
+; ==========================================================================
+; Read-only data
+; ==========================================================================
+
+fgcw:       dw          0740000000000    ; psw1: IRQL = 15
+irqmask:    dw          02000            ; enable level 10
+nomask:     dw          0
+ttyconf:    dw          #1F9A0           ; ENABLED|INTR_RET|INTR_OUT|DESTRUCT|echo
+
+crlfbuf:    dw          13, 10
+
+msg_ban:    dsn         "VIBASIC V0.1"
+msg_free:   dsn         " WORDS FREE"
+msg_rdy:    dsn         "READY."
+
+
+; ==========================================================================
+; Interpreter state (BSS)
+; ==========================================================================
+
+memtop:     bss         1                ; RAM size (first nonexistent word)
+varbot:     bss         1                ; bottom of variable table
+progend:    bss         1                ; end of program text
+
+; I/O interrupt state
+out_ptr:    bss         1
+out_cnt:    bss         1
+out_actv:   bss         1
+out_done:   bss         1
+inp_rdy:    bss         1
+th_ac:      bss         1
+th_x2:      bss         1
+th_x3:      bss         1
+
+; Buffers
+linemax:    dw          120
+linelen:    bss         1
+linebuf:    bss         120              ; raw input line (word-per-char)
+outexp:     bss         256              ; io_puts expansion scratch
+
+; Stack
+            bss         256
+topstk:
+
+; ==========================================================================
+; Heap / program text begins here, grows toward varbot (top of RAM).
+; ==========================================================================
+progbase:   bss         0

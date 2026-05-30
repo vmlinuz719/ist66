@@ -1,0 +1,622 @@
+VIBASIC Implementation Plan
+============================
+A single-user BASIC interpreter for the RDC-700 architecture.
+Boots from RIM paper tape; runs in supervisor mode.
+
+
+═══════════════════════════════════════════════════════════════
+1. OVERALL ARCHITECTURE
+═══════════════════════════════════════════════════════════════
+
+VIBASIC is a classic line-number BASIC in the Applesoft tradition,
+implemented as a single-pass RIM-loaded program in one source file
+(vibasic.a700).  Because asm2 has no include mechanism, all sections
+live in one file; logical boundaries are marked with section headers
+and a naming convention enforces modularity.
+
+Calling convention: calls/rets throughout (supports nesting via
+hardware-managed stack).  Arguments in x0–x3; return value in ac
+(integers) or FP register F0 (floats/doubles); string pointer in x0,
+length in x1.  Leaf I/O helpers may use callr/retr where appropriate.
+
+Register conventions:
+  ac, mq, xy   scratch / function return
+  x0–x3        arguments to subroutines
+  x4–x7        local temporaries within a subroutine (callee-saved)
+  x8–x11       interpreter execution state (current line, token ptr…)
+  sp (x13)     stack pointer
+  lr (x12)     link register (callr/retr only)
+
+Label prefix convention (all ≤ 10 chars):
+  io_*   I/O layer             mem_*  memory manager
+  tok_*  tokenizer             ln_*   line storage
+  par_*  statement dispatcher  ex_*   expression evaluator
+  var_*  variable table        str_*  string operations
+  fp_*   FPU wrappers          err_*  error handling
+  fn_*   built-in functions    st_*   statement handlers
+
+
+═══════════════════════════════════════════════════════════════
+2. MEMORY LAYOUT
+═══════════════════════════════════════════════════════════════
+
+Physical addresses (word-addressed):
+  0–31      Exception / interrupt vector table
+  32–63     Interrupt save area
+  1024      VIBASIC interpreter code and static data (BSS)
+  [end]     Dynamic region: heap grows up, variable table grows down
+
+The dynamic region is bounded by two pointers in BSS:
+  heap_bot  lowest free heap word (start of free space)
+  heap_top  one past highest allocated heap word (grows upward)
+  var_bot   lowest allocated variable-table word (grows downward)
+  mem_top   detected top of physical RAM (set at boot, never changes)
+
+Allocation fails when heap_top >= var_bot.
+
+Heap layout (low → high):
+  Program text (sorted by line number)
+  String storage (bump-allocated; no GC in initial version)
+  [ free space ]
+Variable table layout (high → low):
+  Fixed-size 8-word entries, newest at lowest address
+
+
+═══════════════════════════════════════════════════════════════
+3. BOOT SEQUENCE
+═══════════════════════════════════════════════════════════════
+
+1. Exception vector table at origin 0 (level 0 handler = exc_stub).
+2. TTY interrupt vector at address 20 (level 10, same as echo.a700).
+3. Code at origin 1024:
+   a. ldctl psw1, fgcw  (IRQL = 15 — same fix as ttyout/echo)
+   b. Set up stack pointer.
+   c. Memory detection: write a probe word and catch X_MEMX to find
+      the top of physical RAM (adapted from monitor.a700 approach).
+      Store result in mem_top; set heap_bot and var_bot.
+   d. con_init (TTY config, mask, IRQL already set).
+   e. Print banner ("VIBASIC\r\n", free memory count, "READY.").
+4. Enter the READY loop.
+
+
+═══════════════════════════════════════════════════════════════
+4. I/O LAYER  (prefix io_)
+═══════════════════════════════════════════════════════════════
+
+Adapts routines from echo.a700.  All output is interrupt-driven
+(INTR_OUT); all input is interrupt-driven (INTR_RET on LF).
+
+Routines:
+  io_init       con_init equivalent; called once at boot
+  io_putl       output word-per-char buffer (x0=addr, x1=count)
+  io_puts       output dsn string (x0=dsn ptr)
+  io_putc       output single char in x0
+  io_putn       output signed 36-bit integer in ac (decimal)
+  io_putf       output F36 float from FP register F0
+  io_putd       output F72 double from FP registers F0+F1
+  io_putcrlf    output CR+LF
+  io_getl       read one line into caller buffer; returns count in ac
+                (waits for INTR_RET; stores CR+LF; handles backspace)
+
+io_putn algorithm: divide by 10 repeatedly, push digits onto
+software stack, then print in order.  Handles negative values.
+
+io_puts walks the dsn string with incldb.
+
+All io_put* routines internally use con_putl and the interrupt chain
+from echo.a700, sharing the same out_ptr/out_cnt/out_actv/out_done
+state variables.
+
+
+═══════════════════════════════════════════════════════════════
+5. MEMORY MANAGER  (prefix mem_)
+═══════════════════════════════════════════════════════════════
+
+mem_detect    probe upward from end-of-code until X_MEMX; stores
+              result in mem_top.
+mem_halloc    heap allocate n words (x0=n) → pointer in ac; halts
+              with OOM error if heap_top + n >= var_bot.
+mem_hstr      allocate and copy a dsn string into heap; returns
+              heap pointer in ac.
+mem_varalloc  allocate one 8-word variable entry from top of RAM
+              (var_bot -= 8); returns pointer in ac.
+
+No heap compaction or GC in the initial version.  A future
+"string GC" pass can be added: walk variable table, mark all
+string pointers, then pack live strings in-place.
+
+
+═══════════════════════════════════════════════════════════════
+6. DATA TYPES AND REPRESENTATION
+═══════════════════════════════════════════════════════════════
+
+6.1 Type tags (stored in type word of variable entry)
+  0  INTEGER   36-bit two's complement (1 word)
+  1  FLOAT     F36 single-precision (1 word, FPU format)
+  2  DOUBLE    F72 double-precision (2 words, high word first)
+  3  STRING    pointer to dsn string in heap (1 word)
+  4  IARRAY    array of integers
+  5  FARRAY    array of floats
+  6  DARRAY    array of doubles
+  7  SARRAY    array of string pointers
+
+6.2 Variable name storage
+  Names ≤ 10 printable chars (same dsn packing as assembler labels).
+  Stored packed in the first 2 words of the variable entry (5 chars/
+  word, 7-bit each; padded with zeros).  Type suffix (%, !, #, $)
+  contributes to the name uniqueness but is also reflected in the
+  type tag, so X% and X! are distinct variables.
+
+6.3 Variable table entry (8 words, fixed size)
+  Word 0–1   Packed name (up to 10 chars, 5/word, zero-padded)
+  Word 2     Type tag (bits 2:0) | array-flag (bit 3) | n_dims (bits 7:4)
+  Word 3     Value word 0 (integer, float, or string ptr; or array ptr)
+  Word 4     Value word 1 (double high; or 0 for scalar; array element count)
+  Word 5     Array base pointer (heap addr of element data)
+  Word 6     Array DIM 0 upper bound
+  Word 7     Array DIM 1 upper bound (0 if 1D)
+
+For scalars, words 5–7 are unused.
+
+6.4 Arrays
+  Stored in heap as a flat row-major block.  A(i,j) for
+  dimensions (M, N) is at base + i*N + j.  Bounds checking
+  is performed on every access.
+
+6.5 Temporary values during expression evaluation
+  The expression evaluator passes typed values in a small
+  software value stack (3-word entries: type, val0, val1).
+  This stack lives at the bottom of the call stack or as a
+  separate region; to be decided during implementation.
+
+
+═══════════════════════════════════════════════════════════════
+7. PROGRAM STORAGE  (prefix ln_)
+═══════════════════════════════════════════════════════════════
+
+The BASIC program is a sorted flat list of lines in the heap,
+immediately above heap_bot.  A global pointer prog_end marks
+the first word after the last program line.
+
+Each program line on disk:
+  Word 0    Line number (1–65535 stored in lower 16 bits)
+  Word 1    Length in words of token block (not counting these 2)
+  Words 2+  Token stream
+
+The list is terminated by a sentinel entry with line number 0
+and length 0.  Total program storage = prog_end − prog_start.
+
+Routines:
+  ln_clear    reset prog_end to prog_start (NEW)
+  ln_find     binary or linear search for line number; returns
+              pointer or 0 if not found
+  ln_insert   insert or replace a line:
+                find insertion point, shift subsequent lines right,
+                write new line header + tokens
+  ln_delete   find line, shift subsequent lines left, update prog_end
+  ln_first    returns pointer to first line (or 0 if program empty)
+  ln_next     given a pointer to a line, return pointer to next
+              (add header size + token length; check for sentinel)
+  ln_list     walk lines and de-tokenize to console (LIST command)
+
+
+═══════════════════════════════════════════════════════════════
+8. TOKENIZER  (prefix tok_)
+═══════════════════════════════════════════════════════════════
+
+The tokenizer converts a raw input line to a compact token stream
+stored in a temporary buffer before being handed to ln_insert or
+the expression evaluator.
+
+8.1 Token word encoding (one 36-bit word per token)
+  Bits 35:28  Token class:
+    0x00–0x7F  Keyword / operator (one byte; table-driven)
+    0x80       Integer literal    (bits 27:0 = signed value)
+    0x81       Float literal      (bits 27:0 = F36 representation)
+    0x82       Variable reference (bits 27:0 = index into name table)
+    0x83       String literal     (bits 27:0 = offset into line string area)
+    0x84       End of statement (:)
+    0x85       End of line
+    0x86+      Reserved for future use
+
+  String literals and variable names from the original source line
+  are preserved verbatim in a string area appended after the token
+  stream; the token word holds an offset into that area.
+
+8.2 Keyword table
+  A parallel pair of arrays:
+    kw_strs    dsn strings for each keyword ("PRINT", "LET", …)
+    kw_toks    corresponding token byte values
+  tok_keyword() walks kw_strs until a match or end; returns token byte
+  or -1 if not a keyword.  Matching is case-insensitive.
+
+  Keywords (initial set):
+    REM PRINT INPUT IF THEN ELSE GOTO GOSUB RETURN FOR TO STEP NEXT
+    LET DIM DATA READ RESTORE END STOP CONT RUN LIST NEW SAVE LOAD
+    PEEK POKE CALL ON AND OR NOT MOD
+
+  Function names are recognised by tok_keyword() and return a
+  separate token class (0x90+), so they can appear in expressions.
+  Functions (initial set):
+    ABS SQR INT SGN FIX RND LOG EXP SIN COS TAN ATN
+    LEN LEFT$ RIGHT$ MID$ STR$ VAL CHR$ ASC INSTR
+
+8.3 tok_init(buf_ptr, buf_len)  — point tokenizer at raw line buffer
+    tok_next()                  — returns next token word; advances ptr
+    tok_peek()                  — returns next without advancing
+    tok_back()                  — un-consume one token
+    tok_num()                   — parse numeric literal starting at ptr
+    tok_str()                   — copy string literal to string area
+    tok_var()                   — parse variable name + type suffix
+
+8.4 De-tokenizer (for LIST)
+    tok_detok(tok_ptr, out_buf) walks a token stream and writes the
+    printable representation back.  Each keyword token maps back to
+    its string via kw_strs.  Numeric literals are printed with io_putn
+    or io_putf.  String literals are surrounded by double quotes.
+
+
+═══════════════════════════════════════════════════════════════
+9. STATEMENT DISPATCHER  (prefix par_)
+═══════════════════════════════════════════════════════════════
+
+9.1 READY loop
+
+  Loop:
+    print "> " if in direct mode
+    io_getl → raw line buffer
+    if buffer starts with a digit:
+      parse line number
+      tokenize remainder
+      if remainder is empty: ln_delete(line_num)
+      else:                  ln_insert(line_num, tokens)
+    else (direct mode):
+      tokenize entire line
+      par_exec(token_ptr)
+    goto Loop
+
+9.2 par_exec(tok_ptr)
+
+  Reads first token.  If it is a keyword, looks it up in the
+  statement dispatch table and calls the handler.  If it is a
+  variable or expression, assumes implicit LET.  Handles
+  multi-statement lines (tokens separated by 0x84 end-of-stmt).
+
+9.3 Statement dispatch table (st_tbl)
+
+  Array of [token_byte, handler_ptr] pairs, terminated by [0, 0].
+  par_exec does a linear search (table is small; binary search
+  can be added later).
+
+  Adding a new statement = append one entry to st_tbl and write
+  one handler routine.  No changes to par_exec.
+
+9.4 Program execution
+
+  Run-mode state (global words):
+    run_mode    1 = running, 0 = direct / stopped
+    cur_line    pointer to current program line
+    cur_tok     pointer to current token within current line
+    gosub_sp    gosub stack pointer (separate stack region)
+    for_sp      for/next stack pointer
+
+  par_run(start_line_ptr): sets run_mode=1, cur_line, cur_tok;
+  loops calling par_exec until END or error or run_mode=0.
+
+  After each statement completes: if tok_peek() == END_OF_LINE,
+  advance cur_line to ln_next(cur_line); if sentinel, END program.
+
+
+═══════════════════════════════════════════════════════════════
+10. EXPRESSION EVALUATOR  (prefix ex_)
+═══════════════════════════════════════════════════════════════
+
+Recursive-descent parser.  Each level function returns a typed
+value in a 3-word descriptor block pointed to by x0:
+  Word 0  type tag (0=INT, 1=FLOAT, 2=DOUBLE, 3=STRING)
+  Word 1  value word 0
+  Word 2  value word 1 (double precision; 0 otherwise)
+
+Caller allocates the descriptor on the stack before the call.
+This avoids heap allocation for temporary values.
+
+Evaluation hierarchy (lowest to highest precedence):
+  ex_or       → OR
+  ex_and      → AND
+  ex_not      → NOT (unary)
+  ex_rel      → < > = <= >= <>
+  ex_add      → + - (also string concatenation for STRING + STRING)
+  ex_mul      → * / MOD
+  ex_pow      → ^ (uses FPU or integer loop)
+  ex_unary    → unary minus
+  ex_primary  → literal, variable, function call, (expr)
+
+Type promotion rules:
+  INT op INT   → INT  (unless overflow, then FLOAT)
+  INT op FLOAT → FLOAT
+  FLOAT op DOUBLE → DOUBLE
+  STRING op STRING → STRING (concatenation only; other ops = error)
+
+FPU is enabled at boot (fpc set appropriately).  Integer arithmetic
+uses integer ALU; float/double use FM/FR/FG instructions via fp_*
+wrappers.
+
+ex_primary handles function calls by looking up the function token
+in the function dispatch table (fn_tbl), similar to st_tbl.
+Adding a new built-in function = append to fn_tbl and write handler.
+
+Error on type mismatch: calls err_set(TYPE_MISMATCH).
+
+
+═══════════════════════════════════════════════════════════════
+11. VARIABLE MANAGEMENT  (prefix var_)
+═══════════════════════════════════════════════════════════════
+
+var_find(name_buf, type) → pointer to entry or 0
+  Linear scan from var_bot upward through variable table.
+  Compares packed name and type tag.
+
+var_get(name_buf, type) → fills descriptor; calls var_find.
+  If not found: implicit creation with value 0 / "" (BASIC default).
+
+var_set(name_buf, type, descriptor_ptr)
+  Calls var_find; if found, updates value; if not, calls
+  mem_varalloc to create a new entry, then writes it.
+
+var_dim(name_buf, type, dims_ptr, n_dims)
+  Allocates array storage in heap (product of all dimensions × words
+  per element).  Stores base pointer and bounds in the variable entry.
+
+var_arr_get(name_buf, type, indices_ptr, n_dims) → descriptor
+  Bounds-check each index; compute flat offset; return element.
+
+var_arr_set(name_buf, type, indices_ptr, n_dims, descriptor_ptr)
+  Bounds-check; compute flat offset; write element.
+
+var_clear()   zero var_bot back to mem_top (clears all variables).
+
+
+═══════════════════════════════════════════════════════════════
+12. STRING OPERATIONS  (prefix str_)
+═══════════════════════════════════════════════════════════════
+
+All string results are new heap allocations.  The original
+strings are not modified (immutable).
+
+str_new(char_array_ptr, len) → dsn ptr in heap
+  Allocates (ceil(len/5)+1) words; packs chars via incldb logic.
+
+str_cat(a, b) → new dsn ptr
+  Allocates len(a)+len(b) chars worth of words; copies both.
+
+str_left(s, n) → new dsn ptr (first n chars)
+str_right(s, n) → new dsn ptr (last n chars)
+str_mid(s, start, n) → new dsn ptr
+str_len(s) → integer (from dsn count word)
+str_asc(s) → integer (first char; 0 if empty string)
+str_chr(n) → new 1-char dsn string
+str_instr(s, sub) → 1-based position or 0
+str_cmp(a, b) → -1/0/1 (lexicographic)
+str_val(s) → numeric descriptor (parses leading number)
+str_tof(descriptor) → dsn string (number→string conversion)
+
+String I/O: io_puts walks the dsn format using incldb.
+
+
+═══════════════════════════════════════════════════════════════
+13. FPU WRAPPERS  (prefix fp_)
+═══════════════════════════════════════════════════════════════
+
+The FPU operates on internal 80-bit registers F0–F7.  Memory
+operands are F36 (ldf/stf) or F72 (ldg/stg).
+
+fp_ld_f(ptr)    load F36 word at ptr into F0
+fp_st_f(ptr)    store F0 to F36 at ptr
+fp_ld_d(ptr)    load F72 two-word pair at ptr into F0
+fp_st_d(ptr)    store F0 to F72 pair at ptr
+fp_from_i(ac)   convert integer in ac → F0
+fp_to_i()       convert F0 → integer in ac (truncate)
+
+fp_add_f, fp_sub_f, fp_mul_f, fp_div_f   (F36 operand in F1)
+fp_add_d, fp_sub_d, fp_mul_d, fp_div_d   (F72 operand in F1/F2)
+fp_pow_f        (F0 ^ F1 via LOG/EXP approximation)
+fp_cmp_f        → integer: -1, 0, or 1
+
+Math functions (wrapped for both F and D):
+fp_sqrt, fp_log, fp_exp, fp_sin, fp_cos, fp_tan, fp_atn
+fp_abs, fp_int, fp_sgn, fp_fix
+
+RND: fp_rnd — linear congruential generator; result in F0.
+Seed is a 36-bit BSS word updated each call.
+
+
+═══════════════════════════════════════════════════════════════
+14. STATEMENT HANDLERS  (prefix st_)
+═══════════════════════════════════════════════════════════════
+
+Each handler receives the token stream positioned immediately
+after the keyword token.  Handlers use tok_next/tok_peek to
+consume tokens and ex_or() to evaluate expressions.
+
+Initial statement set:
+
+st_rem      skip rest of tokens to end-of-line
+st_let      evaluate expr; call var_set (LET is also implicit)
+st_print    loop: evaluate expr, print with io_putn/io_putf/io_puts;
+            handle ; (no separator) and , (tab advance to next zone)
+            print CR+LF at end unless trailing ;
+st_input    optional string prompt; for each var: io_getl, parse,
+            var_set
+st_get      wait for single char; store in variable
+st_if       evaluate condition; if true, continue; if false (and no
+            ELSE), skip to end of line
+st_goto     evaluate line number; call par_goto(n)
+st_gosub    push cur_line+cur_tok onto gosub stack; par_goto(n)
+st_return   pop gosub stack; restore cur_line+cur_tok
+st_for      push [var, limit, step, return_tok] onto for stack
+st_next     pop top of for stack; increment variable; if not done,
+            jump back to FOR line
+st_on       evaluate expr; select n-th line from list; goto/gosub
+st_dim      for each variable: parse name+dims; call var_dim
+st_read     for each variable: fetch next DATA value; call var_set
+st_data     (no runtime action; DATA lines are skipped during RUN
+            unless being read by READ)
+st_restore  reset DATA pointer to first DATA line
+st_end      run_mode = 0
+st_stop     run_mode = 0; print "STOP at line N"
+st_cont     resume from last STOP point (if valid)
+st_new      ln_clear; var_clear; return to READY
+st_run      optional line number; par_run(first or specified line)
+st_list     optional range; walk lines; tok_detok each
+st_peek     evaluate address; read M[addr]; push as integer result
+st_poke     evaluate address and value; write M[addr]
+st_call     evaluate address; optionally evaluate arg list; call
+            the address as a subroutine (machine language); return
+            value in ac is available as a BASIC integer
+
+
+═══════════════════════════════════════════════════════════════
+15. ERROR HANDLING  (prefix err_)
+═══════════════════════════════════════════════════════════════
+
+Global word err_code holds current error number (0 = no error).
+Global word err_line holds the line number where the error occurred.
+
+err_set(code) — store code and line; jmp to err_handler.
+
+err_handler:
+  Print "?<message> ERROR IN LINE <n>" (or just "?<message> ERROR"
+  in direct mode).
+  Clear gosub stack, for stack.
+  Reset run_mode to 0.
+  Return to READY loop.
+
+CPU-level exceptions (level 0 handler) convert to err_set calls:
+  X_DIVZ → DIVISION BY ZERO
+  X_MEMX → OUT OF MEMORY (if address is in heap region) or
+            ILLEGAL ADDRESS (if outside RAM)
+
+Error code table (initial):
+  0  OK
+  1  SYNTAX
+  2  TYPE MISMATCH
+  3  UNDEFINED LINE
+  4  UNDEFINED VARIABLE
+  5  SUBSCRIPT OUT OF RANGE
+  6  DIVISION BY ZERO
+  7  OUT OF MEMORY
+  8  STRING TOO LONG
+  9  GOSUB STACK OVERFLOW
+  10 FOR STACK OVERFLOW
+  11 ILLEGAL QUANTITY
+  12 ILLEGAL DIRECT
+
+
+═══════════════════════════════════════════════════════════════
+16. EXTENSIBILITY MECHANISMS
+═══════════════════════════════════════════════════════════════
+
+a) New statements
+   1. Choose a keyword string and assign a token byte constant.
+   2. Add [keyword_str, token_byte] to kw_tbl[] (tokenizer table).
+   3. Add [token_byte, st_handler_ptr] to st_tbl[] (dispatch table).
+   4. Write st_<name> handler; use tok_next/ex_or; end with rets.
+   No changes to the tokenizer core or dispatcher loop required.
+
+b) New functions
+   1. Choose a name and function token byte constant.
+   2. Add to fn_tbl[] (function dispatch table).
+   3. Write fn_<name> handler; argument already evaluated and in
+      descriptor pointed to by x0; store result into result descriptor
+      pointed to by x1; rets.
+
+c) New I/O devices
+   Write a new section of I/O routines using the TTY model as
+   reference.  The io_* layer already abstracts the console; a
+   file I/O device (paper tape, LPT) can be added without touching
+   the statement handlers.
+
+d) New types
+   Add a type tag value in the type constants; extend ex_primary to
+   recognise the new literal/variable form; extend type-coercion
+   logic in ex_add/ex_mul etc.
+
+
+═══════════════════════════════════════════════════════════════
+17. IMPLEMENTATION PHASES
+═══════════════════════════════════════════════════════════════
+
+Phase 1 — Foundation
+  Boot, memory detection, I/O layer (io_*), READY loop with line
+  editing (digit-prefixed lines stored/deleted), LIST and NEW.
+  Deliverable: type a program, LIST it, NEW it.
+
+Phase 2 — Integer BASIC
+  Tokenizer (tok_*), line storage (ln_*), statement dispatcher
+  (par_*), expression evaluator for integers only (ex_*),
+  variable table (var_*) for integer scalars.
+  Statements: REM, LET, PRINT (integers), GOTO, IF/THEN, END,
+  GOSUB/RETURN, RUN, STOP, CONT.
+  Deliverable: run simple integer programs.
+
+Phase 3 — Floating Point
+  fp_* wrappers for F36 and F72.  Float and double variable types.
+  Type promotion in expression evaluator.
+  Statements: no new ones; existing statements gain float handling.
+  Deliverable: float arithmetic, FPU math functions.
+
+Phase 4 — Strings
+  str_* routines, string heap.  String variable type.
+  Expressions: string concatenation (+), string functions.
+  Statements: PRINT (strings), INPUT (strings), string LET.
+  Deliverable: string manipulation programs.
+
+Phase 5 — Arrays and Loops
+  var_dim, array get/set.  DIM statement.
+  FOR/NEXT with STEP.  ON/GOTO, ON/GOSUB.
+  Deliverable: array programs and counted loops.
+
+Phase 6 — Data and System
+  READ/DATA/RESTORE, PEEK, POKE, CALL.
+  Error handler with X_DIVZ and X_MEMX trapping.
+  Deliverable: full initial feature set.
+
+Phase 7 — Built-in Functions
+  All math and string functions in fn_tbl.
+  RND with seeding.  Trigonometric functions via FPU.
+  Deliverable: complete function library.
+
+
+═══════════════════════════════════════════════════════════════
+18. KEY DESIGN DECISIONS AND RATIONALE
+═══════════════════════════════════════════════════════════════
+
+Single source file (vibasic.a700): asm2 has no include directive.
+A large, well-labeled file is preferable to a pre-processing hack.
+Estimated size: 3000–6000 lines of assembly.
+
+calls/rets over callr/retr: BASIC requires nested calls (the
+expression evaluator is recursive; statements call the evaluator
+which calls variable lookup, type conversion, string allocation, etc.).
+callr/retr is only for flat leaf routines (io_putc, tok_next, etc.).
+
+Flat sorted program text: simpler than a linked list, avoids the
+need to store/chase pointers, and linear LIST is fast.  Insert/delete
+require shifting, but BASIC programs are small and edits are rare
+relative to LIST and RUN.
+
+Word-per-char variable table entries (5 chars packed into 2 words):
+Lookup is O(n) with a small constant — fine for the variable counts
+typical of BASIC programs.  A hash table can be substituted later.
+
+No GC in initial version: avoids complexity.  For typical BASIC
+programs, string GC is rarely needed.  The user is notified with
+?OUT OF MEMORY and can use NEW to reclaim space.
+
+Token-per-word encoding: wastes space (one 36-bit word per token)
+but simplifies the evaluator (no bit-packing needed to walk tokens).
+A packed byte stream can be substituted if memory pressure demands.
+
+Supervisor mode throughout: no user/supervisor switching needed.
+PEEK and POKE can access the full address space.  CALL executes
+at supervisor privilege — the user is responsible for correctness.
