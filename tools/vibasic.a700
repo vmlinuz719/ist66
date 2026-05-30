@@ -1517,6 +1517,198 @@ spr_done:   rets
 
 spr_cnt:    bss         1
 
+; str_from_chars — x0 = word-per-char buffer, x1 = count.  Returns heap string.
+str_from_chars: save    x4, x5, x6, x7
+            st          x0, .sfc_src
+            st          x1, .sfc_cnt
+            ld          x0, .sfc_cnt
+            calls       .str_alloc
+            st          ac, .sfc_new
+            ld          x7, .sfc_new     ; dest BX pointer
+            ld          x6, .sfc_src
+            ld          ac, .sfc_cnt
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .sfc_dn
+sfc_lp:     ld          ac, (x6)
+            incr        x6, x6
+            incstb      ac, x7, 7
+            incr.rn     x4, x4
+            jmp         .sfc_lp
+sfc_dn:     ld          ac, .sfc_new
+            rets
+
+sfc_src:    bss         1
+sfc_cnt:    bss         1
+sfc_new:    bss         1
+
+; str_sub — x0 = string, x1 = 0-based start, x2 = count.  Returns substring.
+str_sub:    save        x4, x5, x6, x7
+            st          x0, .ss_s
+            st          x1, .ss_st
+            st          x2, .ss_n
+            ld          x0, .ss_n
+            calls       .str_alloc
+            st          ac, .ss_new
+            ld          x6, .ss_s        ; src BX; skip start chars
+            ld          ac, .ss_st
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .ss_copy
+ss_skip:    incldb      ac, x6, 7
+            incr.rn     x4, x4
+            jmp         .ss_skip
+ss_copy:    ld          x7, .ss_new      ; dest BX
+            ld          ac, .ss_n
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .ss_dn
+ss_cl:      incldb      ac, x6, 7
+            incstb      ac, x7, 7
+            incr.rn     x4, x4
+            jmp         .ss_cl
+ss_dn:      ld          ac, .ss_new
+            rets
+
+ss_s:       bss         1
+ss_st:      bss         1
+ss_n:       bss         1
+ss_new:     bss         1
+
+; str_chr — x0 = char code.  Returns a 1-character string.
+str_chr:    save        x4
+            st          x0, .numbuf
+            ldea        x0, .numbuf
+            ldea        x1, 1
+            calls       .str_from_chars
+            rets
+
+; str_fromint — x0 = integer.  Returns its decimal string (STR$).
+str_fromint: save       x4, x5, x6, x7
+            st          x0, .fi_v
+            ld          ac, .fi_v
+            movr.rn     ac, ac           ; zero ?  skip jmp when nonzero
+            jmp         .fi_nz
+            ldea        x6, .numbuf
+            ldea        ac, 48
+            st          ac, (x6)
+            ldea        x0, .numbuf
+            ldea        x1, 1
+            calls       .str_from_chars
+            rets
+fi_nz:      ld          ac, .fi_v        ; sign
+            and         ac, .signbit
+            movr.rz     ac, ac
+            jmp         .fi_abs
+            ld          ac, .fi_v
+            ngtr        ac, ac
+            st          ac, .fi_v
+            ldea        ac, 1
+            st          ac, .fi_neg
+            jmp         .fi_dig
+fi_abs:     xorr        ac, ac
+            st          ac, .fi_neg
+fi_dig:     xorr        x4, x4           ; digit count
+fi_dl:      ld          ac, .fi_v
+            div         .tenw
+            push        xy
+            incr        x4, x4
+            movr        mq, ac
+            st          ac, .fi_v
+            movr.rn     mq, mq           ; skip jmp when quotient 0
+            jmp         .fi_dl
+            ldea        x6, .numbuf      ; assemble: optional '-', then digits
+            ld          ac, .fi_neg
+            movr.rz     ac, ac
+            jmp         .fi_wr
+            ldea        ac, 45
+            st          ac, (x6)
+            incr        x6, x6
+fi_wr:      ngtr        x4, x5           ; x5 = -digitcount
+fi_pl:      pop         ac
+            addi        ac, ac, 48
+            st          ac, (x6)
+            incr        x6, x6
+            incr.rn     x5, x5
+            jmp         .fi_pl
+            movr        x6, ac           ; total = numbuf end - numbuf
+            ldea        x4, .numbuf
+            ngtr        x4, x4
+            addr        x4, ac
+            st          ac, .fi_total
+            ldea        x0, .numbuf
+            ld          x1, .fi_total
+            calls       .str_from_chars
+            rets
+
+fi_v:       bss         1
+fi_neg:     bss         1
+fi_total:   bss         1
+numbuf:     bss         16
+
+; str_val — x0 = string.  Returns the leading integer (VAL).
+str_val:    save        x4, x5, x6, x7
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .sv_cnt
+            movr        x0, x6           ; BX pointer
+            ld          ac, .sv_cnt
+            ngtr        ac, x4           ; -count
+            xorr        x5, x5           ; value
+            xorr        ac, ac
+            st          ac, .sv_neg
+            st          ac, .sv_started
+sv_lp:      movr.rz     x4, x4           ; characters remain ?
+            jmp         .sv_dn
+            incldb      ac, x6, 7
+            st          ac, .sv_ch
+            incr        x4, x4
+            st          x6, .sv_ptr      ; id_digit clobbers x6/x7 — preserve ptr
+            ld          ac, .sv_ch       ; digit ?
+            callr       .id_digit
+            ld          x6, .sv_ptr
+            movr.rz     ac, ac
+            jmp         .sv_nd
+            ld          ac, .sv_ch       ; accumulate
+            addi        ac, ac, -48
+            st          ac, .sv_d
+            movr        x5, mq
+            mul         .tenw
+            add         ac, .sv_d
+            movr        ac, x5
+            ldea        ac, 1
+            st          ac, .sv_started
+            jmp         .sv_lp
+sv_nd:      ld          ac, .sv_ch       ; leading '-' before any digit ?
+            subin.rn    ac, ac, 45
+            jmp         .sv_chksp
+            ld          ac, .sv_started
+            movr.rn     ac, ac           ; skip jmp when not started
+            jmp         .sv_lp           ; '-' after digits: stop
+            ldea        ac, 1
+            st          ac, .sv_neg
+            jmp         .sv_lp
+sv_chksp:   ld          ac, .sv_started  ; skip leading spaces; else stop
+            movr.rz     ac, ac
+            jmp         .sv_lp
+            ld          ac, .sv_ch
+            subin.rn    ac, ac, 32
+            jmp         .sv_dn
+            jmp         .sv_lp
+sv_dn:      ld          ac, .sv_neg
+            movr.rz     ac, ac
+            jmp         .sv_ret
+            ngtr        x5, x5
+sv_ret:     movr        x5, ac
+            rets
+
+sv_cnt:     bss         1
+sv_neg:     bss         1
+sv_started: bss         1
+sv_ch:      bss         1
+sv_d:       bss         1
+sv_ptr:     bss         1
+
 
 ; ==========================================================================
 ; Integer expression evaluator (recursive descent).  All routines read and
@@ -1524,7 +1716,7 @@ spr_cnt:    bss         1
 ; ==========================================================================
 
 ; ex_prim — primary: INT literal, variable, function call, or ( expr ).
-ex_prim:    save        x4, x5
+ex_prim:    save        x4, x5, x6, x7
             ld          x4, .ep_tok
             ld          ac, (x4)
             st          ac, .ex_w
@@ -1593,11 +1785,11 @@ exp_nV:     ld          ac, .ex_w
             st          x4, .ep_tok
             ld          ac, .ex_val
             rets
-exp_nL:     ld          ac, .ex_w        ; function call: <fn> ( expr )
-            callr       .is_func         ; ac = function code (1..N) or 0
-            movr.rz     ac, ac           ; skip jmp when it is a function
+exp_nL:     ld          ac, .ex_w        ; function call
+            callr       .is_func         ; ac = code (1..13) or 0
+            movr.rz     ac, ac
             jmp         .exp_err
-            movr        ac, x5           ; x5 = function code (survives arg eval)
+            movr        ac, x5           ; x5 = code (survives arg evaluation)
             ld          x4, .ep_tok      ; consume function name
             addi        x4, x4, 1
             st          x4, .ep_tok
@@ -1607,22 +1799,184 @@ exp_nL:     ld          ac, .ex_w        ; function call: <fn> ( expr )
             jmp         .exp_err
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_expr         ; argument in ac; x5 preserved
-            st          ac, .ex_arg
-            ld          ac, .vtype       ; remember argument type
-            st          ac, .ex_argt
-            ld          x4, .ep_tok      ; expect ')'
+            calls       .ex_expr         ; argument 1
+            movr        ac, x6           ; x6 = arg1 value
+            ; codes 1..5 are the legacy single integer-argument functions
+            movr        x5, ac
+            addi        ac, ac, -6
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when code < 6
+            jmp         .fn_new
+            st          x6, .ex_arg      ; legacy path -> apply_fn
+            ld          x4, .ep_tok
             ld          ac, (x4)
             sub         ac, .v_rpar
             movr.rn     ac, ac
             jmp         .exp_err
             addi        x4, x4, 1
             st          x4, .ep_tok
-            st          x5, .ex_fn       ; store fn code + arg, then apply
-            calls       .apply_fn        ; ac = result; apply_fn sets vtype
+            st          x5, .ex_fn
+            calls       .apply_fn
+            rets
+fn_new:     movr        x5, ac           ; codes 11..13 take a second argument
+            addi        ac, ac, -11
+            and         ac, .signbit
+            movr.rn     ac, ac           ; skip jmp when code >= 11
+            jmp         .fn_close         ; codes 6..10: single argument
+            ld          x4, .ep_tok      ; expect ','
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .exp_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; argument 2
+            movr        ac, x7           ; x7 = arg2 value
+            ldea        ac, 30000        ; arg3 default (rest of string)
+            st          ac, .fn_a3
+            ld          x4, .ep_tok      ; optional ',' arg3 (MID$)
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .fn_close
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            st          ac, .fn_a3
+fn_close:   ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .exp_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ; dispatch by code (x5); arg1 in x6, arg2 in x7, arg3 in fn_a3
+            movr        x5, ac
+            subin.rn    ac, ac, 6
+            jmp         .fc_7
+            jmp         .fc_len
+fc_7:       movr        x5, ac
+            subin.rn    ac, ac, 7
+            jmp         .fc_8
+            jmp         .fc_asc
+fc_8:       movr        x5, ac
+            subin.rn    ac, ac, 8
+            jmp         .fc_9
+            jmp         .fc_val
+fc_9:       movr        x5, ac
+            subin.rn    ac, ac, 9
+            jmp         .fc_10
+            jmp         .fc_chr
+fc_10:      movr        x5, ac
+            subin.rn    ac, ac, 10
+            jmp         .fc_11
+            jmp         .fc_str
+fc_11:      movr        x5, ac
+            subin.rn    ac, ac, 11
+            jmp         .fc_12
+            jmp         .fc_left
+fc_12:      movr        x5, ac
+            subin.rn    ac, ac, 12
+            jmp         .fc_mid
+            jmp         .fc_right
+fc_len:     ld          ac, (x6)         ; LEN(s$)
+            and         ac, .cntmask
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
+fc_asc:     movr        x6, x4           ; ASC(s$) -> first char
+            incldb      ac, x4, 7
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
+fc_val:     movr        x6, x0           ; VAL(s$)
+            calls       .str_val
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
+fc_chr:     movr        x6, x0           ; CHR$(n)
+            calls       .str_chr
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_str:     movr        x6, x0           ; STR$(n)
+            calls       .str_fromint
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_left:    ld          ac, (x6)         ; LEFT$(s$, n)
+            and         ac, .cntmask
+            st          ac, .fn_len
+            movr        x7, ac
+            calls       .fn_minlen       ; ac = min(n, len)
+            movr        x6, x0
+            xorr        x1, x1
+            movr        ac, x2
+            calls       .str_sub
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_right:   ld          ac, (x6)         ; RIGHT$(s$, n)
+            and         ac, .cntmask
+            st          ac, .fn_len
+            movr        x7, ac
+            calls       .fn_minlen       ; ac = count = min(n, len)
+            st          ac, .fn_cnt
+            ld          ac, .fn_len      ; start = len - count
+            sub         ac, .fn_cnt
+            movr        ac, x1
+            movr        x6, x0
+            ld          x2, .fn_cnt
+            calls       .str_sub
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_mid:     ld          ac, (x6)         ; MID$(s$, start, len)
+            and         ac, .cntmask
+            st          ac, .fn_len
+            movr        x7, ac           ; start0 = start - 1
+            addi        ac, ac, -1
+            st          ac, .fn_st0
+            ld          ac, .fn_len      ; avail = len - start0
+            sub         ac, .fn_st0
+            st          ac, .fn_avail
+            and         ac, .signbit     ; start past end -> empty
+            movr.rz     ac, ac
+            jmp         .fc_mid2
+            ldea        ac, .emptystr
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_mid2:    ld          ac, .fn_avail    ; count = min(arg3, avail)
+            st          ac, .fn_len
+            ld          ac, .fn_a3
+            movr        ac, x7
+            calls       .fn_minlen
+            movr        x6, x0
+            ld          x1, .fn_st0
+            movr        ac, x2
+            calls       .str_sub
+            ldea        x4, 1
+            st          x4, .vtype
             rets
 exp_err:    ldea        x0, .msg_synt
             jmp         .err_show
+
+; fn_minlen — ac = min(x7, fn_len), clamped to >= 0.
+fn_minlen:  save        x4
+            movr        x7, ac
+            and         ac, .signbit     ; negative count -> 0
+            movr.rz     ac, ac
+            jmp         .fm_pos
+            xorr        ac, ac
+            rets
+fm_pos:     ld          x4, .fn_len
+            cmple       x7, x4           ; x7 <= len ?
+            jmp         .fm_keep
+            ld          ac, .fn_len
+            rets
+fm_keep:    movr        x7, ac
+            rets
 
 ex_w:       bss         1
 ex_t:       bss         1
@@ -1631,6 +1985,11 @@ ex_fn:      bss         1
 ex_arg:     bss         1
 ex_argt:    bss         1
 exp_ent:    bss         1
+fn_a3:      bss         1
+fn_len:     bss         1
+fn_cnt:     bss         1
+fn_st0:     bss         1
+fn_avail:   bss         1
 vtype:      bss         1
 
 ; is_func — token word in ac -> 1=PEEK 2=ABS 3=SGN 4=RND 5=INT, else 0.
@@ -1661,8 +2020,56 @@ iff_4:      ld          ac, .if_w
 iff_5:      ld          ac, .if_w
             sub         ac, .v_int
             movr.rn     ac, ac
-            jmp         .iff_0
+            jmp         .iff_6
             ldea        ac, 5
+            retr
+iff_6:      ld          ac, .if_w
+            sub         ac, .v_len
+            movr.rn     ac, ac
+            jmp         .iff_7
+            ldea        ac, 6
+            retr
+iff_7:      ld          ac, .if_w
+            sub         ac, .v_asc
+            movr.rn     ac, ac
+            jmp         .iff_8
+            ldea        ac, 7
+            retr
+iff_8:      ld          ac, .if_w
+            sub         ac, .v_val
+            movr.rn     ac, ac
+            jmp         .iff_9
+            ldea        ac, 8
+            retr
+iff_9:      ld          ac, .if_w
+            sub         ac, .v_chr
+            movr.rn     ac, ac
+            jmp         .iff_10
+            ldea        ac, 9
+            retr
+iff_10:     ld          ac, .if_w
+            sub         ac, .v_str
+            movr.rn     ac, ac
+            jmp         .iff_11
+            ldea        ac, 10
+            retr
+iff_11:     ld          ac, .if_w
+            sub         ac, .v_left
+            movr.rn     ac, ac
+            jmp         .iff_12
+            ldea        ac, 11
+            retr
+iff_12:     ld          ac, .if_w
+            sub         ac, .v_right
+            movr.rn     ac, ac
+            jmp         .iff_13
+            ldea        ac, 12
+            retr
+iff_13:     ld          ac, .if_w
+            sub         ac, .v_mid
+            movr.rn     ac, ac
+            jmp         .iff_0
+            ldea        ac, 13
             retr
 iff_0:      xorr        ac, ac
             retr
@@ -2645,6 +3052,14 @@ v_abs:      dw          #410000000       ; ABS, tag 0x41
 v_sgn:      dw          #420000000       ; SGN, tag 0x42
 v_rnd:      dw          #430000000       ; RND, tag 0x43
 v_int:      dw          #440000000       ; INT, tag 0x44
+v_len:      dw          #450000000       ; LEN, tag 0x45
+v_asc:      dw          #460000000       ; ASC, tag 0x46
+v_val:      dw          #470000000       ; VAL, tag 0x47
+v_chr:      dw          #480000000       ; CHR$, tag 0x48
+v_str:      dw          #490000000       ; STR$, tag 0x49
+v_left:     dw          #4A0000000       ; LEFT$, tag 0x4A
+v_right:    dw          #4B0000000       ; RIGHT$, tag 0x4B
+v_mid:      dw          #4C0000000       ; MID$, tag 0x4C
 neg1:       dw          -1
 lo35:       dw          #7FFFFFFFF       ; low 35 bits (clears sign)
 rnd_mul:    dw          1103515245
@@ -2676,6 +3091,14 @@ s_abs:      dsn         "ABS"
 s_sgn:      dsn         "SGN"
 s_rnd:      dsn         "RND"
 s_int:      dsn         "INT"
+s_len:      dsn         "LEN"
+s_asc:      dsn         "ASC"
+s_val:      dsn         "VAL"
+s_chr:      dsn         "CHR$"
+s_str:      dsn         "STR$"
+s_left:     dsn         "LEFT$"
+s_right:    dsn         "RIGHT$"
+s_mid:      dsn         "MID$"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -2719,6 +3142,14 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_sgn,    #420000000
             dw          s_rnd,    #430000000
             dw          s_int,    #440000000
+            dw          s_len,    #450000000
+            dw          s_asc,    #460000000
+            dw          s_val,    #470000000
+            dw          s_chr,    #480000000
+            dw          s_str,    #490000000
+            dw          s_left,   #4A0000000
+            dw          s_right,  #4B0000000
+            dw          s_mid,    #4C0000000
             dw          0, 0
 
 ; Single-char operator table: [char code, tag value], terminated by 0.
@@ -2774,6 +3205,14 @@ rev_tab:    dw          #100000000, o_plus
             dw          #420000000, s_sgn
             dw          #430000000, s_rnd
             dw          #440000000, s_int
+            dw          #450000000, s_len
+            dw          #460000000, s_asc
+            dw          #470000000, s_val
+            dw          #480000000, s_chr
+            dw          #490000000, s_str
+            dw          #4A0000000, s_left
+            dw          #4B0000000, s_right
+            dw          #4C0000000, s_mid
             dw          0, 0
 
 
