@@ -48,6 +48,11 @@ start:      xorr        ac, ac
             callr       .mem_det        ; detect RAM -> memtop / varbot / progend
             callr       .con_init       ; TTY config + clear interrupt
 
+            ldea        ac, .strheap     ; init string heap
+            st          ac, .strnext
+            ldea        ac, .strendl
+            st          ac, .strend
+
             ldea        x0, .msg_ban    ; "VIBASIC V0.1"
             callr       .io_puts
             callr       .io_crlf
@@ -1190,6 +1195,11 @@ st_new:     save        x4
             st          ac, .progend
             ld          ac, .memtop
             st          ac, .varbot
+            ldea        ac, .strheap     ; reset string heap
+            st          ac, .strnext
+            xorr        ac, ac
+            st          ac, .for_sp
+            st          ac, .gosub_sp
             rets
 
 
@@ -1282,10 +1292,10 @@ vl_chk:     ld          ac, (x4)
             jmp         .vl_next
             movr        x4, ac           ; found
             rets
-vl_next:    addi        x4, x4, 3
+vl_next:    addi        x4, x4, 4
             jmp         .vl_lp
-vl_new:     ld          ac, .varbot      ; allocate a new entry
-            addi        ac, ac, -3
+vl_new:     ld          ac, .varbot      ; allocate a new 4-word entry
+            addi        ac, ac, -4
             st          ac, .varbot
             movr        ac, x4
             ld          ac, .vl_nm0
@@ -1293,13 +1303,184 @@ vl_new:     ld          ac, .varbot      ; allocate a new entry
             ld          ac, .vl_nm1
             st          ac, 1(x4)
             xorr        ac, ac
-            st          ac, 2(x4)
+            st          ac, 2(x4)        ; type = integer
+            st          ac, 3(x4)        ; value = 0
             movr        x4, ac
             rets
 
 vl_cnt:     bss         1
 vl_nm0:     bss         1
 vl_nm1:     bss         1
+
+
+; ==========================================================================
+; String runtime.  A "string value" is a pointer to a word whose low 28 bits
+; are the character count, followed by ceil(count/5) packed 7-bit body words
+; (the same layout as a TKN_STR token, so literals need no copying).  New
+; strings are bump-allocated from strheap.
+; ==========================================================================
+
+; str_alloc — x0 = character count.  Returns a zeroed dsn string in ac
+; (count word written; body words zeroed so incstb can OR into them).
+str_alloc:  save        x4, x5
+            st          x0, .sa_cnt
+            addi        x0, ac, 4        ; ac = count + 4; nbody = ceil(count/5)
+            div         .fivew
+            movr        mq, ac
+            addi        ac, ac, 1        ; total words = 1 + nbody
+            st          ac, .sa_tot
+            ld          x4, .strnext
+            st          x4, .sa_ptr
+            ld          ac, .sa_tot      ; new top after allocation
+            addr        x4, ac
+            st          ac, .sa_top
+            ld          x4, .strend      ; out of string space ?
+            ld          x5, .sa_top
+            cmple       x5, x4           ; new top <= strend ?
+            jmp         .sa_ok
+            ldea        x0, .msg_oom
+            jmp         .err_show
+sa_ok:      ld          ac, .sa_top
+            st          ac, .strnext
+            ld          x4, .sa_ptr      ; zero the allocation
+            ld          ac, .sa_tot
+            ngtr        ac, x5
+sa_zl:      xorr        ac, ac
+            st          ac, (x4)
+            incr        x4, x4
+            incr.rn     x5, x5
+            jmp         .sa_zl
+            ld          x4, .sa_ptr      ; write count word
+            ld          ac, .sa_cnt
+            st          ac, (x4)
+            ld          ac, .sa_ptr
+            rets
+
+sa_cnt:     bss         1
+sa_tot:     bss         1
+sa_ptr:     bss         1
+sa_top:     bss         1
+
+; str_cat — x0 = string a, x1 = string b.  Returns new string a+b in ac.
+str_cat:    save        x4, x5, x6, x7
+            st          x0, .sc_a
+            st          x1, .sc_b
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .sc_ca
+            ld          ac, (x1)
+            and         ac, .cntmask
+            st          ac, .sc_cb
+            ld          ac, .sc_ca
+            add         ac, .sc_cb
+            movr        ac, x0
+            calls       .str_alloc       ; ac = new string
+            st          ac, .sc_new
+            movr        ac, x7           ; dest BX pointer = new
+            ld          x6, .sc_a        ; copy a
+            ld          ac, .sc_ca
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .sc_b1
+sc_al:      incldb      ac, x6, 7
+            incstb      ac, x7, 7
+            incr.rn     x4, x4
+            jmp         .sc_al
+sc_b1:      ld          x6, .sc_b        ; copy b
+            ld          ac, .sc_cb
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .sc_dn
+sc_bl:      incldb      ac, x6, 7
+            incstb      ac, x7, 7
+            incr.rn     x4, x4
+            jmp         .sc_bl
+sc_dn:      ld          ac, .sc_new
+            rets
+
+sc_a:       bss         1
+sc_b:       bss         1
+sc_ca:      bss         1
+sc_cb:      bss         1
+sc_new:     bss         1
+
+; str_cmp — x0 = a, x1 = b.  Returns ac = -1/0/1 (lexicographic).
+str_cmp:    save        x4, x5, x6, x7
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .scm_ca
+            ld          ac, (x1)
+            and         ac, .cntmask
+            st          ac, .scm_cb
+            movr        x0, x6           ; a BX pointer
+            movr        x1, x7           ; b BX pointer
+            ld          x4, .scm_ca      ; min = min(ca, cb)
+            ld          x5, .scm_cb
+            cmple       x4, x5           ; ca <= cb ?
+            jmp         .scm_mina
+            ld          ac, .scm_cb
+            st          ac, .scm_min
+            jmp         .scm_cl
+scm_mina:   ld          ac, .scm_ca
+            st          ac, .scm_min
+scm_cl:     ld          ac, .scm_min
+            movr.rz     ac, ac           ; skip jmp when min != 0
+            jmp         .scm_len
+            ngtr        ac, x5           ; x5 = -min
+scm_loop:   incldb      ac, x6, 7        ; a char
+            st          ac, .scm_ach
+            incldb      ac, x7, 7        ; b char
+            st          ac, .scm_bch
+            ld          ac, .scm_ach
+            sub         ac, .scm_bch
+            movr.rz     ac, ac           ; skip jmp when chars differ
+            jmp         .scm_eqc
+            and         ac, .signbit     ; differ: sign of (a - b)
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .scm_pos
+            ld          ac, .neg1
+            rets
+scm_pos:    ldea        ac, 1
+            rets
+scm_eqc:    incr.rn     x5, x5           ; skip jmp when all min chars done
+            jmp         .scm_loop
+scm_len:    ld          ac, .scm_ca      ; equal prefix: shorter string is less
+            sub         ac, .scm_cb
+            movr.rz     ac, ac           ; skip jmp when lengths differ
+            jmp         .scm_eq
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .scm_lpos
+            ld          ac, .neg1
+            rets
+scm_lpos:   ldea        ac, 1
+            rets
+scm_eq:     xorr        ac, ac
+            rets
+
+scm_ca:     bss         1
+scm_cb:     bss         1
+scm_min:    bss         1
+scm_ach:    bss         1
+scm_bch:    bss         1
+
+; str_print — x0 = string pointer.  Prints the characters.
+str_print:  save        x4
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .spr_cnt
+            movr        x0, x6           ; BX pointer
+            ld          ac, .spr_cnt
+            ngtr        ac, x7
+            movr.rz     x7, x7           ; skip when empty
+            jmp         .spr_done
+spr_lp:     incldb      ac, x6, 7
+            callr       .io_putc         ; preserves x6, x7
+            incr.rn     x7, x7
+            jmp         .spr_lp
+spr_done:   rets
+
+spr_cnt:    bss         1
 
 
 ; ==========================================================================
@@ -1321,22 +1502,40 @@ ex_prim:    save        x4, x5
             st          ac, .ex_val
             addi        x4, x4, 2
             st          x4, .ep_tok
+            xorr        ac, ac           ; type = integer
+            st          ac, .vtype
             ld          ac, .ex_val
             rets
 exp_nI:     ld          ac, .ex_t
             sub         ac, .tknvar
             movr.rn     ac, ac           ; VAR ?
-            jmp         .exp_nV
+            jmp         .exp_nVc
             ld          x0, .ep_tok
             calls       .var_lookup      ; ac = entry
-            movr        ac, x4
-            ld          ac, 2(x4)        ; value
-            st          ac, .ex_val
+            st          ac, .exp_ent
             ld          x0, .ep_tok      ; advance past the VAR token
             calls       .tok_size
             ld          x4, .ep_tok
             addr        ac, x4
             st          x4, .ep_tok
+            ld          x4, .exp_ent     ; type (word 2) and value (word 3)
+            ld          ac, 2(x4)
+            st          ac, .vtype
+            ld          ac, 3(x4)
+            rets
+exp_nVc:    ld          ac, .ex_t
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; STR literal ?
+            jmp         .exp_nV
+            ld          ac, .ep_tok      ; string value = pointer to the token
+            st          ac, .ex_val
+            ld          x0, .ep_tok      ; advance past it
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ldea        ac, 1            ; type = string
+            st          ac, .vtype
             ld          ac, .ex_val
             rets
 exp_nV:     ld          ac, .ex_w
@@ -1346,20 +1545,19 @@ exp_nV:     ld          ac, .ex_w
             ld          x4, .ep_tok      ; consume '('
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_expr
+            calls       .ex_expr         ; sets vtype
             st          ac, .ex_val
             ld          x4, .ep_tok      ; expect ')'
             ld          ac, (x4)
             sub         ac, .v_rpar
             movr.rn     ac, ac
             jmp         .exp_err
-            ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
             ld          ac, .ex_val
             rets
 exp_nL:     ld          ac, .ex_w        ; function call: <fn> ( expr )
-            callr       .is_func         ; ac = function code (1..5) or 0
+            callr       .is_func         ; ac = function code (1..N) or 0
             movr.rz     ac, ac           ; skip jmp when it is a function
             jmp         .exp_err
             movr        ac, x5           ; x5 = function code (survives arg eval)
@@ -1374,6 +1572,8 @@ exp_nL:     ld          ac, .ex_w        ; function call: <fn> ( expr )
             st          x4, .ep_tok
             calls       .ex_expr         ; argument in ac; x5 preserved
             st          ac, .ex_arg
+            ld          ac, .vtype       ; remember argument type
+            st          ac, .ex_argt
             ld          x4, .ep_tok      ; expect ')'
             ld          ac, (x4)
             sub         ac, .v_rpar
@@ -1382,7 +1582,7 @@ exp_nL:     ld          ac, .ex_w        ; function call: <fn> ( expr )
             addi        x4, x4, 1
             st          x4, .ep_tok
             st          x5, .ex_fn       ; store fn code + arg, then apply
-            calls       .apply_fn        ; ac = result
+            calls       .apply_fn        ; ac = result; apply_fn sets vtype
             rets
 exp_err:    ldea        x0, .msg_synt
             jmp         .err_show
@@ -1392,6 +1592,9 @@ ex_t:       bss         1
 ex_val:     bss         1
 ex_fn:      bss         1
 ex_arg:     bss         1
+ex_argt:    bss         1
+exp_ent:    bss         1
+vtype:      bss         1
 
 ; is_func — token word in ac -> 1=PEEK 2=ABS 3=SGN 4=RND 5=INT, else 0.
 is_func:    st          ac, .if_w
@@ -1431,6 +1634,8 @@ if_w:       bss         1
 
 ; apply_fn — apply function ex_fn to ex_arg; result in ac.
 apply_fn:   save        x4
+            xorr        ac, ac           ; functions here all return integers
+            st          ac, .vtype
             ld          ac, .ex_fn
             subin.rn    ac, ac, 1
             jmp         .af_2
@@ -1539,10 +1744,14 @@ et_done:    movr        x5, ac
 
 et_t:       bss         1
 
-; ex_add — term ( ('+'|'-') term )*.  Accumulator in saved x5.
-ex_add:     save        x4, x5
+; ex_add — term ( ('+'|'-') term )*.  Accumulator value in saved x5, its
+; type in saved x6.  '+' adds integers or concatenates strings; '-' is
+; integer-only.
+ex_add:     save        x4, x5, x6
             calls       .ex_term
-            movr        ac, x5           ; x5 = accumulator
+            movr        ac, x5           ; x5 = accumulator value
+            ld          ac, .vtype
+            movr        ac, x6           ; x6 = accumulator type
 ea_lp:      ld          x4, .ep_tok
             ld          ac, (x4)
             sub         ac, .v_plus
@@ -1551,8 +1760,28 @@ ea_lp:      ld          x4, .ep_tok
             ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_term         ; operand in ac; x5 preserved
-            addr        ac, x5           ; x5 += operand
+            calls       .ex_term         ; operand value in ac, type in vtype
+            st          ac, .ea_opv
+            ld          ac, .vtype
+            st          ac, .ea_opt
+            movr        x6, ac           ; accumulator type
+            movr.rz     ac, ac
+            jmp         .ea_iadd         ; accumulator integer -> integer add
+            jmp         .ea_strp         ; accumulator string  -> concatenate
+ea_strp:    ld          ac, .ea_opt
+            movr.rz     ac, ac
+            jmp         .ea_tmm          ; operand integer -> mismatch
+            movr        x5, x0           ; concat(acc, operand)
+            ld          x1, .ea_opv
+            calls       .str_cat
+            movr        ac, x5
+            jmp         .ea_lp
+ea_iadd:    ld          ac, .ea_opt
+            movr.rz     ac, ac
+            jmp         .ea_addok        ; operand integer -> add
+            jmp         .ea_tmm          ; operand string  -> mismatch
+ea_addok:   ld          ac, .ea_opv
+            addr        ac, x5
             jmp         .ea_lp
 ea_cmin:    ld          x4, .ep_tok
             ld          ac, (x4)
@@ -1562,17 +1791,36 @@ ea_cmin:    ld          x4, .ep_tok
             ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_term
+            movr        x6, ac           ; '-' requires integer accumulator
+            movr.rz     ac, ac
+            jmp         .ea_subai
+            jmp         .ea_tmm
+ea_subai:   calls       .ex_term
+            st          ac, .ea_opv
+            ld          ac, .vtype       ; and integer operand
+            movr.rz     ac, ac
+            jmp         .ea_suboi
+            jmp         .ea_tmm
+ea_suboi:   ld          ac, .ea_opv
             subr        ac, x5           ; x5 -= operand
             jmp         .ea_lp
-ea_done:    movr        x5, ac
+ea_done:    movr        x6, ac           ; vtype = accumulator type
+            st          ac, .vtype
+            movr        x5, ac           ; ac = accumulator value
             rets
+ea_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+ea_opv:     bss         1
+ea_opt:     bss         1
 
 ; ex_expr — relational: add ( relop add )?  True = -1, false = 0.
 ; left in saved x4, relop code in saved x6 across the right-hand evaluation.
 ex_expr:    save        x4, x5, x6
             calls       .ex_add
-            movr        ac, x4           ; x4 = left
+            movr        ac, x4           ; x4 = left value
+            ld          ac, .vtype       ; left type (global survives right eval)
+            st          ac, .ex_lt
             ld          x5, .ep_tok
             ld          ac, (x5)
             callr       .is_relop        ; ac = code (1..6) or 0
@@ -1586,13 +1834,31 @@ ex_expr:    save        x4, x5, x6
             st          x4, .ex_l
             st          ac, .ex_r
             st          x6, .ex_relop
-            calls       .rel_eval        ; ac = -1 / 0
+            ld          ac, .ex_lt       ; operand types must match
+            sub         ac, .vtype
+            movr.rn     ac, ac
+            jmp         .exx_tmm
+            ld          ac, .ex_lt       ; string operands -> compare lexically
+            movr.rz     ac, ac
+            jmp         .exx_num
+            ld          x0, .ex_l
+            ld          x1, .ex_r
+            calls       .str_cmp         ; ac = -1/0/1
+            st          ac, .ex_l        ; reduce to (cmp relop 0)
+            xorr        ac, ac
+            st          ac, .ex_r
+exx_num:    calls       .rel_eval        ; ac = -1 / 0
+            xorr        x4, x4           ; result type = integer
+            st          x4, .vtype
             rets
 exx_done:   movr        x4, ac
             rets
+exx_tmm:    ldea        x0, .msg_tmm
+            jmp         .err_show
 
 ex_l:       bss         1
 ex_r:       bss         1
+ex_lt:      bss         1
 ex_relop:   bss         1
 
 ; is_relop — token word in ac -> relop code (1=EQ 2=LT 3=GT 4=LE 5=GE 6=NE) or 0.
@@ -1771,7 +2037,7 @@ sp_ncom:    ld          x4, .ep_tok
             ld          ac, (x4)
             sub         ac, .v_comma
             movr.rn     ac, ac           ; ',' ?
-            jmp         .sp_nstr
+            jmp         .sp_expr
             ldea        ac, 1
             st          ac, .sp_supp
             ldea        ac, 9            ; tab
@@ -1780,22 +2046,17 @@ sp_ncom:    ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
             jmp         .sp_lp
-sp_nstr:    ld          x4, .ep_tok
-            ld          ac, (x4)
-            and         ac, .tagmask
-            sub         ac, .tknstr
-            movr.rn     ac, ac           ; string literal ?
-            jmp         .sp_expr
-            xorr        ac, ac
-            st          ac, .sp_supp
-            ld          x0, .ep_tok
-            calls       .print_str_tok
-            jmp         .sp_lp
 sp_expr:    xorr        ac, ac
             st          ac, .sp_supp
-            calls       .ex_expr
+            calls       .ex_expr         ; value in ac, type in vtype
             st          ac, .sp_val
-            ld          ac, .sp_val
+            ld          ac, .vtype
+            movr.rz     ac, ac           ; skip jmp when string
+            jmp         .sp_pint
+            ld          x0, .sp_val      ; string: print its characters
+            calls       .str_print
+            jmp         .sp_lp
+sp_pint:    ld          ac, .sp_val
             callr       .io_putn
             jmp         .sp_lp
 
@@ -1829,6 +2090,8 @@ st_let:     save        x4
             st          x4, .ep_tok
             calls       .ex_expr
             ld          x4, .sl_ent
+            st          ac, 3(x4)        ; value
+            ld          ac, .vtype       ; type
             st          ac, 2(x4)
             rets
 sl_err:     ldea        x0, .msg_synt
@@ -2056,7 +2319,11 @@ st_for:     save        x4, x5
             jmp         .sf_err
             ld          x0, .ep_tok
             calls       .var_lookup
-            addi        ac, ac, 2        ; value address
+            movr        ac, x4           ; entry; mark loop variable integer
+            xorr        ac, ac
+            st          ac, 2(x4)
+            movr        x4, ac
+            addi        ac, ac, 3        ; value address (word 3)
             st          ac, .sf_va
             ld          x0, .ep_tok      ; advance past variable
             calls       .tok_size
@@ -2242,8 +2509,10 @@ st_input:   save        x4
             ld          x0, .ep_tok
             calls       .var_lookup
             movr        ac, x4
-            ld          ac, .inp_val
+            xorr        ac, ac           ; type = integer
             st          ac, 2(x4)
+            ld          ac, .inp_val
+            st          ac, 3(x4)
             rets
 si_err:     ldea        x0, .msg_synt
             jmp         .err_show
@@ -2270,6 +2539,8 @@ msg_undef:  dsn         "?UNDEF'D LINE"
 msg_rgos:   dsn         "?RETURN WITHOUT GOSUB"
 msg_nfor:   dsn         "?NEXT WITHOUT FOR"
 msg_inq:    dsn         "? "
+msg_tmm:    dsn         "?TYPE MISMATCH"
+msg_oom:    dsn         "?OUT OF MEMORY"
 
 ; Statement dispatch table: [keyword tag value, handler], terminated by 0.
 ; New statements are added here plus one handler — no change to par_exec.
@@ -2495,6 +2766,12 @@ linelen:    bss         1
 linebuf:    bss         120              ; raw input line (word-per-char)
 tokbuf:     bss         300              ; tokenized statement
 outexp:     bss         256              ; io_puts expansion scratch
+
+; String heap (bump-allocated; reset on NEW)
+strnext:    bss         1
+strend:     bss         1
+strheap:    bss         4096
+strendl:
 
 ; Stack
             bss         256
