@@ -1410,16 +1410,21 @@ af_chk:     ld          ac, (x4)
 af_next:    addi        x4, x4, 4
             jmp         .af_lp
 
-; arr_alloc — x0 = element count N, x1 = initial element value.
-; Allocates an N+1 word block from the array heap, sets block[0]=N and
-; fills the N elements with the init value.  Returns block pointer in ac.
+; arr_alloc — x0 = dim0 size s0, x1 = dim1 size s1 (1 for a 1-D array),
+; x2 = initial element value.  Allocates a (2 + s0*s1) word block:
+;   block[0]=s0, block[1]=s1, then s0*s1 elements.  Returns block ptr.
 arr_alloc:  save        x4, x5
-            st          x1, .aa_init
-            st          x0, .aa_n
+            st          x0, .aa_s0
+            st          x1, .aa_s1
+            st          x2, .aa_init
+            ld          ac, .aa_s0       ; N = s0 * s1
+            movr        ac, mq
+            mul         .aa_s1
+            st          ac, .aa_n
             ld          x4, .arrnext
             st          x4, .aa_blk
-            ld          ac, .aa_n        ; new top = arrnext + N + 1
-            addi        ac, ac, 1
+            ld          ac, .aa_n        ; new top = arrnext + N + 2 (header)
+            addi        ac, ac, 2
             addr        x4, ac
             st          ac, .aa_top
             ld          x4, .aa_top
@@ -1431,9 +1436,11 @@ arr_alloc:  save        x4, x5
 al_ok:      ld          ac, .aa_top
             st          ac, .arrnext
             ld          x4, .aa_blk
-            ld          ac, .aa_n
-            st          ac, (x4)         ; block[0] = N
-            addi        x4, x4, 1
+            ld          ac, .aa_s0
+            st          ac, (x4)         ; block[0] = s0
+            ld          ac, .aa_s1
+            st          ac, 1(x4)        ; block[1] = s1
+            addi        x4, x4, 2
             ld          x5, .aa_n
             ngtr        x5, x5           ; x5 = -N
             ld          ac, .aa_init
@@ -1471,8 +1478,9 @@ ag_make:    ld          ac, .ar_str      ; init value: "" for string, 0 for int
             ldea        ac, .emptystr
             jmp         .ag_al
 ag_ci:      xorr        ac, ac
-ag_al:      movr        ac, x1           ; x1 = init value
+ag_al:      movr        ac, x2           ; x2 = init value
             ldea        x0, 11           ; default upper bound 10 -> 11 elements
+            ldea        x1, 1            ; 1-D (s1 = 1)
             calls       .arr_alloc
             st          ac, .ag_blk
             ld          ac, .varbot      ; allocate a 4-word entry
@@ -1510,31 +1518,58 @@ arr_addr:   save        x4, x5, x6, x7
             jmp         .aa_serr
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_expr         ; index value in ac
-            movr        ac, x6           ; x6 = index
-            ld          x4, .ep_tok      ; expect ')'
+            calls       .ex_expr         ; first index
+            movr        ac, x6           ; x6 = i0
+            ld          x4, .ep_tok      ; optional second index ?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .aa_one
+            addi        x4, x4, 1        ; consume ','
+            st          x4, .ep_tok
+            calls       .ex_expr         ; second index
+            movr        ac, x7           ; x7 = i1
+            jmp         .aa_rpar
+aa_one:     xorr        ac, ac           ; 1-D: i1 = 0
+            movr        ac, x7
+aa_rpar:    ld          x4, .ep_tok      ; expect ')'
             ld          ac, (x4)
             sub         ac, .v_rpar
             movr.rn     ac, ac
             jmp         .aa_serr
             addi        x4, x4, 1
             st          x4, .ep_tok
-            movr        x6, ac           ; index < 0 ?
-            and         ac, .signbit
-            movr.rn     ac, ac           ; skip jmp when non-negative
-            jmp         .aa_sub
             ld          x4, 3(x5)        ; block pointer
-            ld          ac, (x4)         ; N
-            movr        ac, x7           ; x7 = N
-            cmplt       x6, x7           ; index < N ?
-            jmp         .aa_inb
+            st          x4, .aa_blk
+            movr        x6, ac           ; i0 >= 0 ?
+            and         ac, .signbit
+            movr.rn     ac, ac
             jmp         .aa_sub
-aa_inb:     ld          x4, 3(x5)        ; element address = block + 1 + index
-            addi        x4, x4, 1
-            addr        x6, x4
+            ld          x4, .aa_blk      ; i0 < s0 ?
+            ld          x0, (x4)
+            cmplt       x6, x0
+            jmp         .aa_i0ok
+            jmp         .aa_sub
+aa_i0ok:    movr        x7, ac           ; i1 >= 0 ?
+            and         ac, .signbit
+            movr.rn     ac, ac
+            jmp         .aa_sub
+            ld          x4, .aa_blk      ; i1 < s1 ?
+            ld          x0, 1(x4)
+            cmplt       x7, x0
+            jmp         .aa_i1ok
+            jmp         .aa_sub
+aa_i1ok:    movr        x6, mq           ; offset = i0*s1 + i1
+            ld          x4, .aa_blk
+            mul         1(x4)            ; AC = i0 * s1
+            addr        x7, ac           ; AC = i0*s1 + i1
+            ld          x4, .aa_blk      ; element addr = block + 2 + offset
+            addi        x4, x4, 2
+            addr        x4, ac
+            st          ac, .aa_eaddr
             ld          ac, 2(x5)        ; element type
             st          ac, .aa_etype
-            movr        x4, ac
+            ld          ac, .aa_eaddr
             rets
 aa_sub:     ldea        x0, .msg_subr
             jmp         .err_show
@@ -1563,9 +1598,12 @@ ar_nm1:     bss         1
 ar_str:     bss         1
 aa_tok:     bss         1
 aa_n:       bss         1
+aa_s0:      bss         1
+aa_s1:      bss         1
 aa_init:    bss         1
 aa_blk:     bss         1
 aa_top:     bss         1
+aa_eaddr:   bss         1
 aa_etype:   bss         1
 ag_tok:     bss         1
 ag_blk:     bss         1
@@ -2864,29 +2902,59 @@ sd_cap:     ld          ac, .ar_nm0      ; capture name/type before evaluating
             jmp         .sd_err
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_expr         ; upper bound
-            st          ac, .sd_ub
-            ld          x4, .ep_tok      ; expect ')'
+            calls       .ex_expr         ; first upper bound
+            st          ac, .sd_ub0
+            xorr        ac, ac           ; assume 1-D
+            st          ac, .sd_2d
+            ld          x4, .ep_tok      ; optional second bound ?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .sd_rpar
+            addi        x4, x4, 1        ; consume ','
+            st          x4, .ep_tok
+            calls       .ex_expr         ; second upper bound
+            st          ac, .sd_ub1
+            ldea        ac, 1
+            st          ac, .sd_2d
+sd_rpar:    ld          x4, .ep_tok      ; expect ')'
             ld          ac, (x4)
             sub         ac, .v_rpar
             movr.rn     ac, ac
             jmp         .sd_err
             addi        x4, x4, 1
             st          x4, .ep_tok
-            ld          ac, .sd_ub       ; bound must be >= 0
+            ld          ac, .sd_ub0      ; bound0 must be >= 0
             and         ac, .signbit
-            movr.rn     ac, ac           ; skip jmp when non-negative
+            movr.rn     ac, ac
             jmp         .sd_sub
-            ld          ac, .sd_str      ; init value: "" for string else 0
+            ld          ac, .sd_ub0      ; s0 = ub0 + 1
+            addi        ac, ac, 1
+            st          ac, .sd_s0
+            ld          ac, .sd_2d
+            movr.rz     ac, ac           ; skip jmp when 2-D
+            jmp         .sd_s1d
+            ld          ac, .sd_ub1      ; 2-D: bound1 must be >= 0
+            and         ac, .signbit
+            movr.rn     ac, ac
+            jmp         .sd_sub
+            ld          ac, .sd_ub1      ; s1 = ub1 + 1
+            addi        ac, ac, 1
+            st          ac, .sd_s1
+            jmp         .sd_init
+sd_s1d:     ldea        ac, 1            ; 1-D: s1 = 1
+            st          ac, .sd_s1
+sd_init:    ld          ac, .sd_str      ; init value: "" for string else 0
             movr.rz     ac, ac
             jmp         .sd_ci
             ldea        ac, .emptystr
             jmp         .sd_al
 sd_ci:      xorr        ac, ac
-sd_al:      movr        ac, x1           ; x1 = init value
-            ld          ac, .sd_ub       ; x0 = N = ub + 1
-            addi        ac, ac, 1
-            movr        ac, x0
+sd_al:      movr        ac, x2           ; x2 = init value
+            ld          ac, .sd_s0
+            movr        ac, x0           ; x0 = s0
+            ld          ac, .sd_s1
+            movr        ac, x1           ; x1 = s1
             calls       .arr_alloc       ; ac = block pointer
             st          ac, .sd_blk
             ld          ac, .varbot      ; allocate the 4-word entry
@@ -2915,7 +2983,11 @@ sd_sub:     ldea        x0, .msg_subr
 sd_err:     ldea        x0, .msg_synt
             jmp         .err_show
 
-sd_ub:      bss         1
+sd_ub0:     bss         1
+sd_ub1:     bss         1
+sd_2d:      bss         1
+sd_s0:      bss         1
+sd_s1:      bss         1
 sd_blk:     bss         1
 sd_nm0:     bss         1
 sd_nm1:     bss         1
