@@ -618,7 +618,26 @@ ti_adv:     incr        x4, x4
             jmp         .ti_scan
 ti_done:    st          x4, .tk_src
             st          x5, .idlen
-            ; keyword lookup
+            xorr        ac, ac           ; check for a '$' string suffix
+            st          ac, .id_stype
+            ld          x4, .tk_src
+            ld          ac, (x4)
+            subin.rn    ac, ac, 36       ; '$' ?
+            jmp         .ti_kwst
+            ldea        x6, .idbuf       ; append '$' to the name
+            ld          ac, .idlen
+            addr        ac, x6
+            ldea        ac, 36
+            st          ac, (x6)
+            ld          ac, .idlen
+            incr        ac, ac
+            st          ac, .idlen
+            ld          x4, .tk_src
+            incr        x4, x4
+            st          x4, .tk_src
+            ldea        ac, 1
+            st          ac, .id_stype
+ti_kwst:    ; keyword lookup
             ldea        x6, .kw_tab
 ti_kw:      ld          ac, (x6)         ; dsn ptr (0 = end)
             movr.rz     ac, ac           ; skip jmp when entry present
@@ -637,7 +656,11 @@ ti_kw:      ld          ac, (x6)         ; dsn ptr (0 = end)
 ti_knext:   addi        x6, x6, 2
             jmp         .ti_kw
 ti_var:     ld          ac, .tknvar      ; variable: emit TKN_VAR + packed name
-            movr        ac, x0
+            ld          x4, .id_stype    ; string variable -> set string bit
+            movr.rz     x4, x4
+            jmp         .ti_vint
+            or          ac, .strvbit
+ti_vint:    movr        ac, x0
             ldea        x1, .idbuf
             ld          x2, .idlen
             calls       .emit_packed
@@ -645,8 +668,9 @@ ti_var:     ld          ac, .tknvar      ; variable: emit TKN_VAR + packed name
 
 ti_save:    bss         1
 idmax:      dw          10
-idbuf:      bss         11
+idbuf:      bss         12
 idlen:      bss         1
+id_stype:   bss         1
 
 
 ; ==========================================================================
@@ -1263,7 +1287,8 @@ ep_tok:     bss         1
 ; creating a zero-valued entry if the variable does not exist yet.
 var_lookup: save        x4, x5, x6, x7
             movr        x0, x4
-            ld          ac, (x4)         ; tag | count
+            ld          ac, (x4)         ; tag | strbit | count
+            st          ac, .vl_tok
             and         ac, .cntmask
             st          ac, .vl_cnt
             ld          ac, 1(x4)        ; body word 0
@@ -1302,12 +1327,22 @@ vl_new:     ld          ac, .varbot      ; allocate a new 4-word entry
             st          ac, (x4)
             ld          ac, .vl_nm1
             st          ac, 1(x4)
-            xorr        ac, ac
-            st          ac, 2(x4)        ; type = integer
-            st          ac, 3(x4)        ; value = 0
-            movr        x4, ac
+            ld          ac, .vl_tok      ; string variable ?
+            and         ac, .strvbit
+            movr.rz     ac, ac
+            jmp         .vl_nint
+            ldea        ac, 1            ; string: type 1, value = empty string
+            st          ac, 2(x4)
+            ldea        ac, .emptystr
+            st          ac, 3(x4)
+            jmp         .vl_ndone
+vl_nint:    xorr        ac, ac           ; integer: type 0, value 0
+            st          ac, 2(x4)
+            st          ac, 3(x4)
+vl_ndone:   movr        x4, ac
             rets
 
+vl_tok:     bss         1
 vl_cnt:     bss         1
 vl_nm0:     bss         1
 vl_nm1:     bss         1
@@ -1527,9 +1562,11 @@ exp_nVc:    ld          ac, .ex_t
             sub         ac, .tknstr
             movr.rn     ac, ac           ; STR literal ?
             jmp         .exp_nV
-            ld          ac, .ep_tok      ; string value = pointer to the token
+            ld          x0, .ep_tok      ; copy literal into the heap (the token
+            ldea        x1, .emptystr    ; buffer is transient across statements)
+            calls       .str_cat
             st          ac, .ex_val
-            ld          x0, .ep_tok      ; advance past it
+            ld          x0, .ep_tok      ; advance past the token
             calls       .tok_size
             ld          x4, .ep_tok
             addr        ac, x4
@@ -2089,15 +2126,23 @@ st_let:     save        x4
             addi        x4, x4, 1
             st          x4, .ep_tok
             calls       .ex_expr
+            st          ac, .sl_val
+            ld          x4, .sl_ent      ; declared type must match value type
+            ld          ac, 2(x4)
+            sub         ac, .vtype
+            movr.rn     ac, ac
+            jmp         .sl_tmm
             ld          x4, .sl_ent
-            st          ac, 3(x4)        ; value
-            ld          ac, .vtype       ; type
-            st          ac, 2(x4)
+            ld          ac, .sl_val
+            st          ac, 3(x4)        ; store value
             rets
+sl_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
 sl_err:     ldea        x0, .msg_synt
             jmp         .err_show
 
 sl_ent:     bss         1
+sl_val:     bss         1
 
 
 ; ==========================================================================
@@ -2568,8 +2613,10 @@ st_tab:     dw          #280000000, st_list      ; LIST
 ; code are kept as named words; the rest appear as literals in the tables.
 ; ==========================================================================
 tagmask:    dw          #FF0000000       ; bits 35:28
-cntmask:    dw          #FFFFFFF         ; bits 27:0 (packed-token char count)
+cntmask:    dw          #FFFFFF          ; bits 23:0 (packed-token char count)
+strvbit:    dw          #1000000         ; bit 24 (TKN_VAR string-type flag)
 signbit:    dw          #800000000       ; bit 35 (sign)
+emptystr:   dw          0                ; the empty string (count = 0)
 
 tknint:     dw          #10000000        ; tag 0x01
 tknvar:     dw          #20000000        ; tag 0x02
