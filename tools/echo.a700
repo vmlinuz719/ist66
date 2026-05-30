@@ -184,10 +184,12 @@ cpl_lm:     lmwait      .irqmask        ; enable level 10 and halt atomically
 ;   x1  maximum characters to store
 ;
 ; Blocks until INTR_RET fires (the user pressed Enter / sent LF).
-; Then drains the TTY receive buffer: CR (13) is discarded, LF (10)
-; is stored and terminates the read, other bytes are stored.
+; Then drains the TTY receive buffer: LF (10) is stored and terminates
+; the read; all other bytes (including CR) are stored as-is.
+; Telnet sends CR+LF for Enter, so the buffer ends with CR+LF, and
+; the caller's echo produces a proper newline on the terminal.
 ; Stops early if the buffer fills.
-; Returns character count (including LF) in ac.
+; Returns character count (including CR+LF) in ac.
 ; ------------------------------------------------------------------
 
 con_gets:   xorr        ac, ac
@@ -214,14 +216,9 @@ cg_loop:    rio         ac, 2, #030     ; TTY receive buffer fill count
 
             rio         ac, 0, #030     ; pop one byte into ac
 
-            ; discard CR (13) — no-write compare, ac unchanged
-            subin.rn    ac, ac, 13      ; skip if ac != 13
-            jmp         .cg_notcr
-            jmp         .cg_loop        ; ac == 13 (CR): discard
-
-cg_notcr:   ; check for LF (10) — no-write compare, ac unchanged
+            ; check for LF (10) — no-write compare, ac unchanged
             subin.rn    ac, ac, 10      ; skip if ac != 10
-            jmp         .cg_store       ; ac != 10: store regular char
+            jmp         .cg_store       ; ac != 10: store (CR or printable)
 
             ; LF: store it and terminate
             st          ac, (x4)
