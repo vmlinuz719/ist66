@@ -135,11 +135,44 @@ md_ptr:     bss         1
 
 
 ; ==========================================================================
-; Exception handler (level 0) — for this increment, just halt cleanly.
-; (A later increment maps faults to BASIC error codes and unwinds to READY.)
+; Exception handler (level 0) — a CPU fault (divide by zero, bad address,
+; etc.) during a statement is turned into a BASIC error: restore IRQL,
+; reset the stack and run state, print a message, and return to READY
+; instead of halting the machine.  The fault code is in the control word
+; bits 27:24 (set by do_except).
 ; ==========================================================================
 
-exc_hdlr:   hlt
+exc_hdlr:   stctl       psw1, .exc_save  ; capture control word (fault code)
+            ldctl       psw1, .fgcw      ; restore IRQL = 15
+            ldea        sp, .topstk      ; reset supervisor stack
+            xorr        ac, ac
+            st          ac, .runflag
+            st          ac, .for_sp
+            st          ac, .gosub_sp
+            ld          ac, .exc_save    ; isolate the fault code field
+            and         ac, .excmask
+            st          ac, .exc_code
+            sub         ac, .exc_divz    ; divide by zero ?
+            movr.rn     ac, ac
+            jmp         .eh_nmem
+            ldea        x0, .msg_divz
+            jmp         .eh_show
+eh_nmem:    ld          ac, .exc_code
+            sub         ac, .exc_memx    ; nonexistent / bad address ?
+            movr.rn     ac, ac
+            jmp         .eh_other
+            ldea        x0, .msg_badad
+            jmp         .eh_show
+eh_other:   ldea        x0, .msg_fault
+eh_show:    callr       .io_puts
+            callr       .io_crlf
+            jmp         .ready
+
+excmask:    dw          #F000000         ; control-word bits 27:24
+exc_divz:   dw          #8000000         ; X_DIVZ (8) << 24
+exc_memx:   dw          #2000000         ; X_MEMX (2) << 24
+exc_save:   bss         1
+exc_code:   bss         1
 
 
 ; ==========================================================================
@@ -3866,6 +3899,9 @@ msg_oom:    dsn         "?OUT OF MEMORY"
 msg_subr:   dsn         "?BAD SUBSCRIPT"
 msg_redim:  dsn         "?REDIM'D ARRAY"
 msg_ood:    dsn         "?OUT OF DATA"
+msg_divz:   dsn         "?DIVISION BY ZERO"
+msg_badad:  dsn         "?BAD ADDRESS"
+msg_fault:  dsn         "?MACHINE FAULT"
 
 ; Statement dispatch table: [keyword tag value, handler], terminated by 0.
 ; New statements are added here plus one handler — no change to par_exec.
