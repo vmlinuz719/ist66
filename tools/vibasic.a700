@@ -1764,6 +1764,202 @@ err_show:   ldea        sp, .topstk
 
 
 ; ==========================================================================
+; run_exec — run the program from cur_line until END/STOP or past the end.
+; ==========================================================================
+run_exec:   save        x4, x5
+            ldea        ac, 1
+            st          ac, .runflag
+re_lp:      ld          ac, .runflag
+            movr.rz     ac, ac           ; skip jmp when running
+            jmp         .re_done
+            ld          x4, .cur_line
+            ld          x5, .progend
+            cmplt       x4, x5           ; cur_line < progend ?
+            jmp         .re_x
+            jmp         .re_done
+re_x:       xorr        ac, ac
+            st          ac, .jumped
+            ld          x4, .cur_line
+            addi        x4, x4, 2
+            movr        x4, x0
+            calls       .par_exec
+            ld          ac, .jumped
+            movr.rz     ac, ac           ; skip jmp when jumped
+            jmp         .re_adv
+            jmp         .re_lp
+re_adv:     ld          x4, .cur_line
+            ld          ac, 1(x4)
+            addi        ac, ac, 2
+            addr        ac, x4
+            st          x4, .cur_line
+            jmp         .re_lp
+re_done:    xorr        ac, ac
+            st          ac, .runflag
+            rets
+
+
+; ==========================================================================
+; st_run — RUN: execute the program from the first line.
+; ==========================================================================
+st_run:     save        x4
+            ldea        ac, .progbase
+            st          ac, .cur_line
+            xorr        ac, ac
+            st          ac, .gosub_sp
+            calls       .run_exec
+            rets
+
+
+; ==========================================================================
+; st_goto — GOTO <line>.  During RUN sets cur_line + jumped; in direct mode
+; starts execution at the target.
+; ==========================================================================
+st_goto:    save        x4
+            calls       .ex_expr
+            st          ac, .goto_ln
+            ld          x0, .goto_ln
+            calls       .ln_find
+            ld          ac, .ln_match
+            movr.rz     ac, ac           ; skip jmp when found
+            jmp         .sg_err
+            ld          ac, .ln_ptr
+            st          ac, .cur_line
+            ld          ac, .runflag
+            movr.rz     ac, ac           ; skip jmp when running
+            jmp         .sg_direct
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+sg_direct:  calls       .run_exec
+            rets
+sg_err:     ldea        x0, .msg_undef
+            jmp         .err_show
+
+goto_ln:    bss         1
+
+
+; ==========================================================================
+; st_if — IF <expr> THEN <line | statement>.
+; ==========================================================================
+st_if:      save        x4
+            calls       .ex_expr
+            movr.rz     ac, ac           ; skip jmp when condition true
+            jmp         .if_false
+            ld          x4, .ep_tok      ; expect THEN
+            ld          ac, (x4)
+            sub         ac, .v_then
+            movr.rn     ac, ac
+            jmp         .if_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok      ; consume THEN
+            ld          ac, (x4)         ; line number after THEN -> GOTO
+            and         ac, .tagmask
+            sub         ac, .tknint
+            movr.rn     ac, ac
+            jmp         .if_stmt
+            calls       .st_goto
+            rets
+if_stmt:    ld          x0, .ep_tok      ; statement after THEN
+            calls       .par_exec
+            rets
+if_false:   rets                          ; skip remainder of the line
+if_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+
+; ==========================================================================
+; st_end / st_stop — stop program execution.
+; ==========================================================================
+st_end:     save        x4
+            xorr        ac, ac
+            st          ac, .runflag
+            rets
+
+st_stop:    save        x4
+            xorr        ac, ac
+            st          ac, .runflag
+            rets
+
+
+; ==========================================================================
+; st_gosub — GOSUB <line>: push the next line, then jump.
+; ==========================================================================
+st_gosub:   save        x4, x5, x6
+            calls       .ex_expr
+            st          ac, .goto_ln
+            ld          x0, .goto_ln
+            calls       .ln_find
+            ld          ac, .ln_match
+            movr.rz     ac, ac           ; skip jmp when found
+            jmp         .gs_err
+            ld          x4, .cur_line    ; push address of the next line
+            ld          ac, 1(x4)
+            addi        ac, ac, 2
+            addr        ac, x4
+            ld          x5, .gosub_sp
+            ldea        x6, .gosub_st
+            addr        x5, x6
+            st          x4, (x6)
+            incr        x5, x5
+            st          x5, .gosub_sp
+            ld          ac, .ln_ptr
+            st          ac, .cur_line
+            ld          ac, .runflag
+            movr.rz     ac, ac           ; skip jmp when running
+            jmp         .gs_direct
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+gs_direct:  calls       .run_exec
+            rets
+gs_err:     ldea        x0, .msg_undef
+            jmp         .err_show
+
+
+; ==========================================================================
+; st_return — RETURN: pop the saved line and resume there.
+; ==========================================================================
+st_return:  save        x4, x5
+            ld          x4, .gosub_sp
+            movr.rz     x4, x4           ; skip jmp when stack non-empty
+            jmp         .rt_err
+            addi        x4, x4, -1
+            st          x4, .gosub_sp
+            ldea        x5, .gosub_st
+            addr        x4, x5
+            ld          ac, (x5)
+            st          ac, .cur_line
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+rt_err:     ldea        x0, .msg_rgos
+            jmp         .err_show
+
+
+; ==========================================================================
+; st_poke — POKE <addr>, <value>.
+; ==========================================================================
+st_poke:    save        x4
+            calls       .ex_expr
+            st          ac, .poke_a
+            ld          x4, .ep_tok      ; expect comma
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .pk_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            ld          x4, .poke_a
+            st          ac, (x4)
+            rets
+pk_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+poke_a:     bss         1
+
+
+; ==========================================================================
 ; Read-only data
 ; ==========================================================================
 
@@ -1778,6 +1974,8 @@ msg_ban:    dsn         "VIBASIC V0.1"
 msg_free:   dsn         " WORDS FREE"
 msg_rdy:    dsn         "READY."
 msg_synt:   dsn         "?SYNTAX ERROR"
+msg_undef:  dsn         "?UNDEF'D LINE"
+msg_rgos:   dsn         "?RETURN WITHOUT GOSUB"
 
 ; Statement dispatch table: [keyword tag value, handler], terminated by 0.
 ; New statements are added here plus one handler — no change to par_exec.
@@ -1786,6 +1984,14 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #200000000, st_rem       ; REM
             dw          #210000000, st_print     ; PRINT
             dw          #220000000, st_let       ; LET
+            dw          #230000000, st_goto      ; GOTO
+            dw          #240000000, st_if        ; IF
+            dw          #260000000, st_end       ; END
+            dw          #270000000, st_run       ; RUN
+            dw          #2A0000000, st_gosub     ; GOSUB
+            dw          #2B0000000, st_return    ; RETURN
+            dw          #2C0000000, st_stop      ; STOP
+            dw          #2D0000000, st_poke      ; POKE
             dw          0, 0
 
 
@@ -1929,6 +2135,8 @@ progend:    bss         1                ; end of program text
 runflag:    bss         1                ; nonzero while a program is running
 cur_line:   bss         1                ; current line during RUN
 jumped:     bss         1                ; set by GOTO/GOSUB to suppress advance
+gosub_sp:   bss         1                ; gosub stack pointer
+gosub_st:   bss         32               ; gosub return-address stack
 
 ; I/O interrupt state
 out_ptr:    bss         1
