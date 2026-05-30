@@ -3077,6 +3077,110 @@ goto_ln:    bss         1
 
 
 ; ==========================================================================
+; st_on — ON expr GOTO line,line,...   or   ON expr GOSUB line,line,...
+; Evaluates expr (1-based); jumps/calls the n-th line.  If expr is out of
+; range, execution falls through to the next statement.
+; ==========================================================================
+st_on:      save        x4, x5
+            calls       .ex_expr         ; selector index (1-based)
+            st          ac, .on_idx
+            ld          x4, .ep_tok      ; GOTO or GOSUB ?
+            ld          ac, (x4)
+            sub         ac, .v_goto
+            movr.rn     ac, ac
+            jmp         .on_chkgs
+            xorr        ac, ac           ; mode 0 = GOTO
+            st          ac, .on_mode
+            jmp         .on_kwok
+on_chkgs:   ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_gosub
+            movr.rn     ac, ac
+            jmp         .on_err
+            ldea        ac, 1            ; mode 1 = GOSUB
+            st          ac, .on_mode
+on_kwok:    ld          x4, .ep_tok      ; consume GOTO / GOSUB
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            xorr        ac, ac           ; selected line number (0 = none)
+            st          ac, .on_sel
+            ldea        ac, 1            ; current list position
+            st          ac, .on_cnt
+on_lp:      ld          x4, .ep_tok      ; expect an INT line number
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknint
+            movr.rn     ac, ac
+            jmp         .on_err
+            ld          ac, .on_cnt      ; this the selected position ?
+            sub         ac, .on_idx
+            movr.rn     ac, ac
+            jmp         .on_nosel
+            ld          x4, .ep_tok      ; record this line number
+            ld          ac, 1(x4)
+            st          ac, .on_sel
+on_nosel:   ld          x4, .ep_tok      ; advance past the INT token (2 words)
+            addi        x4, x4, 2
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; ',' -> more list entries
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .on_done
+            addi        x4, x4, 1        ; consume ','
+            st          x4, .ep_tok
+            ld          ac, .on_cnt
+            incr        ac, ac
+            st          ac, .on_cnt
+            jmp         .on_lp
+on_done:    ld          ac, .on_sel      ; ep_tok now past the whole list
+            movr.rn     ac, ac           ; skip jmp when no line selected
+            jmp         .on_jump
+            rets                          ; out of range: fall through
+on_jump:    ld          x0, .on_sel
+            calls       .ln_find
+            ld          ac, .ln_match
+            movr.rz     ac, ac
+            jmp         .on_uln
+            ld          ac, .on_mode
+            movr.rz     ac, ac           ; skip jmp when GOSUB (mode != 0)
+            jmp         .on_goto
+            ld          ac, .gosub_sp    ; GOSUB: push (cur_line, resume tok)
+            addr        ac, ac
+            ldea        x5, .gosub_st
+            addr        x5, ac
+            movr        ac, x5
+            ld          ac, .cur_line
+            st          ac, (x5)
+            ld          ac, .ep_tok
+            st          ac, 1(x5)
+            ld          ac, .gosub_sp
+            incr        ac, ac
+            st          ac, .gosub_sp
+on_goto:    ld          ac, .ln_ptr
+            st          ac, .cur_line
+            ld          ac, .runflag
+            movr.rz     ac, ac           ; skip jmp when running
+            jmp         .on_direct
+            ld          ac, .ln_ptr
+            addi        ac, ac, 2
+            st          ac, .cur_tok
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+on_direct:  calls       .run_exec
+            rets
+on_uln:     ldea        x0, .msg_undef
+            jmp         .err_show
+on_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+on_idx:     bss         1
+on_mode:    bss         1
+on_sel:     bss         1
+on_cnt:     bss         1
+
+
+; ==========================================================================
 ; st_if — IF <expr> THEN <line | statement>.
 ; ==========================================================================
 st_if:      save        x4
@@ -3485,6 +3589,7 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #2F0000000, st_next      ; NEXT
             dw          #320000000, st_input     ; INPUT
             dw          #330000000, st_dim       ; DIM
+            dw          #340000000, st_on        ; ON
             dw          0, 0
 
 
@@ -3524,6 +3629,8 @@ v_semi:     dw          #170000000
 v_colon:    dw          #180000000       ; ':' statement separator
 v_eq:       dw          #190000000
 v_then:     dw          #250000000
+v_goto:     dw          #230000000
+v_gosub:    dw          #2A0000000
 v_to:       dw          #300000000       ; TO, tag 0x30
 v_step:     dw          #310000000       ; STEP, tag 0x31
 v_peek:     dw          #400000000       ; PEEK function, tag 0x40
@@ -3567,6 +3674,7 @@ s_to:       dsn         "TO"
 s_step:     dsn         "STEP"
 s_input:    dsn         "INPUT"
 s_dim:      dsn         "DIM"
+s_on:       dsn         "ON"
 s_abs:      dsn         "ABS"
 s_sgn:      dsn         "SGN"
 s_rnd:      dsn         "RND"
@@ -3618,6 +3726,7 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_step,   #310000000
             dw          s_input,  #320000000
             dw          s_dim,    #330000000
+            dw          s_on,     #340000000
             dw          s_peek,   #400000000
             dw          s_abs,    #410000000
             dw          s_sgn,    #420000000
@@ -3682,6 +3791,7 @@ rev_tab:    dw          #100000000, o_plus
             dw          #310000000, s_step
             dw          #320000000, s_input
             dw          #330000000, s_dim
+            dw          #340000000, s_on
             dw          #400000000, s_peek
             dw          #410000000, s_abs
             dw          #420000000, s_sgn
