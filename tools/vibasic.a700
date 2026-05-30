@@ -367,6 +367,26 @@ ig_store:   st          ac, (x4)
 ig_done:    ld          ac, .gilen
             retr
 
+; io_getc — read a single character (no newline needed).  Returns its code
+; in ac.  If the receive buffer already holds data it is taken immediately;
+; otherwise it waits, interrupt-driven, for input to arrive.
+io_getc:    rio         ac, 2, #030      ; data already buffered ?
+            movr.rz     ac, ac
+            jmp         .gc_pop
+            xorr        ac, ac
+            st          .inp_rdy
+gc_wait:    ldmask      .nomask
+            ld          .inp_rdy
+            movr.rz     ac, ac           ; skip jmp if ready
+            jmp         .gc_lm
+            ldmask      .irqmask
+            jmp         .gc_pop
+gc_lm:      lmwait      .irqmask
+            jmp         .gc_wait
+gc_pop:     ldmask      .irqmask
+            rio         ac, 0, #030      ; pop one byte
+            retr
+
 gets_buf:   bss         1
 gets_max:   bss         1
 gilen:      bss         1
@@ -1175,6 +1195,8 @@ li_sz:      bss         1
 ; do_edit — store or delete a numbered program line from linebuf.
 ; ==========================================================================
 do_edit:    save        x4, x5
+            xorr        ac, ac           ; editing invalidates CONT
+            st          ac, .cont_ok
             ; parse the leading line number
             ldea        x4, .linebuf
             xorr        x5, x5           ; value
@@ -1266,6 +1288,7 @@ st_new:     save        x4
             st          ac, .gosub_sp
             st          ac, .data_init
             st          ac, .data_ptr
+            st          ac, .cont_ok
             rets
 
 
@@ -1877,6 +1900,70 @@ str_chr:    save        x4
             calls       .str_from_chars
             rets
 
+; str_instr — x0 = haystack string, x1 = needle string.  Returns the
+; 1-based position of the first occurrence of needle in haystack, or 0.
+; An empty needle matches at position 1.
+str_instr:  save        x4, x5, x6, x7
+            st          x0, .si_hay
+            st          x1, .si_ndl
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .si_hlen
+            ld          ac, (x1)
+            and         ac, .cntmask
+            st          ac, .si_nlen
+            ld          ac, .si_hlen     ; last start = hlen - nlen
+            sub         ac, .si_nlen
+            st          ac, .si_last
+            and         ac, .signbit
+            movr.rn     ac, ac           ; skip jmp when hlen >= nlen
+            jmp         .si_zero
+            xorr        ac, ac
+            st          ac, .si_start
+si_outer:   ld          x6, .si_hay      ; hay BX pointer; skip si_start chars
+            ld          x4, .si_start
+            ngtr        x4, x4
+            movr.rz     x4, x4           ; start == 0 ?
+            jmp         .si_cmp0
+si_skip:    incldb      ac, x6, 7
+            incr.rn     x4, x4
+            jmp         .si_skip
+si_cmp0:    ld          x7, .si_ndl      ; needle BX pointer
+            ld          x5, .si_nlen
+            ngtr        x5, x5
+            movr.rz     x5, x5           ; empty needle ?
+            jmp         .si_match
+si_cmplp:   incldb      ac, x6, 7        ; hay char
+            st          ac, .si_hc
+            incldb      ac, x7, 7        ; needle char
+            sub         ac, .si_hc
+            movr.rn     ac, ac           ; skip jmp when chars equal
+            jmp         .si_next
+            incr.rn     x5, x5           ; matched all needle chars ?
+            jmp         .si_cmplp
+si_match:   ld          ac, .si_start    ; found -> start + 1
+            addi        ac, ac, 1
+            rets
+si_next:    ld          ac, .si_start    ; try the next start position
+            addi        ac, ac, 1
+            st          ac, .si_start
+            ld          ac, .si_last
+            sub         ac, .si_start
+            and         ac, .signbit
+            movr.rn     ac, ac           ; skip jmp when start <= last
+            jmp         .si_zero
+            jmp         .si_outer
+si_zero:    xorr        ac, ac
+            rets
+
+si_hay:     bss         1
+si_ndl:     bss         1
+si_hlen:    bss         1
+si_nlen:    bss         1
+si_last:    bss         1
+si_start:   bss         1
+si_hc:      bss         1
+
 ; str_fromint — x0 = integer.  Returns its decimal string (STR$).
 str_fromint: save       x4, x5, x6, x7
             st          x0, .fi_v
@@ -2184,8 +2271,18 @@ fc_11:      movr        x5, ac
             jmp         .fc_left
 fc_12:      movr        x5, ac
             subin.rn    ac, ac, 12
-            jmp         .fc_mid
+            jmp         .fc_13
             jmp         .fc_right
+fc_13:      movr        x5, ac
+            subin.rn    ac, ac, 13
+            jmp         .fc_instr
+            jmp         .fc_mid
+fc_instr:   movr        x6, x0           ; INSTR(s$, sub$)
+            movr        x7, x1
+            calls       .str_instr
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
 fc_len:     ld          ac, (x6)         ; LEN(s$)
             and         ac, .cntmask
             xorr        x4, x4
@@ -2375,8 +2472,14 @@ iff_12:     ld          ac, .if_w
 iff_13:     ld          ac, .if_w
             sub         ac, .v_mid
             movr.rn     ac, ac
-            jmp         .iff_0
+            jmp         .iff_14
             ldea        ac, 13
+            retr
+iff_14:     ld          ac, .if_w
+            sub         ac, .v_instr
+            movr.rn     ac, ac
+            jmp         .iff_0
+            ldea        ac, 14
             retr
 iff_0:      xorr        ac, ac
             retr
@@ -2766,10 +2869,14 @@ sp_lp:      ld          x4, .ep_tok
             ld          ac, (x4)
             movr.rz     ac, ac           ; skip jmp when a token is present
             jmp         .sp_eol
-            sub         ac, .v_colon     ; ':' also ends the PRINT statement
-            movr.rn     ac, ac
-            jmp         .sp_item
+            sub         ac, .v_colon     ; ':' ends the PRINT statement
+            movr.rz     ac, ac           ; skip jmp when not ':'
             jmp         .sp_eol
+            ld          ac, (x4)
+            sub         ac, .v_else      ; ELSE also ends it
+            movr.rz     ac, ac           ; skip jmp when not ELSE
+            jmp         .sp_eol
+            jmp         .sp_item
 sp_eol:     ld          ac, .sp_supp
             movr.rz     ac, ac           ; skip jmp when suppressing
             jmp         .sp_nl
@@ -3052,6 +3159,13 @@ run_exec:   save        x4, x5
             ld          ac, .cur_line    ; cur_tok = first token of cur_line
             addi        ac, ac, 2
             st          ac, .cur_tok
+            jmp         .re_lp
+
+; run_resume — like run_exec but continues from the existing cur_line and
+; cur_tok (used by CONT).  Same save mask, so re_done returns correctly.
+run_resume: save        x4, x5
+            ldea        ac, 1
+            st          ac, .runflag
 re_lp:      ld          ac, .runflag
             movr.rz     ac, ac           ; skip jmp when running
             jmp         .re_done
@@ -3073,6 +3187,8 @@ re_eol:     ld          x4, .cur_line    ; advance to the next line
             ld          x5, .progend
             cmplt       x4, x5           ; cur_line < progend ?
             jmp         .re_nl
+            xorr        ac, ac           ; ran off the end: not continuable
+            st          ac, .cont_ok
             jmp         .re_done
 re_nl:      ld          ac, .cur_line
             addi        ac, ac, 2
@@ -3168,6 +3284,7 @@ st_run:     save        x4
             st          ac, .gosub_sp
             st          ac, .data_init   ; RUN rewinds DATA too
             st          ac, .data_ptr
+            st          ac, .cont_ok     ; and invalidates any CONT point
             calls       .run_exec
             rets
 
@@ -3510,47 +3627,113 @@ st_call:    save        x4
 
 
 ; ==========================================================================
-; st_if — IF <expr> THEN <line | statement>.
+; st_if — IF <expr> THEN <clause> [ELSE <clause>].  A clause is a line
+; number (implicit GOTO) or one or more statements.  When the condition is
+; true the THEN clause runs and execution then reaches the ELSE keyword,
+; which (st_else) skips the rest of the line.  When false, execution jumps
+; to the ELSE clause if present, else skips the line.
 ; ==========================================================================
 st_if:      save        x4
             calls       .ex_expr
             movr.rz     ac, ac           ; skip jmp when condition true
             jmp         .if_false
-            ld          x4, .ep_tok      ; expect THEN
+            ld          x4, .ep_tok      ; true: expect THEN
             ld          ac, (x4)
             sub         ac, .v_then
             movr.rn     ac, ac
             jmp         .if_err
             addi        x4, x4, 1
             st          x4, .ep_tok      ; consume THEN
-            ld          ac, (x4)         ; line number after THEN -> GOTO
+            jmp         .if_clause
+if_false:   calls       .find_else       ; jump to an ELSE clause if present
+            movr.rz     ac, ac           ; skip jmp when ELSE found
+            jmp         .if_noelse
+if_clause:  ld          x4, .ep_tok      ; line number -> implicit GOTO
+            ld          ac, (x4)
             and         ac, .tagmask
             sub         ac, .tknint
             movr.rn     ac, ac
-            jmp         .if_stmt
+            jmp         .if_inline
             calls       .st_goto
             rets
-if_stmt:    ld          x0, .ep_tok      ; statement after THEN
-            calls       .par_exec
-            rets
-if_false:   calls       .skip_eol         ; skip remainder of the line
-            rets
+if_inline:  rets                          ; statements run via the executor
+if_noelse:  rets                          ; ep_tok left at EOL
 if_err:     ldea        x0, .msg_synt
             jmp         .err_show
 
+; st_else — reached only after a true THEN clause has run; skip the rest
+; of the line (the ELSE clause).
+st_else:    save        x4
+            calls       .skip_eol
+            rets
+
+; find_else — scan from ep_tok within the current line for an ELSE keyword.
+; If found, set ep_tok past it and return 1; if TKN_EOL comes first, set
+; ep_tok at the EOL and return 0.
+find_else:  save        x4
+            ld          x0, .ep_tok
+fe_lp:      ld          ac, (x0)
+            movr.rz     ac, ac           ; EOL ?
+            jmp         .fe_eol
+            and         ac, .tagmask
+            sub         ac, .v_else
+            movr.rn     ac, ac           ; ELSE ?
+            jmp         .fe_adv
+            addi        x0, x0, 1         ; position past ELSE
+            st          x0, .ep_tok
+            ldea        ac, 1
+            rets
+fe_adv:     calls       .tok_size
+            addr        ac, x0
+            jmp         .fe_lp
+fe_eol:     st          x0, .ep_tok
+            xorr        ac, ac
+            rets
+
 
 ; ==========================================================================
-; st_end / st_stop — stop program execution.
+; st_end / st_stop — stop program execution.  Both record a resume point
+; (the statement after this one) so CONT can pick up where it left off.
 ; ==========================================================================
 st_end:     save        x4
+            calls       .save_cont
             xorr        ac, ac
             st          ac, .runflag
             rets
 
 st_stop:    save        x4
+            calls       .save_cont
             xorr        ac, ac
             st          ac, .runflag
             rets
+
+; save_cont — remember (cur_line, ep_tok) as the CONT resume point.
+save_cont:  save        x4
+            ld          ac, .cur_line
+            st          ac, .cont_line
+            ld          ac, .ep_tok
+            st          ac, .cont_tok
+            ldea        ac, 1
+            st          ac, .cont_ok
+            rets
+
+; st_cont — CONT: resume a STOPped/ENDed program at its saved position.
+st_cont:    save        x4
+            ld          ac, .cont_ok
+            movr.rz     ac, ac           ; have a resume point ?
+            jmp         .ct_err
+            ld          ac, .cont_line
+            st          ac, .cur_line
+            ld          ac, .cont_tok
+            st          ac, .cur_tok
+            calls       .run_resume
+            rets
+ct_err:     ldea        x0, .msg_cont
+            jmp         .err_show
+
+cont_line:  bss         1
+cont_tok:   bss         1
+cont_ok:    bss         1
 
 
 ; ==========================================================================
@@ -3876,6 +4059,64 @@ inp_val:    bss         1
 
 
 ; ==========================================================================
+; st_get — GET var : read one character.  A numeric variable receives the
+; character code; a string variable receives a one-character string.
+; Targets may be scalars or array elements.
+; ==========================================================================
+st_get:     save        x4
+            ld          x4, .ep_tok      ; expect a VAR
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .gv_err
+            ld          x0, .ep_tok      ; array element or scalar ?
+            calls       .is_array
+            movr.rz     ac, ac
+            jmp         .gv_scal
+            ld          x0, .ep_tok
+            calls       .arr_addr
+            st          ac, .gv_addr
+            ld          ac, .aa_etype
+            st          ac, .gv_etype
+            jmp         .gv_read
+gv_scal:    ld          x0, .ep_tok
+            calls       .var_lookup
+            movr        ac, x4
+            ld          ac, 2(x4)
+            st          ac, .gv_etype
+            addi        x4, x4, 3
+            st          x4, .gv_addr
+            ld          x0, .ep_tok      ; advance past the variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+gv_read:    callr       .io_getc         ; ac = character code
+            st          ac, .gv_ch
+            ld          ac, .gv_etype    ; string target ?
+            movr.rz     ac, ac
+            jmp         .gv_int
+            ld          x0, .gv_ch       ; string: one-character string
+            calls       .str_chr
+            st          ac, .gv_val
+            jmp         .gv_store
+gv_int:     ld          ac, .gv_ch       ; numeric: the character code
+            st          ac, .gv_val
+gv_store:   ld          x4, .gv_addr
+            ld          ac, .gv_val
+            st          ac, (x4)
+            rets
+gv_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+gv_addr:    bss         1
+gv_etype:   bss         1
+gv_ch:      bss         1
+gv_val:     bss         1
+
+
+; ==========================================================================
 ; Read-only data
 ; ==========================================================================
 
@@ -3902,6 +4143,7 @@ msg_ood:    dsn         "?OUT OF DATA"
 msg_divz:   dsn         "?DIVISION BY ZERO"
 msg_badad:  dsn         "?BAD ADDRESS"
 msg_fault:  dsn         "?MACHINE FAULT"
+msg_cont:   dsn         "?CANT CONTINUE"
 
 ; Statement dispatch table: [keyword tag value, handler], terminated by 0.
 ; New statements are added here plus one handler — no change to par_exec.
@@ -3927,6 +4169,9 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #360000000, st_read      ; READ
             dw          #370000000, st_restore   ; RESTORE
             dw          #380000000, st_call      ; CALL
+            dw          #390000000, st_else      ; ELSE (skips when reached)
+            dw          #3A0000000, st_cont      ; CONT
+            dw          #3B0000000, st_get       ; GET
             dw          0, 0
 
 
@@ -3966,6 +4211,7 @@ v_semi:     dw          #170000000
 v_colon:    dw          #180000000       ; ':' statement separator
 v_eq:       dw          #190000000
 v_then:     dw          #250000000
+v_else:     dw          #390000000       ; ELSE keyword tag
 v_goto:     dw          #230000000
 v_gosub:    dw          #2A0000000
 v_data:     dw          #350000000       ; DATA keyword tag
@@ -3984,6 +4230,7 @@ v_str:      dw          #490000000       ; STR$, tag 0x49
 v_left:     dw          #4A0000000       ; LEFT$, tag 0x4A
 v_right:    dw          #4B0000000       ; RIGHT$, tag 0x4B
 v_mid:      dw          #4C0000000       ; MID$, tag 0x4C
+v_instr:    dw          #4D0000000       ; INSTR, tag 0x4D
 neg1:       dw          -1
 lo35:       dw          #7FFFFFFFF       ; low 35 bits (clears sign)
 rnd_mul:    dw          1103515245
@@ -4017,6 +4264,9 @@ s_data:     dsn         "DATA"
 s_read:     dsn         "READ"
 s_restore:  dsn         "RESTORE"
 s_call:     dsn         "CALL"
+s_else:     dsn         "ELSE"
+s_cont:     dsn         "CONT"
+s_get:      dsn         "GET"
 s_abs:      dsn         "ABS"
 s_sgn:      dsn         "SGN"
 s_rnd:      dsn         "RND"
@@ -4029,6 +4279,7 @@ s_str:      dsn         "STR$"
 s_left:     dsn         "LEFT$"
 s_right:    dsn         "RIGHT$"
 s_mid:      dsn         "MID$"
+s_instr:    dsn         "INSTR"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -4073,6 +4324,9 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_read,   #360000000
             dw          s_restore,#370000000
             dw          s_call,   #380000000
+            dw          s_else,   #390000000
+            dw          s_cont,   #3A0000000
+            dw          s_get,    #3B0000000
             dw          s_peek,   #400000000
             dw          s_abs,    #410000000
             dw          s_sgn,    #420000000
@@ -4086,6 +4340,7 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_left,   #4A0000000
             dw          s_right,  #4B0000000
             dw          s_mid,    #4C0000000
+            dw          s_instr,  #4D0000000
             dw          0, 0
 
 ; Single-char operator table: [char code, tag value], terminated by 0.
@@ -4142,6 +4397,9 @@ rev_tab:    dw          #100000000, o_plus
             dw          #360000000, s_read
             dw          #370000000, s_restore
             dw          #380000000, s_call
+            dw          #390000000, s_else
+            dw          #3A0000000, s_cont
+            dw          #3B0000000, s_get
             dw          #400000000, s_peek
             dw          #410000000, s_abs
             dw          #420000000, s_sgn
@@ -4155,6 +4413,7 @@ rev_tab:    dw          #100000000, o_plus
             dw          #4A0000000, s_left
             dw          #4B0000000, s_right
             dw          #4C0000000, s_mid
+            dw          #4D0000000, s_instr
             dw          0, 0
 
 
