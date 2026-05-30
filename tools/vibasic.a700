@@ -240,11 +240,11 @@ io_putn:    st          lr, .putn_lr
             st          ac, .putn_v
             movr.rz     ac, ac           ; skip jmp when value != 0
             jmp         .putn_zero       ; value == 0: print "0"
-putn_nz:    ld          x6, .putn_v
-            ld          x7, .zerow
-            cmplt       x6, x7           ; exec next if value < 0
-            jmp         .putn_neg
+putn_nz:    ld          ac, .putn_v
+            and         ac, .signbit     ; bit 35 set => negative
+            movr.rz     ac, ac           ; skip jmp when negative
             jmp         .putn_abs
+            jmp         .putn_neg
 putn_neg:   ldea        ac, 45           ; "-"
             callr       .io_putc
             ld          ac, .putn_v
@@ -419,32 +419,50 @@ c122:       dw          122
 ; ==========================================================================
 
 emit_packed:save        x4, x5, x6, x7
+            st          x1, .ep_src
             st          x2, .ep_cnt
             movr        x2, ac
             bisr        x0, ac           ; ac = count | tag
             ld          x6, .tk_dst
             st          ac, (x6)         ; store tag|count word
-            st          x6, .ep_tagad    ; remember tag word address
-            movr        x6, x7           ; BX pointer = tag word addr (shift 0)
-            ngtr        x2, x5           ; x5 = -count
-            movr.rz     x5, x5           ; skip loop body when count == 0
+            st          x6, .ep_tagad
+            ld          ac, .ep_cnt      ; nbody = ceil(count/5)
+            addi        ac, ac, 4
+            div         .fivew
+            movr        mq, ac
+            st          ac, .ep_nbody
+            ld          x4, .ep_tagad    ; zero the body words (incstb only ORs)
+            incr        x4, x4
+            ld          x5, .ep_nbody
+            ngtr        x5, x5
+            movr.rz     x5, x5           ; skip when nbody == 0
+            jmp         .ep_zd
+ep_zlp:     xorr        ac, ac
+            st          ac, (x4)
+            incr        x4, x4
+            incr.rn     x5, x5
+            jmp         .ep_zlp
+ep_zd:      ld          x7, .ep_tagad    ; BX pointer = tag word addr (shift 0)
+            ld          x1, .ep_src
+            ld          x5, .ep_cnt
+            ngtr        x5, x5
+            movr.rz     x5, x5           ; skip when count == 0
             jmp         .ep_fin
-ep_lp:      ld          ac, (x1)         ; source char
+ep_lp:      ld          ac, (x1)
             incr        x1, x1
             incstb      ac, x7, 7        ; pack into body (advances x7)
-            incr.rn     x5, x5           ; skip jmp when all packed
+            incr.rn     x5, x5
             jmp         .ep_lp
-ep_fin:     ld          ac, .ep_cnt      ; tk_dst = tagad + 1 + ceil(count/5)
-            addi        ac, ac, 4
-            div         .fivew           ; mq = (count+4)/5
-            ld          ac, .ep_tagad
+ep_fin:     ld          ac, .ep_tagad    ; tk_dst = tagad + 1 + nbody
             addi        ac, ac, 1
-            addr        mq, ac           ; ac = ac + mq
+            add         ac, .ep_nbody
             st          ac, .tk_dst
             rets
 
+ep_src:     bss         1
 ep_cnt:     bss         1
 ep_tagad:   bss         1
+ep_nbody:   bss         1
 fivew:      dw          5
 
 
@@ -1192,7 +1210,16 @@ par_exec:   save        x4
             movr.rz     ac, ac           ; skip rets when statement present
             rets                          ; empty line: nothing to do
             st          ac, .pe_w
-            ldea        x4, .st_tab
+            ; a VAR as the first token is an implicit LET
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; skip jmp when VAR
+            jmp         .pe_kw
+            ld          ac, .cur_tok     ; ep_tok = cur_tok (at the variable)
+            st          ac, .ep_tok
+            calls       .st_let
+            rets
+pe_kw:      ldea        x4, .st_tab
 pe_lp:      ld          ac, (x4)         ; tag (0 = end)
             movr.rz     ac, ac
             jmp         .pe_unk
@@ -1200,6 +1227,9 @@ pe_lp:      ld          ac, (x4)         ; tag (0 = end)
             sub         ac, (x4)
             movr.rn     ac, ac           ; match ?
             jmp         .pe_next
+            ld          ac, .cur_tok     ; ep_tok = cur_tok + 1 (past keyword)
+            addi        ac, ac, 1
+            st          ac, .ep_tok
             ld          x0, 1(x4)        ; handler address
             calls       (x0)             ; mask word lives at handler[0]
             rets
@@ -1212,6 +1242,525 @@ pe_unk:     ldea        x0, .msg_synt    ; unknown / not-yet-implemented
 
 pe_w:       bss         1
 cur_tok:    bss         1
+ep_tok:     bss         1
+
+
+; ==========================================================================
+; Variable table.  Each entry: name word 0, name word 1, value (3 words),
+; allocated downward from memtop (varbot = current bottom).
+; ==========================================================================
+; var_lookup — x0 = VAR token pointer.  Returns entry address in ac,
+; creating a zero-valued entry if the variable does not exist yet.
+var_lookup: save        x4, x5, x6, x7
+            movr        x0, x4
+            ld          ac, (x4)         ; tag | count
+            and         ac, .cntmask
+            st          ac, .vl_cnt
+            ld          ac, 1(x4)        ; body word 0
+            st          ac, .vl_nm0
+            ld          x5, .vl_cnt
+            ld          x6, .fivew
+            cmpgt       x5, x6           ; count > 5 ?
+            jmp         .vl_two
+            xorr        ac, ac
+            st          ac, .vl_nm1
+            jmp         .vl_scan
+vl_two:     ld          ac, 2(x4)        ; body word 1
+            st          ac, .vl_nm1
+vl_scan:    ld          x4, .varbot
+vl_lp:      ld          x5, .memtop
+            cmplt       x4, x5           ; ptr < memtop ?
+            jmp         .vl_chk
+            jmp         .vl_new
+vl_chk:     ld          ac, (x4)
+            sub         ac, .vl_nm0
+            movr.rn     ac, ac           ; nm0 match ?
+            jmp         .vl_next
+            ld          ac, 1(x4)
+            sub         ac, .vl_nm1
+            movr.rn     ac, ac           ; nm1 match ?
+            jmp         .vl_next
+            movr        x4, ac           ; found
+            rets
+vl_next:    addi        x4, x4, 3
+            jmp         .vl_lp
+vl_new:     ld          ac, .varbot      ; allocate a new entry
+            addi        ac, ac, -3
+            st          ac, .varbot
+            movr        ac, x4
+            ld          ac, .vl_nm0
+            st          ac, (x4)
+            ld          ac, .vl_nm1
+            st          ac, 1(x4)
+            xorr        ac, ac
+            st          ac, 2(x4)
+            movr        x4, ac
+            rets
+
+vl_cnt:     bss         1
+vl_nm0:     bss         1
+vl_nm1:     bss         1
+
+
+; ==========================================================================
+; Integer expression evaluator (recursive descent).  All routines read and
+; advance ep_tok and return the integer result in ac.
+; ==========================================================================
+
+; ex_prim — primary: INT literal, variable, PEEK(e), or ( expr ).
+ex_prim:    save        x4
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            st          ac, .ex_w
+            and         ac, .tagmask
+            st          ac, .ex_t
+            sub         ac, .tknint
+            movr.rn     ac, ac           ; INT ?
+            jmp         .exp_nI
+            ld          ac, 1(x4)        ; value
+            st          ac, .ex_val
+            addi        x4, x4, 2
+            st          x4, .ep_tok
+            ld          ac, .ex_val
+            rets
+exp_nI:     ld          ac, .ex_t
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; VAR ?
+            jmp         .exp_nV
+            ld          x0, .ep_tok
+            calls       .var_lookup      ; ac = entry
+            movr        ac, x4
+            ld          ac, 2(x4)        ; value
+            st          ac, .ex_val
+            ld          x0, .ep_tok      ; advance past the VAR token
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          ac, .ex_val
+            rets
+exp_nV:     ld          ac, .ex_w
+            sub         ac, .v_lpar
+            movr.rn     ac, ac           ; '(' ?
+            jmp         .exp_nL
+            ld          x4, .ep_tok      ; consume '('
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            st          ac, .ex_val
+            ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .exp_err
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          ac, .ex_val
+            rets
+exp_nL:     ld          ac, .ex_w
+            sub         ac, .v_peek
+            movr.rn     ac, ac           ; PEEK ?
+            jmp         .exp_err
+            ld          x4, .ep_tok      ; consume PEEK
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; expect '('
+            sub         ac, .v_lpar
+            movr.rn     ac, ac
+            jmp         .exp_err
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; address
+            movr        ac, x4
+            ld          ac, (x4)         ; M[address]
+            st          ac, .ex_val
+            ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .exp_err
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          ac, .ex_val
+            rets
+exp_err:    ldea        x0, .msg_synt
+            jmp         .err_show
+
+ex_w:       bss         1
+ex_t:       bss         1
+ex_val:     bss         1
+
+; ex_fact — unary minus, then primary.
+ex_fact:    save        x4
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_minus
+            movr.rn     ac, ac           ; unary '-' ?
+            jmp         .ef_prim
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_fact
+            ngtr        ac, ac
+            rets
+ef_prim:    calls       .ex_prim
+            rets
+
+; ex_term — factor ( ('*'|'/') factor )*
+ex_term:    save        x4
+            calls       .ex_fact
+            st          ac, .et_acc
+et_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_mul
+            movr.rn     ac, ac           ; '*' ?
+            jmp         .et_cdiv
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_fact
+            st          ac, .et_t
+            ld          ac, .et_acc
+            movr        ac, mq
+            mul         .et_t            ; ac = acc * t
+            st          ac, .et_acc
+            jmp         .et_lp
+et_cdiv:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_div
+            movr.rn     ac, ac           ; '/' ?
+            jmp         .et_done
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_fact
+            st          ac, .et_t
+            ld          ac, .et_acc
+            div         .et_t            ; mq = acc / t
+            movr        mq, ac
+            st          ac, .et_acc
+            jmp         .et_lp
+et_done:    ld          ac, .et_acc
+            rets
+
+et_acc:     bss         1
+et_t:       bss         1
+
+; ex_add — term ( ('+'|'-') term )*
+ex_add:     save        x4
+            calls       .ex_term
+            st          ac, .ea_acc
+ea_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_plus
+            movr.rn     ac, ac           ; '+' ?
+            jmp         .ea_cmin
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_term
+            st          ac, .ea_t
+            ld          ac, .ea_acc
+            add         ac, .ea_t
+            st          ac, .ea_acc
+            jmp         .ea_lp
+ea_cmin:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_minus
+            movr.rn     ac, ac           ; '-' ?
+            jmp         .ea_done
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_term
+            st          ac, .ea_t
+            ld          ac, .ea_acc
+            sub         ac, .ea_t
+            st          ac, .ea_acc
+            jmp         .ea_lp
+ea_done:    ld          ac, .ea_acc
+            rets
+
+ea_acc:     bss         1
+ea_t:       bss         1
+
+; ex_expr — relational: add ( relop add )?  True = -1, false = 0.
+ex_expr:    save        x4
+            calls       .ex_add
+            st          ac, .ex_l
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            callr       .is_relop        ; ac = code (1..6) or 0
+            movr.rz     ac, ac           ; skip jmp when relop present
+            jmp         .exx_done
+            st          ac, .ex_relop
+            ld          x4, .ep_tok      ; consume relop
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_add
+            st          ac, .ex_r
+            calls       .rel_eval        ; ac = -1 / 0
+            rets
+exx_done:   ld          ac, .ex_l
+            rets
+
+ex_l:       bss         1
+ex_r:       bss         1
+ex_relop:   bss         1
+
+; is_relop — token word in ac -> relop code (1=EQ 2=LT 3=GT 4=LE 5=GE 6=NE) or 0.
+is_relop:   st          ac, .ir_w
+            sub         ac, .v_eq
+            movr.rn     ac, ac
+            jmp         .ir_1
+            ldea        ac, 1
+            retr
+ir_1:       ld          ac, .ir_w
+            sub         ac, .tknlt
+            movr.rn     ac, ac
+            jmp         .ir_2
+            ldea        ac, 2
+            retr
+ir_2:       ld          ac, .ir_w
+            sub         ac, .tkngt
+            movr.rn     ac, ac
+            jmp         .ir_3
+            ldea        ac, 3
+            retr
+ir_3:       ld          ac, .ir_w
+            sub         ac, .tknle
+            movr.rn     ac, ac
+            jmp         .ir_4
+            ldea        ac, 4
+            retr
+ir_4:       ld          ac, .ir_w
+            sub         ac, .tknge
+            movr.rn     ac, ac
+            jmp         .ir_5
+            ldea        ac, 5
+            retr
+ir_5:       ld          ac, .ir_w
+            sub         ac, .tknne
+            movr.rn     ac, ac
+            jmp         .ir_0
+            ldea        ac, 6
+            retr
+ir_0:       xorr        ac, ac
+            retr
+
+ir_w:       bss         1
+
+; rel_eval — compare ex_l, ex_r per ex_relop; ac = -1 (true) or 0.
+rel_eval:   save        x4, x5
+            ld          ac, .ex_relop
+            subin.rn    ac, ac, 1
+            jmp         .rv_1
+            jmp         .re_eq
+rv_1:       ld          ac, .ex_relop
+            subin.rn    ac, ac, 2
+            jmp         .rv_2
+            jmp         .re_lt
+rv_2:       ld          ac, .ex_relop
+            subin.rn    ac, ac, 3
+            jmp         .rv_3
+            jmp         .re_gt
+rv_3:       ld          ac, .ex_relop
+            subin.rn    ac, ac, 4
+            jmp         .rv_4
+            jmp         .re_le
+rv_4:       ld          ac, .ex_relop
+            subin.rn    ac, ac, 5
+            jmp         .re_ne
+            jmp         .re_ge
+re_eq:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            movr.rz     ac, ac           ; skip jmp when not equal
+            jmp         .re_true
+            jmp         .re_false
+re_ne:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            movr.rz     ac, ac
+            jmp         .re_false
+            jmp         .re_true
+; Signed comparisons via d = ex_l - ex_r and the sign bit (bit 35).
+re_lt:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .re_false
+            jmp         .re_true
+re_ge:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .re_true
+            jmp         .re_false
+re_gt:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            st          ac, .rel_d
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .rgt_nn
+            jmp         .re_false
+rgt_nn:     ld          ac, .rel_d
+            movr.rz     ac, ac           ; skip jmp when d != 0
+            jmp         .re_false
+            jmp         .re_true
+re_le:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            st          ac, .rel_d
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .rle_nn
+            jmp         .re_true
+rle_nn:     ld          ac, .rel_d
+            movr.rz     ac, ac           ; skip jmp when d != 0
+            jmp         .re_true
+            jmp         .re_false
+re_true:    ld          ac, .neg1
+            rets
+re_false:   xorr        ac, ac
+            rets
+
+rel_d:      bss         1
+
+
+; ==========================================================================
+; print_str_tok — print the body of the STR token at x0; advance ep_tok.
+; ==========================================================================
+print_str_tok: save     x4
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .ps_cnt
+            movr        x0, x6           ; BX pointer = tag word addr
+            ld          ac, .ps_cnt
+            ngtr        ac, x7
+            movr.rz     x7, x7
+            jmp         .ps_adv
+ps_lp:      incldb      ac, x6, 7
+            callr       .io_putc
+            incr.rn     x7, x7
+            jmp         .ps_lp
+ps_adv:     ld          x0, .ep_tok
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            rets
+
+ps_cnt:     bss         1
+
+
+; ==========================================================================
+; st_print — PRINT items separated by ';' (no gap) or ',' (tab).  A trailing
+; separator suppresses the newline.
+; ==========================================================================
+st_print:   save        x4
+            xorr        ac, ac
+            st          ac, .sp_supp
+sp_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; skip jmp when a token is present
+            jmp         .sp_eol
+            jmp         .sp_item
+sp_eol:     ld          ac, .sp_supp
+            movr.rz     ac, ac           ; skip jmp when suppressing
+            jmp         .sp_nl
+            rets
+sp_nl:      callr       .io_crlf
+            rets
+sp_item:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_semi
+            movr.rn     ac, ac           ; ';' ?
+            jmp         .sp_ncom
+            ldea        ac, 1
+            st          ac, .sp_supp
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .sp_lp
+sp_ncom:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac           ; ',' ?
+            jmp         .sp_nstr
+            ldea        ac, 1
+            st          ac, .sp_supp
+            ldea        ac, 9            ; tab
+            callr       .io_putc
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .sp_lp
+sp_nstr:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; string literal ?
+            jmp         .sp_expr
+            xorr        ac, ac
+            st          ac, .sp_supp
+            ld          x0, .ep_tok
+            calls       .print_str_tok
+            jmp         .sp_lp
+sp_expr:    xorr        ac, ac
+            st          ac, .sp_supp
+            calls       .ex_expr
+            st          ac, .sp_val
+            ld          ac, .sp_val
+            callr       .io_putn
+            jmp         .sp_lp
+
+sp_supp:    bss         1
+sp_val:     bss         1
+
+
+; ==========================================================================
+; st_let — assign:  [LET] var = expr  (ep_tok at the variable).
+; ==========================================================================
+st_let:     save        x4
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; VAR ?
+            jmp         .sl_err
+            ld          x0, .ep_tok
+            calls       .var_lookup
+            st          ac, .sl_ent
+            ld          x0, .ep_tok      ; advance past variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; expect '='
+            sub         ac, .v_eq
+            movr.rn     ac, ac
+            jmp         .sl_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            ld          x4, .sl_ent
+            st          ac, 2(x4)
+            rets
+sl_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+sl_ent:     bss         1
+
+
+; ==========================================================================
+; err_show — print error message (x0), reset to the READY loop.
+; ==========================================================================
+err_show:   ldea        sp, .topstk
+            callr       .io_puts
+            callr       .io_crlf
+            xorr        ac, ac
+            st          ac, .runflag
+            jmp         .ready
 
 
 ; ==========================================================================
@@ -1235,6 +1784,8 @@ msg_synt:   dsn         "?SYNTAX ERROR"
 st_tab:     dw          #280000000, st_list      ; LIST
             dw          #290000000, st_new       ; NEW
             dw          #200000000, st_rem       ; REM
+            dw          #210000000, st_print     ; PRINT
+            dw          #220000000, st_let       ; LET
             dw          0, 0
 
 
@@ -1244,6 +1795,7 @@ st_tab:     dw          #280000000, st_list      ; LIST
 ; ==========================================================================
 tagmask:    dw          #FF0000000       ; bits 35:28
 cntmask:    dw          #FFFFFFF         ; bits 27:0 (packed-token char count)
+signbit:    dw          #800000000       ; bit 35 (sign)
 
 tknint:     dw          #10000000        ; tag 0x01
 tknvar:     dw          #20000000        ; tag 0x02
@@ -1253,6 +1805,20 @@ tkngt:      dw          #1B0000000       ; tag 0x1B  '>'
 tknle:      dw          #1C0000000       ; tag 0x1C  '<='
 tknge:      dw          #1D0000000       ; tag 0x1D  '>='
 tknne:      dw          #1E0000000       ; tag 0x1E  '<>'
+
+; Operator / keyword token values used by the evaluator and statements
+v_plus:     dw          #100000000
+v_minus:    dw          #110000000
+v_mul:      dw          #120000000
+v_div:      dw          #130000000
+v_lpar:     dw          #140000000
+v_rpar:     dw          #150000000
+v_comma:    dw          #160000000
+v_semi:     dw          #170000000
+v_eq:       dw          #190000000
+v_then:     dw          #250000000
+v_peek:     dw          #400000000       ; PEEK function, tag 0x40
+neg1:       dw          -1
 
 ; Keyword name strings (for forward lookup and detok)
 s_rem:      dsn         "REM"
@@ -1269,6 +1835,7 @@ s_gosub:    dsn         "GOSUB"
 s_return:   dsn         "RETURN"
 s_stop:     dsn         "STOP"
 s_poke:     dsn         "POKE"
+s_peek:     dsn         "PEEK"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -1302,6 +1869,7 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_return, #2B0000000
             dw          s_stop,   #2C0000000
             dw          s_poke,   #2D0000000
+            dw          s_peek,   #400000000
             dw          0, 0
 
 ; Single-char operator table: [char code, tag value], terminated by 0.
@@ -1347,6 +1915,7 @@ rev_tab:    dw          #100000000, o_plus
             dw          #2B0000000, s_return
             dw          #2C0000000, s_stop
             dw          #2D0000000, s_poke
+            dw          #400000000, s_peek
             dw          0, 0
 
 
@@ -1357,6 +1926,9 @@ rev_tab:    dw          #100000000, o_plus
 memtop:     bss         1                ; RAM size (first nonexistent word)
 varbot:     bss         1                ; bottom of variable table
 progend:    bss         1                ; end of program text
+runflag:    bss         1                ; nonzero while a program is running
+cur_line:   bss         1                ; current line during RUN
+jumped:     bss         1                ; set by GOTO/GOSUB to suppress advance
 
 ; I/O interrupt state
 out_ptr:    bss         1
