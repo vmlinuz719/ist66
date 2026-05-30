@@ -1307,8 +1307,8 @@ vl_nm1:     bss         1
 ; advance ep_tok and return the integer result in ac.
 ; ==========================================================================
 
-; ex_prim — primary: INT literal, variable, PEEK(e), or ( expr ).
-ex_prim:    save        x4
+; ex_prim — primary: INT literal, variable, function call, or ( expr ).
+ex_prim:    save        x4, x5
             ld          x4, .ep_tok
             ld          ac, (x4)
             st          ac, .ex_w
@@ -1358,33 +1358,31 @@ exp_nV:     ld          ac, .ex_w
             st          x4, .ep_tok
             ld          ac, .ex_val
             rets
-exp_nL:     ld          ac, .ex_w
-            sub         ac, .v_peek
-            movr.rn     ac, ac           ; PEEK ?
+exp_nL:     ld          ac, .ex_w        ; function call: <fn> ( expr )
+            callr       .is_func         ; ac = function code (1..5) or 0
+            movr.rz     ac, ac           ; skip jmp when it is a function
             jmp         .exp_err
-            ld          x4, .ep_tok      ; consume PEEK
+            movr        ac, x5           ; x5 = function code (survives arg eval)
+            ld          x4, .ep_tok      ; consume function name
             addi        x4, x4, 1
             st          x4, .ep_tok
             ld          ac, (x4)         ; expect '('
             sub         ac, .v_lpar
             movr.rn     ac, ac
             jmp         .exp_err
-            ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_expr         ; address
-            movr        ac, x4
-            ld          ac, (x4)         ; M[address]
-            st          ac, .ex_val
+            calls       .ex_expr         ; argument in ac; x5 preserved
+            st          ac, .ex_arg
             ld          x4, .ep_tok      ; expect ')'
             ld          ac, (x4)
             sub         ac, .v_rpar
             movr.rn     ac, ac
             jmp         .exp_err
-            ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
-            ld          ac, .ex_val
+            st          x5, .ex_fn       ; store fn code + arg, then apply
+            calls       .apply_fn        ; ac = result
             rets
 exp_err:    ldea        x0, .msg_synt
             jmp         .err_show
@@ -1392,6 +1390,102 @@ exp_err:    ldea        x0, .msg_synt
 ex_w:       bss         1
 ex_t:       bss         1
 ex_val:     bss         1
+ex_fn:      bss         1
+ex_arg:     bss         1
+
+; is_func — token word in ac -> 1=PEEK 2=ABS 3=SGN 4=RND 5=INT, else 0.
+is_func:    st          ac, .if_w
+            sub         ac, .v_peek
+            movr.rn     ac, ac
+            jmp         .iff_2
+            ldea        ac, 1
+            retr
+iff_2:      ld          ac, .if_w
+            sub         ac, .v_abs
+            movr.rn     ac, ac
+            jmp         .iff_3
+            ldea        ac, 2
+            retr
+iff_3:      ld          ac, .if_w
+            sub         ac, .v_sgn
+            movr.rn     ac, ac
+            jmp         .iff_4
+            ldea        ac, 3
+            retr
+iff_4:      ld          ac, .if_w
+            sub         ac, .v_rnd
+            movr.rn     ac, ac
+            jmp         .iff_5
+            ldea        ac, 4
+            retr
+iff_5:      ld          ac, .if_w
+            sub         ac, .v_int
+            movr.rn     ac, ac
+            jmp         .iff_0
+            ldea        ac, 5
+            retr
+iff_0:      xorr        ac, ac
+            retr
+
+if_w:       bss         1
+
+; apply_fn — apply function ex_fn to ex_arg; result in ac.
+apply_fn:   save        x4
+            ld          ac, .ex_fn
+            subin.rn    ac, ac, 1
+            jmp         .af_2
+            ld          x4, .ex_arg      ; PEEK
+            ld          ac, (x4)
+            rets
+af_2:       ld          ac, .ex_fn
+            subin.rn    ac, ac, 2
+            jmp         .af_3
+            ld          ac, .ex_arg      ; ABS
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .af_apos
+            ld          ac, .ex_arg
+            ngtr        ac, ac
+            rets
+af_apos:    ld          ac, .ex_arg
+            rets
+af_3:       ld          ac, .ex_fn
+            subin.rn    ac, ac, 3
+            jmp         .af_4
+            ld          ac, .ex_arg      ; SGN
+            movr.rz     ac, ac           ; skip jmp when nonzero
+            jmp         .af_szero
+            ld          ac, .ex_arg
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .af_spos
+            ld          ac, .neg1
+            rets
+af_spos:    ldea        ac, 1
+            rets
+af_szero:   xorr        ac, ac
+            rets
+af_4:       ld          ac, .ex_fn
+            subin.rn    ac, ac, 4
+            jmp         .af_int
+            ld          ac, .rnd_seed    ; RND: LCG, result in [0, arg)
+            movr        ac, mq
+            mul         .rnd_mul
+            add         ac, .rnd_inc
+            st          ac, .rnd_seed
+            ld          x4, .ex_arg
+            movr.rz     x4, x4           ; skip jmp when arg != 0
+            jmp         .af_rzero
+            jmp         .af_rmod
+af_rzero:   xorr        ac, ac
+            rets
+af_rmod:    ld          ac, .rnd_seed
+            and         ac, .lo35        ; force non-negative
+            div         .ex_arg          ; xy = seed mod arg
+            movr        xy, ac
+            rets
+af_int:     ld          ac, .ex_arg      ; INT (identity for integers)
+            rets
 
 ; ex_fact — unary minus, then primary.
 ex_fact:    save        x4
@@ -1408,10 +1502,10 @@ ex_fact:    save        x4
 ef_prim:    calls       .ex_prim
             rets
 
-; ex_term — factor ( ('*'|'/') factor )*
-ex_term:    save        x4
+; ex_term — factor ( ('*'|'/') factor )*.  Accumulator in saved x5.
+ex_term:    save        x4, x5
             calls       .ex_fact
-            st          ac, .et_acc
+            movr        ac, x5           ; x5 = accumulator
 et_lp:      ld          x4, .ep_tok
             ld          ac, (x4)
             sub         ac, .v_mul
@@ -1420,12 +1514,11 @@ et_lp:      ld          x4, .ep_tok
             ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_fact
+            calls       .ex_fact         ; operand in ac; x5 preserved
             st          ac, .et_t
-            ld          ac, .et_acc
-            movr        ac, mq
-            mul         .et_t            ; ac = acc * t
-            st          ac, .et_acc
+            movr        x5, mq
+            mul         .et_t            ; ac = acc * operand
+            movr        ac, x5
             jmp         .et_lp
 et_cdiv:    ld          x4, .ep_tok
             ld          ac, (x4)
@@ -1437,21 +1530,19 @@ et_cdiv:    ld          x4, .ep_tok
             st          x4, .ep_tok
             calls       .ex_fact
             st          ac, .et_t
-            ld          ac, .et_acc
-            div         .et_t            ; mq = acc / t
-            movr        mq, ac
-            st          ac, .et_acc
+            movr        x5, ac
+            div         .et_t            ; mq = acc / operand
+            movr        mq, x5
             jmp         .et_lp
-et_done:    ld          ac, .et_acc
+et_done:    movr        x5, ac
             rets
 
-et_acc:     bss         1
 et_t:       bss         1
 
-; ex_add — term ( ('+'|'-') term )*
-ex_add:     save        x4
+; ex_add — term ( ('+'|'-') term )*.  Accumulator in saved x5.
+ex_add:     save        x4, x5
             calls       .ex_term
-            st          ac, .ea_acc
+            movr        ac, x5           ; x5 = accumulator
 ea_lp:      ld          x4, .ep_tok
             ld          ac, (x4)
             sub         ac, .v_plus
@@ -1460,11 +1551,8 @@ ea_lp:      ld          x4, .ep_tok
             ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
-            calls       .ex_term
-            st          ac, .ea_t
-            ld          ac, .ea_acc
-            add         ac, .ea_t
-            st          ac, .ea_acc
+            calls       .ex_term         ; operand in ac; x5 preserved
+            addr        ac, x5           ; x5 += operand
             jmp         .ea_lp
 ea_cmin:    ld          x4, .ep_tok
             ld          ac, (x4)
@@ -1475,35 +1563,32 @@ ea_cmin:    ld          x4, .ep_tok
             addi        x4, x4, 1
             st          x4, .ep_tok
             calls       .ex_term
-            st          ac, .ea_t
-            ld          ac, .ea_acc
-            sub         ac, .ea_t
-            st          ac, .ea_acc
+            subr        ac, x5           ; x5 -= operand
             jmp         .ea_lp
-ea_done:    ld          ac, .ea_acc
+ea_done:    movr        x5, ac
             rets
 
-ea_acc:     bss         1
-ea_t:       bss         1
-
 ; ex_expr — relational: add ( relop add )?  True = -1, false = 0.
-ex_expr:    save        x4
+; left in saved x4, relop code in saved x6 across the right-hand evaluation.
+ex_expr:    save        x4, x5, x6
             calls       .ex_add
-            st          ac, .ex_l
-            ld          x4, .ep_tok
-            ld          ac, (x4)
+            movr        ac, x4           ; x4 = left
+            ld          x5, .ep_tok
+            ld          ac, (x5)
             callr       .is_relop        ; ac = code (1..6) or 0
             movr.rz     ac, ac           ; skip jmp when relop present
             jmp         .exx_done
-            st          ac, .ex_relop
-            ld          x4, .ep_tok      ; consume relop
-            addi        x4, x4, 1
-            st          x4, .ep_tok
-            calls       .ex_add
+            movr        ac, x6           ; x6 = relop code
+            ld          x5, .ep_tok      ; consume relop
+            addi        x5, x5, 1
+            st          x5, .ep_tok
+            calls       .ex_add          ; right in ac; x4, x6 preserved
+            st          x4, .ex_l
             st          ac, .ex_r
+            st          x6, .ex_relop
             calls       .rel_eval        ; ac = -1 / 0
             rets
-exx_done:   ld          ac, .ex_l
+exx_done:   movr        x4, ac
             rets
 
 ex_l:       bss         1
@@ -2238,7 +2323,15 @@ v_then:     dw          #250000000
 v_to:       dw          #300000000       ; TO, tag 0x30
 v_step:     dw          #310000000       ; STEP, tag 0x31
 v_peek:     dw          #400000000       ; PEEK function, tag 0x40
+v_abs:      dw          #410000000       ; ABS, tag 0x41
+v_sgn:      dw          #420000000       ; SGN, tag 0x42
+v_rnd:      dw          #430000000       ; RND, tag 0x43
+v_int:      dw          #440000000       ; INT, tag 0x44
 neg1:       dw          -1
+lo35:       dw          #7FFFFFFFF       ; low 35 bits (clears sign)
+rnd_mul:    dw          1103515245
+rnd_inc:    dw          12345
+rnd_seed:   dw          1
 
 ; Keyword name strings (for forward lookup and detok)
 s_rem:      dsn         "REM"
@@ -2261,6 +2354,10 @@ s_next:     dsn         "NEXT"
 s_to:       dsn         "TO"
 s_step:     dsn         "STEP"
 s_input:    dsn         "INPUT"
+s_abs:      dsn         "ABS"
+s_sgn:      dsn         "SGN"
+s_rnd:      dsn         "RND"
+s_int:      dsn         "INT"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -2300,6 +2397,10 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_step,   #310000000
             dw          s_input,  #320000000
             dw          s_peek,   #400000000
+            dw          s_abs,    #410000000
+            dw          s_sgn,    #420000000
+            dw          s_rnd,    #430000000
+            dw          s_int,    #440000000
             dw          0, 0
 
 ; Single-char operator table: [char code, tag value], terminated by 0.
@@ -2351,6 +2452,10 @@ rev_tab:    dw          #100000000, o_plus
             dw          #310000000, s_step
             dw          #320000000, s_input
             dw          #400000000, s_peek
+            dw          #410000000, s_abs
+            dw          #420000000, s_sgn
+            dw          #430000000, s_rnd
+            dw          #440000000, s_int
             dw          0, 0
 
 
