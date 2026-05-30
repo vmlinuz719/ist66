@@ -221,12 +221,8 @@ putsn:      bss         1
 ; Pushes digits on the hardware stack, then prints them.  Returns via retr.
 io_putn:    st          lr, .putn_lr
             st          ac, .putn_v
-            movr.rz     ac, ac           ; skip jmp if value != 0
-            jmp         .putn_nz
-            ldea        ac, 48           ; "0"
-            callr       .io_putc
-            ld          lr, .putn_lr
-            retr
+            movr.rz     ac, ac           ; skip jmp when value != 0
+            jmp         .putn_zero       ; value == 0: print "0"
 putn_nz:    ld          x6, .putn_v
             ld          x7, .zerow
             cmplt       x6, x7           ; exec next if value < 0
@@ -247,9 +243,8 @@ putn_dl:    ld          ac, .putn_v
             st          ac, .putn_n
             movr        mq, ac           ; ac = quotient
             st          ac, .putn_v
-            movr.rn     mq, mq           ; skip jmp if quotient != 0
-            jmp         .putn_pr
-            jmp         .putn_dl
+            movr.rn     mq, mq           ; skip jmp when quotient == 0 (done)
+            jmp         .putn_dl         ; quotient != 0: extract next digit
 putn_pr:    ld          ac, .putn_n
             ngtr        ac, ac
             st          ac, .putn_n      ; putn_n = -count
@@ -261,6 +256,10 @@ putn_pl:    pop         ac               ; digit 0..9
             st          ac, .putn_n
             movr.rn     ac, ac           ; skip jmp when count reaches 0
             jmp         .putn_pl
+            ld          lr, .putn_lr
+            retr
+putn_zero:  ldea        ac, 48           ; "0"
+            callr       .io_putc
             ld          lr, .putn_lr
             retr
 
