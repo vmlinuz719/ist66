@@ -2785,9 +2785,116 @@ es_tok:     bss         1
 es_op:      bss         1
 es_cnt:     bss         1
 
-; ex_expr — relational: add ( relop add )?  True = -1, false = 0.
+; ----- Bitwise / logical operators ---------------------------------------
+; Precedence, loosest to tightest:  OR/XOR  <  AND  <  NOT  <  relational.
+; These treat their integer operands as 36-bit bit vectors; because TRUE is
+; -1 (all ones) and FALSE is 0 they double as logical connectives, so
+; conditions like  IF A > 0 AND B > 0  parse without parentheses (relational
+; binds tighter than AND).  String operands raise ?TYPE MISMATCH.
+;
+; ex_expr — top of the expression grammar:  and_expr ( ('OR'|'XOR') and_expr )*
+ex_expr:    save        x4, x5
+            calls       .ex_and
+            movr        ac, x5           ; x5 = accumulator value
+bo_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            st          ac, .bo_tok
+            sub         ac, .v_or
+            movr.rn     ac, ac           ; OR ?
+            jmp         .bo_cxor
+            xorr        ac, ac           ; op 0 = OR
+            jmp         .bo_have
+bo_cxor:    ld          ac, .bo_tok
+            sub         ac, .v_xor
+            movr.rn     ac, ac           ; XOR ?
+            jmp         .bo_done
+            ldea        ac, 1            ; op 1 = XOR
+bo_have:    st          ac, .bo_op
+            ld          ac, .vtype       ; left operand must be integer
+            movr.rz     ac, ac
+            jmp         .bo_li
+            jmp         .bo_tmm
+bo_li:      ld          x4, .ep_tok      ; consume the operator
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_and          ; right operand
+            ld          x4, .vtype       ; right operand must be integer
+            movr.rz     x4, x4
+            jmp         .bo_ri
+            jmp         .bo_tmm
+bo_ri:      ld          x4, .bo_op
+            movr.rz     x4, x4           ; skip next when op != 0 (XOR)
+            jmp         .bo_or           ; op 0 = OR
+            xorr        ac, x5           ; op 1 = XOR: x5 ^= operand
+            jmp         .bo_after
+bo_or:      bisr        ac, x5           ; OR: x5 |= operand
+bo_after:   xorr        ac, ac           ; result type = integer
+            st          ac, .vtype
+            jmp         .bo_lp
+bo_done:    movr        x5, ac           ; ac = accumulator value
+            rets
+bo_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+bo_tok:     bss         1
+bo_op:      bss         1
+
+; ex_and — not_expr ( 'AND' not_expr )*.  Bitwise AND, integer-only.
+ex_and:     save        x4, x5
+            calls       .ex_not
+            movr        ac, x5           ; x5 = accumulator value
+ba_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_and
+            movr.rn     ac, ac           ; AND ?
+            jmp         .ba_done
+            ld          ac, .vtype       ; left operand must be integer
+            movr.rz     ac, ac
+            jmp         .ba_li
+            jmp         .ba_tmm
+ba_li:      ld          x4, .ep_tok      ; consume AND
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_not          ; right operand
+            ld          x4, .vtype       ; right operand must be integer
+            movr.rz     x4, x4
+            jmp         .ba_ri
+            jmp         .ba_tmm
+ba_ri:      andr        ac, x5           ; x5 &= operand
+            xorr        ac, ac           ; result type = integer
+            st          ac, .vtype
+            jmp         .ba_lp
+ba_done:    movr        x5, ac
+            rets
+ba_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+; ex_not — 'NOT' not_expr | rel_expr.  Unary one's complement, integer-only.
+ex_not:     save        x4
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_not
+            movr.rn     ac, ac           ; NOT ?
+            jmp         .nt_rel
+            addi        x4, x4, 1        ; consume NOT
+            st          x4, .ep_tok
+            calls       .ex_not          ; NOT binds to the right
+            ld          x4, .vtype       ; operand must be integer
+            movr.rz     x4, x4
+            jmp         .nt_int
+            jmp         .nt_tmm
+nt_int:     comr        ac, ac           ; one's complement
+            xorr        x4, x4           ; result type = integer
+            st          x4, .vtype
+            rets
+nt_rel:     calls       .ex_rel
+            rets
+nt_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+; ex_rel — relational: shift ( relop shift )?  True = -1, false = 0.
 ; left in saved x4, relop code in saved x6 across the right-hand evaluation.
-ex_expr:    save        x4, x5, x6
+ex_rel:     save        x4, x5, x6
             calls       .ex_shift
             movr        ac, x4           ; x4 = left value
             ld          ac, .vtype       ; left type (global survives right eval)
@@ -4341,6 +4448,10 @@ v_instr:    dw          #4D0000000       ; INSTR, tag 0x4D
 v_shl:      dw          #4E0000000       ; SHL  logical shift left,  tag 0x4E
 v_shr:      dw          #4F0000000       ; SHR  logical shift right, tag 0x4F
 v_asr:      dw          #500000000       ; ASR  arithmetic shift right, tag 0x50
+v_and:      dw          #510000000       ; AND  bitwise and, tag 0x51
+v_or:       dw          #520000000       ; OR   bitwise or,  tag 0x52
+v_xor:      dw          #530000000       ; XOR  bitwise xor, tag 0x53
+v_not:      dw          #540000000       ; NOT  one's complement, tag 0x54
 const36:    dw          36               ; shift-count clamp ceiling (0..36)
 neg1:       dw          -1
 lo35:       dw          #7FFFFFFFF       ; low 35 bits (clears sign)
@@ -4394,6 +4505,10 @@ s_instr:    dsn         "INSTR"
 s_shl:      dsn         "SHL"
 s_shr:      dsn         "SHR"
 s_asr:      dsn         "ASR"
+s_and:      dsn         "AND"
+s_or:       dsn         "OR"
+s_xor:      dsn         "XOR"
+s_not:      dsn         "NOT"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -4458,6 +4573,10 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_shl,    #4E0000000
             dw          s_shr,    #4F0000000
             dw          s_asr,    #500000000
+            dw          s_and,    #510000000
+            dw          s_or,     #520000000
+            dw          s_xor,    #530000000
+            dw          s_not,    #540000000
             dw          0, 0
 
 ; Single-char operator table: [char code, tag value], terminated by 0.
@@ -4534,6 +4653,10 @@ rev_tab:    dw          #100000000, o_plus
             dw          #4E0000000, s_shl
             dw          #4F0000000, s_shr
             dw          #500000000, s_asr
+            dw          #510000000, s_and
+            dw          #520000000, s_or
+            dw          #530000000, s_xor
+            dw          #540000000, s_not
             dw          0, 0
 
 
