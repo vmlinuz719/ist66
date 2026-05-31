@@ -2148,11 +2148,27 @@ exp_nVc:    ld          ac, .ex_t
             sub         ac, .tknstr
             movr.rn     ac, ac           ; STR literal ?
             jmp         .exp_nV
-            ld          x0, .ep_tok      ; copy literal into the heap (the token
-            ldea        x1, .emptystr    ; buffer is transient across statements)
+            ; A literal in the program text is persistent (the text never
+            ; moves during RUN), so the value can point at the token directly.
+            ; Only a literal in the transient tokbuf (direct mode) is copied
+            ; into the heap.  This avoids leaking heap on every evaluation,
+            ; e.g. PRINT of a constant string inside a loop.
+            ld          x4, .ep_tok
+            ldea        x5, .progbase
+            cmplt       x4, x5           ; ep_tok < progbase -> transient
+            jmp         .exp_lcopy
+            ld          x5, .progend
+            cmplt       x4, x5           ; ep_tok < progend -> program text
+            jmp         .exp_lref
+            jmp         .exp_lcopy
+exp_lref:   ld          ac, .ep_tok      ; point at the literal in place
+            st          ac, .ex_val
+            jmp         .exp_ladv
+exp_lcopy:  ld          x0, .ep_tok      ; copy the transient literal to the heap
+            ldea        x1, .emptystr
             calls       .str_cat
             st          ac, .ex_val
-            ld          x0, .ep_tok      ; advance past the token
+exp_ladv:   ld          x0, .ep_tok      ; advance past the token
             calls       .tok_size
             ld          x4, .ep_tok
             addr        ac, x4
