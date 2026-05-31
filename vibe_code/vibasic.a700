@@ -284,8 +284,7 @@ io_putn:    st          lr, .putn_lr
             movr.rz     ac, ac           ; skip jmp when value != 0
             jmp         .putn_zero       ; value == 0: print "0"
 putn_nz:    ld          ac, .putn_v
-            and         ac, .signbit     ; bit 35 set => negative
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .putn_abs
             jmp         .putn_neg
 putn_neg:   ldea        ac, 45           ; "-"
@@ -399,12 +398,10 @@ gilen:      bss         1
 
 id_digit:   st          ac, .cltmp
             ld          x6, .cltmp
-            ld          x7, .c48
-            cmpge       x6, x7           ; x6 >= '0' ?
+            addizn.bz   x6, x6, -48      ; x6 >= '0' ?
             jmp         .idg_hi
             jmp         .idg_no
-idg_hi:     ld          x7, .c57
-            cmple       x6, x7           ; x6 <= '9' ?
+idg_hi:     addisn.bz   x6, x6, -57      ; x6 <= '9' ?
             jmp         .idg_yes
             jmp         .idg_no
 idg_yes:    ldea        ac, 1
@@ -414,19 +411,15 @@ idg_no:     xorr        ac, ac
 
 id_alpha:   st          ac, .cltmp
             ld          x6, .cltmp
-            ld          x7, .c65
-            cmpge       x6, x7           ; >= 'A' ?
+            addizn.bz   x6, x6, -65      ; >= 'A' ?
             jmp         .ida_uc
             jmp         .ida_no
-ida_uc:     ld          x7, .c90
-            cmple       x6, x7           ; <= 'Z' ?
+ida_uc:     addisn.bz   x6, x6, -90      ; <= 'Z' ?
             jmp         .ida_yes
-            ld          x7, .c97
-            cmpge       x6, x7           ; >= 'a' ?
+            addizn.bz   x6, x6, -97      ; >= 'a' ?
             jmp         .ida_lc
             jmp         .ida_no
-ida_lc:     ld          x7, .c122
-            cmple       x6, x7           ; <= 'z' ?
+ida_lc:     addisn.bz   x6, x6, -122     ; <= 'z' ?
             jmp         .ida_yes
             jmp         .ida_no
 ida_yes:    ldea        ac, 1
@@ -449,12 +442,10 @@ aln_alp:    ld          ac, .alnch
 
 to_upper:   st          ac, .cltmp
             ld          x6, .cltmp
-            ld          x7, .c97
-            cmpge       x6, x7           ; >= 'a' ?
+            addizn.bz   x6, x6, -97      ; >= 'a' ?
             jmp         .tu_hi
             retr
-tu_hi:      ld          x7, .c122
-            cmple       x6, x7           ; <= 'z' ?
+tu_hi:      addisn.bz   x6, x6, -122     ; <= 'z' ?
             jmp         .tu_lo
             retr
 tu_lo:      ld          ac, .cltmp
@@ -464,12 +455,6 @@ tu_lo:      ld          ac, .cltmp
 cltmp:      bss         1
 alnch:      bss         1
 alnlr:      bss         1
-c48:        dw          48
-c57:        dw          57
-c65:        dw          65
-c90:        dw          90
-c97:        dw          97
-c122:       dw          122
 
 
 ; ==========================================================================
@@ -1244,16 +1229,50 @@ de_cnt:     bss         1
 
 
 ; ==========================================================================
-; st_list — LIST the stored program.
+; st_list — list the stored program.
+;   LIST           list every line
+;   LIST n         list from line n to the end
+;   LIST n, m      list lines n through m inclusive
 ; ==========================================================================
 st_list:    save        x4, x5
-            ldea        x4, .progbase
+            xorr        ac, ac           ; default range: 0 .. (all lines)
+            st          ac, .sl_from
+            ld          ac, .sl_big
+            st          ac, .sl_to
+            ld          x4, .ep_tok      ; any arguments?
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; skip jmp when token != 0
+            jmp         .sl_go           ; TKN_EOL -> no args
+            sub         ac, .v_colon
+            movr.rn     ac, ac           ; skip jmp when token == ':'
+            jmp         .sl_a1
+            jmp         .sl_go           ; ':' -> no args
+sl_a1:      calls       .ex_expr         ; first arg = start line
+            st          ac, .sl_from
+            ld          x4, .ep_tok      ; second arg?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac           ; skip jmp when token == ','
+            jmp         .sl_go           ; one arg -> list to the end
+            addi        x4, x4, 1        ; consume ','
+            st          x4, .ep_tok
+            calls       .ex_expr         ; second arg = end line
+            st          ac, .sl_to
+sl_go:      ldea        x4, .progbase
 sl_lp:      ld          x5, .progend
             cmplt       x4, x5           ; ptr < progend ?
             jmp         .sl_line
             jmp         .sl_done
-sl_line:    st          x4, .sl_save
+sl_line:    ld          x5, .sl_to
             ld          ac, (x4)         ; line number
+            cmpgt       ac, x5           ; lineno > to ?  (sorted -> stop)
+            jmp         .sl_done
+            ld          x5, .sl_from
+            ld          ac, (x4)
+            cmplt       ac, x5           ; lineno < from ?  skip this line
+            jmp         .sl_skip
+            st          x4, .sl_save
+            ld          ac, (x4)
             callr       .io_putn
             ldea        ac, 32           ; space
             callr       .io_putc
@@ -1262,13 +1281,16 @@ sl_line:    st          x4, .sl_save
             addi        x0, x0, 2        ; token block
             calls       .detok           ; prints tokens + CRLF
             ld          x4, .sl_save
-            ld          ac, 1(x4)
+sl_skip:    ld          ac, 1(x4)
             addi        ac, ac, 2
             addr        ac, x4           ; next line
             jmp         .sl_lp
 sl_done:    rets
 
 sl_save:    bss         1
+sl_from:    bss         1
+sl_to:      bss         1
+sl_big:     dw          #FFFFFFFFF       ; larger than any line number
 
 
 ; ==========================================================================
@@ -1335,7 +1357,10 @@ pe_lp:      ld          ac, (x4)         ; tag (0 = end)
             rets
 pe_next:    addi        x4, x4, 2
             jmp         .pe_lp
-pe_unk:     ldea        x0, .msg_synt    ; unknown / not-yet-implemented
+pe_unk:     ld          ac, .cur_tok     ; abandon the rest of the line so the
+            st          ac, .ep_tok      ;   caller advances past the bad token
+            calls       .skip_eol        ;   (ep_tok -> TKN_EOL) instead of
+            ldea        x0, .msg_synt    ;   re-dispatching it forever
             callr       .io_puts
             callr       .io_crlf
             rets
@@ -1360,8 +1385,7 @@ var_lookup: save        x4, x5, x6, x7
             ld          ac, 1(x4)        ; body word 0
             st          ac, .vl_nm0
             ld          x5, .vl_cnt
-            ld          x6, .fivew
-            cmpgt       x5, x6           ; count > 5 ?
+            addisn.bn   x5, x5, -5       ; count > 5 ?
             jmp         .vl_two
             xorr        ac, ac
             st          ac, .vl_nm1
@@ -1434,8 +1458,7 @@ arr_name:   save        x4, x5, x6
             or          ac, .arrbit      ; mark as array
             st          ac, .ar_nm0
             ld          x5, .ar_cnt
-            ld          x6, .fivew
-            cmpgt       x5, x6           ; count > 5 ?
+            addisn.bn   x5, x5, -5       ; count > 5 ?
             jmp         .an_two
             xorr        ac, ac
             st          ac, .ar_nm1
@@ -1598,8 +1621,7 @@ aa_rpar:    ld          x4, .ep_tok      ; expect ')'
             ld          x4, 3(x5)        ; block pointer
             st          x4, .aa_blk
             movr        x6, ac           ; i0 >= 0 ?
-            and         ac, .signbit
-            movr.rn     ac, ac
+            movrzn.rn   ac, ac, 1, 35
             jmp         .aa_sub
             ld          x4, .aa_blk      ; i0 < s0 ?
             ld          x0, (x4)
@@ -1607,8 +1629,7 @@ aa_rpar:    ld          x4, .ep_tok      ; expect ')'
             jmp         .aa_i0ok
             jmp         .aa_sub
 aa_i0ok:    movr        x7, ac           ; i1 >= 0 ?
-            and         ac, .signbit
-            movr.rn     ac, ac
+            movrzn.rn   ac, ac, 1, 35
             jmp         .aa_sub
             ld          x4, .aa_blk      ; i1 < s1 ?
             ld          x0, 1(x4)
@@ -1787,8 +1808,7 @@ scm_loop:   incldb      ac, x6, 7        ; a char
             sub         ac, .scm_bch
             movr.rz     ac, ac           ; skip jmp when chars differ
             jmp         .scm_eqc
-            and         ac, .signbit     ; differ: sign of (a - b)
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .scm_pos
             ld          ac, .neg1
             rets
@@ -1800,8 +1820,7 @@ scm_len:    ld          ac, .scm_ca      ; equal prefix: shorter string is less
             sub         ac, .scm_cb
             movr.rz     ac, ac           ; skip jmp when lengths differ
             jmp         .scm_eq
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .scm_lpos
             ld          ac, .neg1
             rets
@@ -1915,8 +1934,7 @@ str_instr:  save        x4, x5, x6, x7
             ld          ac, .si_hlen     ; last start = hlen - nlen
             sub         ac, .si_nlen
             st          ac, .si_last
-            and         ac, .signbit
-            movr.rn     ac, ac           ; skip jmp when hlen >= nlen
+            movrzn.rn   ac, ac, 1, 35    ; skip jmp when hlen >= nlen
             jmp         .si_zero
             xorr        ac, ac
             st          ac, .si_start
@@ -1949,8 +1967,7 @@ si_next:    ld          ac, .si_start    ; try the next start position
             st          ac, .si_start
             ld          ac, .si_last
             sub         ac, .si_start
-            and         ac, .signbit
-            movr.rn     ac, ac           ; skip jmp when start <= last
+            movrzn.rn   ac, ac, 1, 35    ; skip jmp when start <= last
             jmp         .si_zero
             jmp         .si_outer
 si_zero:    xorr        ac, ac
@@ -1978,8 +1995,7 @@ str_fromint: save       x4, x5, x6, x7
             calls       .str_from_chars
             rets
 fi_nz:      ld          ac, .fi_v        ; sign
-            and         ac, .signbit
-            movr.rz     ac, ac
+            movrzn.rz   ac, ac, 1, 35
             jmp         .fi_abs
             ld          ac, .fi_v
             ngtr        ac, ac
@@ -2214,8 +2230,7 @@ exp_nL:     ld          ac, .ex_w        ; function call
             ; codes 1..5 are the legacy single integer-argument functions
             movr        x5, ac
             addi        ac, ac, -6
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when code < 6
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when code < 6
             jmp         .fn_new
             st          x6, .ex_arg      ; legacy path -> apply_fn
             ld          x4, .ep_tok
@@ -2230,8 +2245,7 @@ exp_nL:     ld          ac, .ex_w        ; function call
             rets
 fn_new:     movr        x5, ac           ; codes 11..13 take a second argument
             addi        ac, ac, -11
-            and         ac, .signbit
-            movr.rn     ac, ac           ; skip jmp when code >= 11
+            movrzn.rn   ac, ac, 1, 35    ; skip jmp when code >= 11
             jmp         .fn_close         ; codes 6..10: single argument
             ld          x4, .ep_tok      ; expect ','
             ld          ac, (x4)
@@ -2360,8 +2374,7 @@ fc_mid:     ld          ac, (x6)         ; MID$(s$, start, len)
             ld          ac, .fn_len      ; avail = len - start0
             sub         ac, .fn_st0
             st          ac, .fn_avail
-            and         ac, .signbit     ; start past end -> empty
-            movr.rz     ac, ac
+            movrzn.rz   ac, ac, 1, 35    ; start past end -> empty
             jmp         .fc_mid2
             ldea        ac, .emptystr
             ldea        x4, 1
@@ -2385,8 +2398,7 @@ exp_err:    ldea        x0, .msg_synt
 ; fn_minlen — ac = min(x7, fn_len), clamped to >= 0.
 fn_minlen:  save        x4
             movr        x7, ac
-            and         ac, .signbit     ; negative count -> 0
-            movr.rz     ac, ac
+            movrzn.rz   ac, ac, 1, 35    ; negative count -> 0
             jmp         .fm_pos
             xorr        ac, ac
             rets
@@ -2516,8 +2528,7 @@ af_2:       ld          ac, .ex_fn
             subin.rn    ac, ac, 2
             jmp         .af_3
             ld          ac, .ex_arg      ; ABS
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .af_apos
             ld          ac, .ex_arg
             ngtr        ac, ac
@@ -2531,8 +2542,7 @@ af_3:       ld          ac, .ex_fn
             movr.rz     ac, ac           ; skip jmp when nonzero
             jmp         .af_szero
             ld          ac, .ex_arg
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .af_spos
             ld          ac, .neg1
             rets
@@ -2808,21 +2818,18 @@ re_ne:      ld          ac, .ex_l
 ; Signed comparisons via d = ex_l - ex_r and the sign bit (bit 35).
 re_lt:      ld          ac, .ex_l
             sub         ac, .ex_r
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .re_false
             jmp         .re_true
 re_ge:      ld          ac, .ex_l
             sub         ac, .ex_r
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .re_true
             jmp         .re_false
 re_gt:      ld          ac, .ex_l
             sub         ac, .ex_r
             st          ac, .rel_d
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .rgt_nn
             jmp         .re_false
 rgt_nn:     ld          ac, .rel_d
@@ -2832,8 +2839,7 @@ rgt_nn:     ld          ac, .rel_d
 re_le:      ld          ac, .ex_l
             sub         ac, .ex_r
             st          ac, .rel_d
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .rle_nn
             jmp         .re_true
 rle_nn:     ld          ac, .rel_d
@@ -3081,8 +3087,7 @@ sd_rpar:    ld          x4, .ep_tok      ; expect ')'
             addi        x4, x4, 1
             st          x4, .ep_tok
             ld          ac, .sd_ub0      ; bound0 must be >= 0
-            and         ac, .signbit
-            movr.rn     ac, ac
+            movrzn.rn   ac, ac, 1, 35
             jmp         .sd_sub
             ld          ac, .sd_ub0      ; s0 = ub0 + 1
             addi        ac, ac, 1
@@ -3091,8 +3096,7 @@ sd_rpar:    ld          x4, .ep_tok      ; expect ')'
             movr.rz     ac, ac           ; skip jmp when 2-D
             jmp         .sd_s1d
             ld          ac, .sd_ub1      ; 2-D: bound1 must be >= 0
-            and         ac, .signbit
-            movr.rn     ac, ac
+            movrzn.rn   ac, ac, 1, 35
             jmp         .sd_sub
             ld          ac, .sd_ub1      ; s1 = ub1 + 1
             addi        ac, ac, 1
@@ -3960,14 +3964,12 @@ sn_chk:     ld          ac, .for_sp
             add         ac, 2(x5)        ; var += step
             st          ac, (x4)
             ld          ac, 2(x5)        ; step sign
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when step negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when step negative
             jmp         .sn_pos
             ld          x4, (x5)         ; negative step: continue if var >= limit
             ld          ac, (x4)
             sub         ac, 1(x5)        ; var - limit
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when var < limit
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when var < limit
             jmp         .sn_cont
             jmp         .sn_end
 sn_pos:     ld          x4, (x5)         ; positive step: continue if var <= limit
@@ -3977,8 +3979,7 @@ sn_pos:     ld          x4, (x5)         ; positive step: continue if var <= lim
             movr.rz     ac, ac           ; skip jmp when nonzero
             jmp         .sn_cont
             ld          ac, .sn_d
-            and         ac, .signbit
-            movr.rz     ac, ac           ; skip jmp when negative
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .sn_end
             jmp         .sn_cont
 sn_cont:    ld          ac, 3(x5)        ; loop back to body (resume line + token)
@@ -4198,7 +4199,6 @@ st_tab:     dw          #280000000, st_list      ; LIST
 tagmask:    dw          #FF0000000       ; bits 35:28
 cntmask:    dw          #FFFFFF          ; bits 23:0 (packed-token char count)
 strvbit:    dw          #1000000         ; bit 24 (TKN_VAR string-type flag)
-signbit:    dw          #800000000       ; bit 35 (sign)
 arrbit:     dw          #1               ; bit 0 of a packed name marks an array
                                          ;   entry.  Names pack 5 chars x 7 bits
                                          ;   into bits 35:1 (char 0 at 35:29), so
