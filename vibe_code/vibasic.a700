@@ -1,0 +1,4495 @@
+; vibasic.a700 - AI-GENERATED BASIC RUNTIME FOR RDC-700
+; THIS IS AI-GENERATED CODE - I CANNOT ATTEST TO ITS QUALITY
+; ==========================================================================
+; VIBASIC — a single-user line-number BASIC for the RDC-700.
+; Boots from RIM paper tape; runs in supervisor mode.
+;
+; INCREMENT 1 — Foundation (this file):
+;   - Boot, IRQL setup, physical memory detection (see monitor.a700)
+;   - Interrupt-driven buffered console I/O (adapted from echo.a700)
+;   - Integer print (io_putn), string print (io_puts), line input (io_gets)
+;   - A READY loop that echoes typed input (proves the I/O path end-to-end)
+;
+; Later increments add the tokenizer, line storage, expression evaluator,
+; statements, and the remaining data types per VIBASIC_PLAN.txt.
+;
+; Conventions:
+;   Leaf I/O helpers use callr/retr.  Arguments in x0..x3; integer return
+;   in ac.  Routines that call others save their return address explicitly
+;   (callr clobbers lr) or use the hardware stack.
+;
+; Device assumptions (match the emulator's main()):
+;   TTY console at device #030 (octal 060 = 48), IRQ level 10, vector @ 20.
+; ==========================================================================
+
+
+; ==========================================================================
+; Interrupt / exception vector table
+; ==========================================================================
+
+            origin      0
+
+exc_vec:    dw          exc_hdlr, 0     ; level 0: exceptions
+
+            origin      20              ; level 10: TTY interrupt (2 x 10)
+
+tty_vec:    dw          tty_intr, 0
+
+
+; ==========================================================================
+; Boot
+; ==========================================================================
+
+            origin      1024
+
+start:      xorr        ac, ac
+            ldctl       psw1, .fgcw     ; IRQL = 15 (so lmwait is wakeable)
+            ldea        sp, .topstk     ; supervisor stack
+
+            callr       .mem_det        ; detect RAM -> memtop / varbot / progend
+            callr       .con_init       ; TTY config + clear interrupt
+
+            ldea        ac, .strheap     ; init string heap
+            st          ac, .strnext
+            ldea        ac, .strendl
+            st          ac, .strend
+
+            ldea        ac, .arrheap     ; init array heap
+            st          ac, .arrnext
+            ldea        ac, .arrendl
+            st          ac, .arrend
+
+            ldea        x0, .msg_ban    ; "VIBASIC V0.1"
+            callr       .io_puts
+            callr       .io_crlf
+            ld          ac, .memtop     ; free word count
+            callr       .io_putn
+            ldea        x0, .msg_free   ; " WORDS FREE"
+            callr       .io_puts
+            callr       .io_crlf
+
+            ldea        x0, .msg_rdy     ; initial "READY."
+            callr       .io_puts
+            callr       .io_crlf
+
+; ----- READY loop ---------------------------------------------------------
+; Read a line.  If it begins with a digit it is a program edit (store or
+; delete a numbered line); otherwise it is a direct command: tokenize and
+; execute, then print READY.
+ready:      ldea        sp, .topstk      ; reset stack each command
+            ldea        x0, .linebuf
+            ld          x1, .linemax
+            callr       .io_gets
+            st          ac, .linelen
+
+            ldea        x0, .linebuf     ; first char a digit?
+            ld          ac, (x0)
+            callr       .id_digit
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .rdy_dir
+
+            calls       .do_edit         ; program line edit (silent)
+            jmp         .ready
+
+rdy_dir:    ldea        x0, .linebuf     ; tokenize the whole line
+            ld          x1, .linelen
+            calls       .tok_line
+            ldea        x0, .tokbuf
+            calls       .exec_dir
+            ldea        x0, .msg_rdy
+            callr       .io_puts
+            callr       .io_crlf
+            jmp         .ready
+
+
+; ==========================================================================
+; Memory detection — probe upward until X_MEMX (see monitor.a700)
+; ==========================================================================
+; Installs a temporary level-0 handler (md_done), walks memory with an
+; auto-increment indirect pointer, and on the bounds fault records the first
+; nonexistent address.  memtop = RAM size; varbot = memtop; progend = progbase.
+
+mem_det:    ldea        ac, .md_done    ; temporary exception vector
+            st          ac, .exc_vec
+
+            ldea        x6, .progbase    ; probe pointer: base = progbase,
+            or          x6, .incptr      ;   bit35=auto, mode=inc, step=1
+            st          x6, .md_ptr
+
+md_loop:    ld          ac, @.md_ptr     ; touch M[*md_ptr]; post-increment ptr
+            jmp         .md_loop         ; X_MEMX exits via md_done
+
+md_done:    ldctl       psw1, .fgcw      ; exception dropped us to IRQL 0
+            ld          ac, .md_ptr      ; pointer = step bits | first bad addr
+            and         ac, .admask      ; keep 27-bit address field
+            st          ac, .memtop
+            st          ac, .varbot
+            ldea        ac, .progbase
+            st          ac, .progend
+            ldea        ac, .exc_hdlr    ; restore real exception handler
+            st          ac, .exc_vec
+            retr
+
+incptr:     dw          0401000000000    ; auto-increment-by-1 indirect pointer
+admask:     dw          #7FFFFFF         ; 27-bit address mask
+md_ptr:     bss         1
+
+
+; ==========================================================================
+; Exception handler (level 0) — a CPU fault (divide by zero, bad address,
+; etc.) during a statement is turned into a BASIC error: restore IRQL,
+; reset the stack and run state, print a message, and return to READY
+; instead of halting the machine.  The fault code is in the control word
+; bits 27:24 (set by do_except).
+; ==========================================================================
+
+exc_hdlr:   stctl       psw1, .exc_save  ; capture control word (fault code)
+            ldctl       psw1, .fgcw      ; restore IRQL = 15
+            ldea        sp, .topstk      ; reset supervisor stack
+            xorr        ac, ac
+            st          ac, .runflag
+            st          ac, .for_sp
+            st          ac, .gosub_sp
+            ld          ac, .exc_save    ; isolate the fault code field
+            and         ac, .excmask
+            st          ac, .exc_code
+            sub         ac, .exc_divz    ; divide by zero ?
+            movr.rn     ac, ac
+            jmp         .eh_nmem
+            ldea        x0, .msg_divz
+            jmp         .eh_show
+eh_nmem:    ld          ac, .exc_code
+            sub         ac, .exc_memx    ; nonexistent / bad address ?
+            movr.rn     ac, ac
+            jmp         .eh_other
+            ldea        x0, .msg_badad
+            jmp         .eh_show
+eh_other:   ldea        x0, .msg_fault
+eh_show:    callr       .io_puts
+            callr       .io_crlf
+            jmp         .ready
+
+excmask:    dw          #F000000         ; control-word bits 27:24
+exc_divz:   dw          #8000000         ; X_DIVZ (8) << 24
+exc_memx:   dw          #2000000         ; X_MEMX (2) << 24
+exc_save:   bss         1
+exc_code:   bss         1
+
+
+; ==========================================================================
+; Console I/O layer (interrupt-driven; adapted from echo.a700)
+; ==========================================================================
+
+tty_intr:   st          ac, .th_ac
+            st          x2, .th_x2
+            st          x3, .th_x3
+
+            ld          ac, .out_actv
+            movr.rz     ac, ac          ; skip jmp if output active
+            jmp         .ti_inp
+
+            ld          x2, .out_ptr
+            ld          x3, .out_cnt
+            incr.rn     x3, x3          ; skip jmp if count reached 0
+            jmp         .ti_tx
+
+            nioc        #030            ; output complete
+            st          x3, .out_cnt
+            xorr        ac, ac
+            st          .out_actv
+            incr        ac, ac
+            st          .out_done
+            jmp         .ti_ret
+
+ti_tx:      ld          ac, (x2)
+            incr        x2, x2
+            st          x2, .out_ptr
+            st          x3, .out_cnt
+            wios        ac, 0, #030
+            jmp         .ti_ret
+
+ti_inp:     nioc        #030            ; input event
+            xorr        ac, ac
+            incr        ac, ac
+            st          .inp_rdy
+
+ti_ret:     ld          x3, .th_x3
+            ld          x2, .th_x2
+            ld          ac, .th_ac
+            reti
+
+; --- con_init -------------------------------------------------------------
+con_init:   ld          ac, .ttyconf
+            wio         ac, 1, #030
+            nioc        #030
+            retr
+
+; --- io_putl: send word-per-char buffer (x0=addr, x1=count); blocks --------
+; Clobbers ac, x0, x1, x3, x4, x5.  Returns via retr.
+io_putl:    movr.rz     x1, x1          ; skip retr if count != 0
+            retr
+            ld          x4, (x0)         ; first char
+            incr        x0, x0
+            st          x0, .out_ptr
+            ngtr        x1, x3
+            st          x3, .out_cnt
+            xorr        ac, ac
+            st          .out_done
+            incr        ac, ac
+            st          .out_actv
+            movr        x4, ac
+            wios        ac, 0, #030      ; send first char; starts the chain
+iputl_w:    ldmask      .nomask          ; race-free wait for completion
+            ld          .out_done
+            movr.rz     ac, ac           ; skip jmp if done
+            jmp         .iputl_lm
+            retr
+iputl_lm:   lmwait      .irqmask
+            jmp         .iputl_w
+
+; --- io_putc: output single char in ac ------------------------------------
+; Tail-calls io_putl, which returns to io_putc's caller.
+io_putc:    st          ac, .onechar
+            ldea        x0, .onechar
+            ldea        x1, 1
+            jmp         .io_putl
+onechar:    bss         1
+
+; --- io_crlf: output CR LF ------------------------------------------------
+io_crlf:    ldea        x0, .crlfbuf
+            ldea        x1, 2
+            jmp         .io_putl
+
+; --- io_puts: output a dsn string (x0 = pointer to count word) ------------
+; Expands the packed string into outexp, then sends it.  Returns via retr.
+io_puts:    ld          x1, (x0)         ; char count
+            st          x1, .putsn       ; remember it for the send
+            movr.rz     x1, x1           ; skip retr if nonzero
+            retr
+            ngtr        x1, x5           ; x5 = -count
+            ldea        x4, .outexp      ; write pointer
+iputs_l:    incldb      ac, x0, 7        ; next 7-bit char from dsn body
+            st          ac, (x4)
+            incr        x4, x4
+            incr.rn     x5, x5           ; skip jmp when expanded all chars
+            jmp         .iputs_l
+            ld          x1, .putsn       ; send the expanded buffer
+            ldea        x0, .outexp
+            jmp         .io_putl
+putsn:      bss         1
+
+; --- io_putn: output signed decimal integer in ac -------------------------
+; Pushes digits on the hardware stack, then prints them.  Returns via retr.
+io_putn:    st          lr, .putn_lr
+            st          ac, .putn_v
+            movr.rz     ac, ac           ; skip jmp when value != 0
+            jmp         .putn_zero       ; value == 0: print "0"
+putn_nz:    ld          ac, .putn_v
+            and         ac, .signbit     ; bit 35 set => negative
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .putn_abs
+            jmp         .putn_neg
+putn_neg:   ldea        ac, 45           ; "-"
+            callr       .io_putc
+            ld          ac, .putn_v
+            ngtr        ac, ac
+            st          ac, .putn_v
+putn_abs:   xorr        ac, ac
+            st          ac, .putn_n      ; digit count = 0
+putn_dl:    ld          ac, .putn_v
+            div         .tenw            ; mq = v/10, xy = v%10
+            push        xy               ; save remainder digit
+            ld          ac, .putn_n
+            incr        ac, ac
+            st          ac, .putn_n
+            movr        mq, ac           ; ac = quotient
+            st          ac, .putn_v
+            movr.rn     mq, mq           ; skip jmp when quotient == 0 (done)
+            jmp         .putn_dl         ; quotient != 0: extract next digit
+putn_pr:    ld          ac, .putn_n
+            ngtr        ac, ac
+            st          ac, .putn_n      ; putn_n = -count
+putn_pl:    pop         ac               ; digit 0..9
+            addi        ac, ac, 48
+            callr       .io_putc
+            ld          ac, .putn_n
+            incr        ac, ac
+            st          ac, .putn_n
+            movr.rn     ac, ac           ; skip jmp when count reaches 0
+            jmp         .putn_pl
+            ld          lr, .putn_lr
+            retr
+putn_zero:  ldea        ac, 48           ; "0"
+            callr       .io_putc
+            ld          lr, .putn_lr
+            retr
+
+tenw:       dw          10
+zerow:      dw          0
+putn_v:     bss         1
+putn_n:     bss         1
+putn_lr:    bss         1
+
+; --- io_gets: read one line, word-per-char (x0=buf, x1=max) -> ac=count ----
+io_gets:    st          x0, .gets_buf
+            st          x1, .gets_max
+            xorr        ac, ac
+            st          .inp_rdy
+            st          .gilen
+ig_wait:    ldmask      .nomask
+            ld          .inp_rdy
+            movr.rz     ac, ac           ; skip jmp if ready
+            jmp         .ig_lm
+            ldmask      .irqmask
+            jmp         .ig_read
+ig_lm:      lmwait      .irqmask
+            jmp         .ig_wait
+ig_read:    ld          x4, .gets_buf    ; write pointer
+            ld          ac, .gets_max
+            ngtr        ac, x5           ; x5 = -max
+ig_loop:    rio         ac, 2, #030      ; receive fill count
+            movr.rz     ac, ac           ; skip jmp if data available
+            jmp         .ig_done
+            rio         ac, 0, #030      ; pop byte
+            subin.rn    ac, ac, 10       ; skip store-branch if LF
+            jmp         .ig_store
+            st          ac, (x4)         ; store LF and finish
+            ld          ac, .gilen
+            incr        ac, ac
+            st          .gilen
+            jmp         .ig_done
+ig_store:   st          ac, (x4)
+            incr        x4, x4
+            ld          ac, .gilen
+            incr        ac, ac
+            st          .gilen
+            incr.rn     x5, x5           ; skip jmp if buffer full
+            jmp         .ig_loop
+ig_done:    ld          ac, .gilen
+            retr
+
+; io_getc — read a single character (no newline needed).  Returns its code
+; in ac.  If the receive buffer already holds data it is taken immediately;
+; otherwise it waits, interrupt-driven, for input to arrive.
+io_getc:    rio         ac, 2, #030      ; data already buffered ?
+            movr.rz     ac, ac
+            jmp         .gc_pop
+            xorr        ac, ac
+            st          .inp_rdy
+gc_wait:    ldmask      .nomask
+            ld          .inp_rdy
+            movr.rz     ac, ac           ; skip jmp if ready
+            jmp         .gc_lm
+            ldmask      .irqmask
+            jmp         .gc_pop
+gc_lm:      lmwait      .irqmask
+            jmp         .gc_wait
+gc_pop:     ldmask      .irqmask
+            rio         ac, 0, #030      ; pop one byte
+            retr
+
+gets_buf:   bss         1
+gets_max:   bss         1
+gilen:      bss         1
+
+
+; ==========================================================================
+; Character classification (leaf; callr/retr).  Each takes a char in ac and
+; returns ac = 1/0.  All clobber x6, x7 (callers keep state elsewhere).
+; ==========================================================================
+
+id_digit:   st          ac, .cltmp
+            ld          x6, .cltmp
+            ld          x7, .c48
+            cmpge       x6, x7           ; x6 >= '0' ?
+            jmp         .idg_hi
+            jmp         .idg_no
+idg_hi:     ld          x7, .c57
+            cmple       x6, x7           ; x6 <= '9' ?
+            jmp         .idg_yes
+            jmp         .idg_no
+idg_yes:    ldea        ac, 1
+            retr
+idg_no:     xorr        ac, ac
+            retr
+
+id_alpha:   st          ac, .cltmp
+            ld          x6, .cltmp
+            ld          x7, .c65
+            cmpge       x6, x7           ; >= 'A' ?
+            jmp         .ida_uc
+            jmp         .ida_no
+ida_uc:     ld          x7, .c90
+            cmple       x6, x7           ; <= 'Z' ?
+            jmp         .ida_yes
+            ld          x7, .c97
+            cmpge       x6, x7           ; >= 'a' ?
+            jmp         .ida_lc
+            jmp         .ida_no
+ida_lc:     ld          x7, .c122
+            cmple       x6, x7           ; <= 'z' ?
+            jmp         .ida_yes
+            jmp         .ida_no
+ida_yes:    ldea        ac, 1
+            retr
+ida_no:     xorr        ac, ac
+            retr
+
+id_alnum:   st          lr, .alnlr
+            st          ac, .alnch
+            callr       .id_digit
+            movr.rz     ac, ac           ; skip next when digit
+            jmp         .aln_alp
+            ldea        ac, 1
+            ld          lr, .alnlr
+            retr
+aln_alp:    ld          ac, .alnch
+            callr       .id_alpha
+            ld          lr, .alnlr
+            retr
+
+to_upper:   st          ac, .cltmp
+            ld          x6, .cltmp
+            ld          x7, .c97
+            cmpge       x6, x7           ; >= 'a' ?
+            jmp         .tu_hi
+            retr
+tu_hi:      ld          x7, .c122
+            cmple       x6, x7           ; <= 'z' ?
+            jmp         .tu_lo
+            retr
+tu_lo:      ld          ac, .cltmp
+            addi        ac, ac, -32
+            retr
+
+cltmp:      bss         1
+alnch:      bss         1
+alnlr:      bss         1
+c48:        dw          48
+c57:        dw          57
+c65:        dw          65
+c90:        dw          90
+c97:        dw          97
+c122:       dw          122
+
+
+; ==========================================================================
+; emit_packed — append a packed (dsn-style) token to tokbuf.
+;   x0 = tag word (e.g. TKN_STR or TKN_VAR base)
+;   x1 = source pointer (word-per-char)
+;   x2 = char count
+; Emits  (tag | count)  then  ceil(count/5)  packed 7-bit body words.
+; Updates tk_dst.  No console I/O, so x-registers are safe here.
+; ==========================================================================
+
+emit_packed:save        x4, x5, x6, x7
+            st          x1, .ep_src
+            st          x2, .ep_cnt
+            movr        x2, ac
+            bisr        x0, ac           ; ac = count | tag
+            ld          x6, .tk_dst
+            st          ac, (x6)         ; store tag|count word
+            st          x6, .ep_tagad
+            ld          ac, .ep_cnt      ; nbody = ceil(count/5)
+            addi        ac, ac, 4
+            div         .fivew
+            movr        mq, ac
+            st          ac, .ep_nbody
+            ld          x4, .ep_tagad    ; zero the body words (incstb only ORs)
+            incr        x4, x4
+            ld          x5, .ep_nbody
+            ngtr        x5, x5
+            movr.rz     x5, x5           ; skip when nbody == 0
+            jmp         .ep_zd
+ep_zlp:     xorr        ac, ac
+            st          ac, (x4)
+            incr        x4, x4
+            incr.rn     x5, x5
+            jmp         .ep_zlp
+ep_zd:      ld          x7, .ep_tagad    ; BX pointer = tag word addr (shift 0)
+            ld          x1, .ep_src
+            ld          x5, .ep_cnt
+            ngtr        x5, x5
+            movr.rz     x5, x5           ; skip when count == 0
+            jmp         .ep_fin
+ep_lp:      ld          ac, (x1)
+            incr        x1, x1
+            incstb      ac, x7, 7        ; pack into body (advances x7)
+            incr.rn     x5, x5
+            jmp         .ep_lp
+ep_fin:     ld          ac, .ep_tagad    ; tk_dst = tagad + 1 + nbody
+            addi        ac, ac, 1
+            add         ac, .ep_nbody
+            st          ac, .tk_dst
+            rets
+
+ep_src:     bss         1
+ep_cnt:     bss         1
+ep_tagad:   bss         1
+ep_nbody:   bss         1
+fivew:      dw          5
+
+
+; ==========================================================================
+; tok_emit1 — append a single token word in ac to tokbuf (leaf).
+; ==========================================================================
+tok_emit1:  ld          x6, .tk_dst
+            st          ac, (x6)
+            incr        x6, x6
+            st          x6, .tk_dst
+            retr
+
+
+; ==========================================================================
+; name_eq — compare scanned identifier to a keyword dsn string.
+;   x0 = idbuf (word-per-char)   x1 = id length   x2 = dsn string pointer
+; Returns ac = 1 if equal, else 0.
+; ==========================================================================
+name_eq:    save        x4, x5, x6, x7
+            ld          ac, (x2)         ; dsn char count
+            st          x1, .ne_len
+            sub         ac, .ne_len      ; count - len
+            movr.rn     ac, ac           ; skip jmp when lengths equal
+            jmp         .ne_no
+            movr        x0, x4           ; idbuf pointer
+            movr        x2, x5           ; dsn BX pointer (count word addr)
+            ngtr        x1, x6           ; x6 = -len
+            movr.rn     x6, x6           ; skip jmp when len == 0
+            jmp         .ne_cmp
+            ldea        ac, 1            ; len 0 -> equal
+            rets
+ne_cmp:     incldb      ac, x5, 7        ; next dsn char (advances x5)
+            ld          x7, (x4)         ; id char
+            incr        x4, x4
+            st          x7, .ne_ch
+            sub         ac, .ne_ch       ; dsnchar - idchar
+            movr.rn     ac, ac           ; skip jmp when equal
+            jmp         .ne_no
+            incr.rn     x6, x6           ; skip jmp when all compared
+            jmp         .ne_cmp
+            ldea        ac, 1
+            rets
+ne_no:      xorr        ac, ac
+            rets
+
+ne_len:     bss         1
+ne_ch:      bss         1
+
+
+; ==========================================================================
+; tok_number — parse a decimal integer at tk_src; emit TKN_INT + value.
+; ==========================================================================
+tok_number: save        x4, x5
+            ld          x4, .tk_src
+            xorr        x5, x5           ; accumulated value
+tn_lp:      ld          x6, .tk_send
+            cmplt       x4, x6           ; src < send ?
+            jmp         .tn_chk
+            jmp         .tn_emit
+tn_chk:     ld          ac, (x4)
+            callr       .id_digit        ; clobbers x6,x7 (x4,x5 safe)
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .tn_emit
+            ld          ac, (x4)         ; digit char
+            addi        ac, ac, -48
+            st          ac, .tn_dig
+            movr        x5, mq           ; mq = value
+            mul         .tenw            ; ac = value * 10 (low word)
+            add         ac, .tn_dig      ; + digit
+            movr        ac, x5           ; value = ac
+            incr        x4, x4
+            jmp         .tn_lp
+tn_emit:    st          x4, .tk_src
+            ld          ac, .tknint
+            callr       .tok_emit1       ; emit tag
+            movr        x5, ac
+            callr       .tok_emit1       ; emit value
+            rets
+
+tn_dig:     bss         1
+
+
+; ==========================================================================
+; tok_string — parse "..." at tk_src; emit TKN_STR + packed chars.
+; ==========================================================================
+tok_string: save        x4, x5
+            ld          x4, .tk_src
+            incr        x4, x4           ; skip opening quote
+            movr        x4, x5           ; x5 = start of string chars
+            xorr        ac, ac
+            st          .ts_cnt
+ts_lp:      ld          x6, .tk_send
+            cmplt       x4, x6           ; src < send ?
+            jmp         .ts_chk
+            jmp         .ts_end
+ts_chk:     ld          ac, (x4)
+            subin.rn    ac, ac, 34       ; closing quote?
+            jmp         .ts_more
+            jmp         .ts_end
+ts_more:    incr        x4, x4
+            ld          ac, .ts_cnt
+            incr        ac, ac
+            st          .ts_cnt
+            jmp         .ts_lp
+ts_end:     ld          ac, .tknstr      ; tag
+            movr        ac, x0
+            movr        x5, x1           ; source ptr
+            ld          x2, .ts_cnt      ; count
+            calls       .emit_packed
+            ; advance src past closing quote (if present)
+            ld          x4, .tk_src      ; (unchanged; recompute end)
+            ld          x4, .ts_cnt
+            ld          x5, .tk_src
+            incr        x5, x5           ; past opening quote
+            addr        x4, x5           ; x5 = first char + count = closing quote
+            incr        x5, x5           ; past closing quote
+            st          x5, .tk_src
+            rets
+
+ts_cnt:     bss         1
+
+
+; ==========================================================================
+; tok_ident — parse an identifier (keyword or variable) at tk_src.
+; ==========================================================================
+tok_ident:  save        x4, x5
+            ld          x4, .tk_src
+            xorr        x5, x5           ; id length
+ti_scan:    ld          x6, .tk_send
+            cmplt       x4, x6           ; src < send ?
+            jmp         .ti_c
+            jmp         .ti_done
+ti_c:       ld          ac, (x4)
+            callr       .id_alnum        ; clobbers x6,x7 (x4,x5 safe)
+            movr.rz     ac, ac           ; skip jmp when alnum
+            jmp         .ti_done
+            ld          ac, (x4)
+            callr       .to_upper
+            ldea        x6, .idbuf
+            addr        x5, x6           ; idbuf + len
+            st          ac, (x6)
+            incr        x5, x5
+            ld          x6, .idmax
+            cmplt       x5, x6           ; len < 10 ? keep scanning
+            jmp         .ti_adv
+            jmp         .ti_done
+ti_adv:     incr        x4, x4
+            jmp         .ti_scan
+ti_done:    st          x4, .tk_src
+            st          x5, .idlen
+            xorr        ac, ac           ; check for a '$' string suffix
+            st          ac, .id_stype
+            ld          x4, .tk_src
+            ld          ac, (x4)
+            subin.rn    ac, ac, 36       ; '$' ?
+            jmp         .ti_kwst
+            ldea        x6, .idbuf       ; append '$' to the name
+            ld          ac, .idlen
+            addr        ac, x6
+            ldea        ac, 36
+            st          ac, (x6)
+            ld          ac, .idlen
+            incr        ac, ac
+            st          ac, .idlen
+            ld          x4, .tk_src
+            incr        x4, x4
+            st          x4, .tk_src
+            ldea        ac, 1
+            st          ac, .id_stype
+ti_kwst:    ; keyword lookup
+            ldea        x6, .kw_tab
+ti_kw:      ld          ac, (x6)         ; dsn ptr (0 = end)
+            movr.rz     ac, ac           ; skip jmp when entry present
+            jmp         .ti_var
+            ldea        x0, .idbuf
+            ld          x1, .idlen
+            ld          x2, (x6)
+            st          x6, .ti_save
+            calls       .name_eq
+            ld          x6, .ti_save
+            movr.rz     ac, ac           ; skip jmp when match
+            jmp         .ti_knext
+            ld          ac, 1(x6)         ; matched: emit tag word
+            callr       .tok_emit1
+            rets
+ti_knext:   addi        x6, x6, 2
+            jmp         .ti_kw
+ti_var:     ld          ac, .tknvar      ; variable: emit TKN_VAR + packed name
+            ld          x4, .id_stype    ; string variable -> set string bit
+            movr.rz     x4, x4
+            jmp         .ti_vint
+            or          ac, .strvbit
+ti_vint:    movr        ac, x0
+            ldea        x1, .idbuf
+            ld          x2, .idlen
+            calls       .emit_packed
+            rets
+
+ti_save:    bss         1
+idmax:      dw          10
+idbuf:      bss         12
+idlen:      bss         1
+id_stype:   bss         1
+
+
+; ==========================================================================
+; tok_op — parse an operator at tk_src; emit its token.  ac = 0 ok / 1 error.
+; ==========================================================================
+tok_op:     save        x4
+            ld          x4, .tk_src
+            ld          ac, (x4)
+            st          ac, .op_ch
+            subin.rn    ac, ac, 60       ; '<' ?
+            jmp         .op_nlt
+            jmp         .op_lt
+op_nlt:     ld          ac, .op_ch
+            subin.rn    ac, ac, 62       ; '>' ?
+            jmp         .op_single
+            jmp         .op_gt
+op_lt:      ld          x4, .tk_src
+            ld          ac, 1(x4)
+            st          ac, .op_ch2
+            subin.rn    ac, ac, 61       ; '<=' ?
+            jmp         .lt_nE
+            ld          ac, .tknle
+            jmp         .op_emit2
+lt_nE:      ld          ac, .op_ch2
+            subin.rn    ac, ac, 62       ; '<>' ?
+            jmp         .lt_nNE
+            ld          ac, .tknne
+            jmp         .op_emit2
+lt_nNE:     ld          ac, .tknlt
+            jmp         .op_emit1
+op_gt:      ld          x4, .tk_src
+            ld          ac, 1(x4)
+            subin.rn    ac, ac, 61       ; '>=' ?
+            jmp         .gt_nE
+            ld          ac, .tknge
+            jmp         .op_emit2
+gt_nE:      ld          ac, .tkngt
+            jmp         .op_emit1
+op_single:  ldea        x4, .optab
+ops_lp:     ld          ac, (x4)         ; table char (0 = end)
+            movr.rz     ac, ac
+            jmp         .op_bad
+            ld          ac, .op_ch
+            sub         ac, (x4)
+            movr.rn     ac, ac           ; skip jmp when char matches
+            jmp         .ops_next
+            ld          ac, 1(x4)         ; emit tag word
+            callr       .tok_emit1
+            ld          x4, .tk_src
+            incr        x4, x4
+            st          x4, .tk_src
+            xorr        ac, ac
+            rets
+ops_next:   addi        x4, x4, 2
+            jmp         .ops_lp
+op_bad:     ldea        ac, 1            ; unknown char
+            rets
+op_emit2:   callr       .tok_emit1
+            ld          x4, .tk_src
+            addi        x4, x4, 2
+            st          x4, .tk_src
+            xorr        ac, ac
+            rets
+op_emit1:   callr       .tok_emit1
+            ld          x4, .tk_src
+            incr        x4, x4
+            st          x4, .tk_src
+            xorr        ac, ac
+            rets
+
+op_ch:      bss         1
+op_ch2:     bss         1
+
+
+; ==========================================================================
+; tok_sksp — advance tk_src past spaces (leaf).
+; ==========================================================================
+tok_sksp:   ld          x6, .tk_src
+            ld          x7, .tk_send
+ts2_lp:     cmplt       x6, x7           ; src < send ?
+            jmp         .ts2_chk
+            retr
+ts2_chk:    ld          ac, (x6)
+            subin.rn    ac, ac, 32       ; space ?
+            jmp         .ts2_done
+            incr        x6, x6
+            st          x6, .tk_src
+            jmp         .ts2_lp
+ts2_done:   retr
+
+
+; ==========================================================================
+; tok_line — tokenize x1 chars starting at x0 into tokbuf, ending TKN_EOL.
+; Returns ac = 0 on success, 1 on error.
+; ==========================================================================
+tok_line:   save        x4, x5
+            st          x0, .tk_src
+            movr        x0, x4
+            addr        x1, x4           ; start + count
+            st          x4, .tk_send
+            ldea        x4, .tokbuf
+            st          x4, .tk_dst
+tl_lp:      callr       .tok_sksp
+            ld          x4, .tk_src
+            ld          x5, .tk_send
+            cmplt       x4, x5           ; more chars ?
+            jmp         .tl_more
+            jmp         .tl_eol
+tl_more:    ld          ac, (x4)
+            st          ac, .tk_ch
+            subin.rn    ac, ac, 13       ; CR ?
+            jmp         .tl_n13
+            jmp         .tl_eol
+tl_n13:     ld          ac, .tk_ch
+            subin.rn    ac, ac, 10       ; LF ?
+            jmp         .tl_n10
+            jmp         .tl_eol
+tl_n10:     ld          ac, .tk_ch
+            callr       .id_digit
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .tl_nd
+            calls       .tok_number
+            jmp         .tl_lp
+tl_nd:      ld          ac, .tk_ch
+            callr       .id_alpha
+            movr.rz     ac, ac           ; skip jmp when alpha
+            jmp         .tl_na
+            calls       .tok_ident
+            jmp         .tl_lp
+tl_na:      ld          ac, .tk_ch
+            subin.rn    ac, ac, 34       ; quote ?
+            jmp         .tl_nq
+            calls       .tok_string
+            jmp         .tl_lp
+tl_nq:      calls       .tok_op
+            movr.rn     ac, ac           ; skip jmp when ok (ac == 0)
+            jmp         .tl_err
+            jmp         .tl_lp
+tl_eol:     xorr        ac, ac
+            callr       .tok_emit1       ; TKN_EOL
+            xorr        ac, ac
+            rets
+tl_err:     ldea        ac, 1
+            rets
+
+tk_ch:      bss         1
+
+
+; ==========================================================================
+; detok — de-tokenize the token list at x0 to the console.
+; (Stage A: used as the temporary par_exec body to verify the tokenizer.)
+; ==========================================================================
+detok:      save        x4
+            st          x0, .dt_ptr      ; token pointer kept in memory (io clobbers x4)
+dt_lp:      ld          x4, .dt_ptr
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; skip jmp when word != 0
+            jmp         .dt_done
+            st          ac, .dt_word
+            and         ac, .tagmask
+            st          ac, .dt_tag
+            sub         ac, .tknint
+            movr.rn     ac, ac           ; INT ?
+            jmp         .dt_nI
+            ld          x4, .dt_ptr      ; INT: value at ptr+1
+            incr        x4, x4
+            ld          ac, (x4)
+            incr        x4, x4
+            st          x4, .dt_ptr
+            callr       .io_putn
+            jmp         .dt_sp
+dt_nI:      ld          ac, .dt_tag
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; VAR ?
+            jmp         .dt_nV
+            calls       .dt_packed       ; print name body
+            jmp         .dt_sp
+dt_nV:      ld          ac, .dt_tag
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; STR ?
+            jmp         .dt_nS
+            ldea        ac, 34           ; opening quote
+            callr       .io_putc
+            calls       .dt_packed       ; print string body
+            ldea        ac, 34           ; closing quote
+            callr       .io_putc
+            jmp         .dt_sp
+dt_nS:      ld          ac, .dt_word     ; operator or keyword
+            calls       .rev_print
+            ld          x4, .dt_ptr
+            incr        x4, x4
+            st          x4, .dt_ptr
+            jmp         .dt_sp
+dt_sp:      ldea        ac, 32           ; space between tokens
+            callr       .io_putc
+            jmp         .dt_lp
+dt_done:    callr       .io_crlf
+            rets
+
+; dt_packed — print the count packed chars of the token at dt_ptr, then
+; advance dt_ptr past the token.  dt_word must hold the tag|count word.
+dt_packed:  save        x5
+            ld          ac, .dt_word
+            and         ac, .cntmask
+            st          ac, .dt_cnt
+            ld          x6, .dt_ptr      ; BX pointer = tag word address
+            ld          ac, .dt_cnt
+            ngtr        ac, x7           ; -count
+            movr.rz     x7, x7           ; count 0 -> skip body
+            jmp         .dp_adv
+dp_lp:      incldb      ac, x6, 7
+            callr       .io_putc         ; preserves x6, x7
+            incr.rn     x7, x7
+            jmp         .dp_lp
+dp_adv:     ld          x4, .dt_ptr      ; ptr += 1 + ceil(count/5)
+            incr        x4, x4
+            ld          ac, .dt_cnt
+            addi        ac, ac, 4
+            div         .fivew
+            movr        mq, ac
+            addr        ac, x4
+            st          x4, .dt_ptr
+            rets
+
+dt_ptr:     bss         1
+dt_word:    bss         1
+dt_tag:     bss         1
+dt_cnt:     bss         1
+
+
+; ==========================================================================
+; rev_print — given a token word in ac (operator or keyword), print its text.
+; ==========================================================================
+rev_print:  save        x4, x5
+            st          ac, .rv_w
+            ldea        x4, .rev_tab
+rv_lp:      ld          x5, (x4)         ; tag word (0 = end)
+            movr.rz     x5, x5
+            jmp         .rv_none
+            ld          ac, .rv_w
+            sub         ac, (x4)         ; compare token word
+            movr.rn     ac, ac           ; skip jmp when match
+            jmp         .rv_next
+            ld          x0, 1(x4)        ; dsn pointer
+            callr       .io_puts
+            rets
+rv_next:    addi        x4, x4, 2
+            jmp         .rv_lp
+rv_none:    ldea        ac, 63           ; '?'
+            callr       .io_putc
+            rets
+
+rv_w:       bss         1
+
+
+; ==========================================================================
+; tok_size — size in words of the token at x0.  Returns size in ac.
+; ==========================================================================
+tok_size:   save        x4
+            ld          ac, (x0)
+            st          ac, .tz_word
+            and         ac, .tagmask
+            st          ac, .tz_tag
+            sub         ac, .tknint
+            movr.rn     ac, ac           ; INT ?
+            jmp         .tz_nI
+            ldea        ac, 2
+            rets
+tz_nI:      ld          ac, .tz_tag
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; VAR ?
+            jmp         .tz_nV
+            jmp         .tz_pk
+tz_nV:      ld          ac, .tz_tag
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; STR ?
+            jmp         .tz_nS
+            jmp         .tz_pk
+tz_nS:      ldea        ac, 1            ; operator / keyword
+            rets
+tz_pk:      ld          ac, .tz_word     ; 1 + ceil(count/5)
+            and         ac, .cntmask
+            addi        ac, ac, 4
+            div         .fivew
+            movr        mq, ac
+            addi        ac, ac, 1
+            rets
+
+tz_word:    bss         1
+tz_tag:     bss         1
+
+
+; ==========================================================================
+; tok_blklen — count words in the tokbuf statement (including TKN_EOL).
+; Result in toklen.  Walks by token structure so embedded 0 data words
+; (e.g. the literal 0) are not mistaken for the end marker.
+; ==========================================================================
+tok_blklen: save        x4, x5
+            ldea        x4, .tokbuf
+            xorr        x5, x5
+tb_lp:      ld          ac, (x4)
+            movr.rz     ac, ac           ; word != 0 ?
+            jmp         .tb_eol
+            movr        x4, x0
+            st          x4, .tb_save
+            calls       .tok_size        ; ac = token size
+            ld          x4, .tb_save
+            addr        ac, x4           ; advance ptr
+            addr        ac, x5           ; total += size
+            jmp         .tb_lp
+tb_eol:     incr        x5, x5           ; count the EOL word
+            st          x5, .toklen
+            rets
+
+tb_save:    bss         1
+toklen:     bss         1
+
+
+; ==========================================================================
+; ln_find — locate line lnum (x0).  Sets ln_ptr = first line with number
+; >= lnum (the insertion point) and ln_match = 1 if an exact match exists.
+; ==========================================================================
+ln_find:    save        x4, x5, x6
+            st          x0, .lf_num
+            ldea        x4, .progbase
+lf_lp:      ld          x5, .progend
+            cmplt       x4, x5           ; ptr < progend ?
+            jmp         .lf_chk
+            jmp         .lf_end
+lf_chk:     ld          x6, (x4)         ; this line number
+            ld          x5, .lf_num
+            cmpge       x6, x5           ; lineno >= lnum ?
+            jmp         .lf_here
+            ld          ac, 1(x4)        ; advance: header(2) + token count
+            addi        ac, ac, 2
+            addr        ac, x4
+            jmp         .lf_lp
+lf_here:    st          x4, .ln_ptr
+            ld          ac, (x4)
+            sub         ac, .lf_num
+            movr.rn     ac, ac           ; exact match ?
+            jmp         .lf_nomat
+            ldea        ac, 1
+            st          ac, .ln_match
+            rets
+lf_nomat:   xorr        ac, ac
+            st          ac, .ln_match
+            rets
+lf_end:     st          x4, .ln_ptr      ; past last line (append point)
+            xorr        ac, ac
+            st          ac, .ln_match
+            rets
+
+lf_num:     bss         1
+ln_ptr:     bss         1
+ln_match:   bss         1
+
+
+; ==========================================================================
+; shift_up — open a gap of x1 words at address x0; progend += x1.
+; ==========================================================================
+shift_up:   save        x4, x5, x6, x7
+            movr        x0, x6           ; lower bound
+            ld          x4, .progend
+            addi        x4, x4, -1       ; src = progend - 1
+su_lp:      cmpge       x4, x6           ; src >= at ?
+            jmp         .su_do
+            jmp         .su_fin
+su_do:      ld          ac, (x4)
+            movr        x4, x5
+            addr        x1, x5           ; dst = src + cnt
+            st          ac, (x5)
+            addi        x4, x4, -1
+            jmp         .su_lp
+su_fin:     ld          ac, .progend
+            addr        x1, ac
+            st          ac, .progend
+            rets
+
+
+; ==========================================================================
+; shift_dn — remove x1 words at address x0; progend -= x1.
+; ==========================================================================
+shift_dn:   save        x4, x5, x6, x7
+            movr        x0, x4
+            addr        x1, x4           ; src = at + cnt
+            ld          x6, .progend
+sd_lp:      cmplt       x4, x6           ; src < progend ?
+            jmp         .sd_do
+            jmp         .sd_fin
+sd_do:      ld          ac, (x4)
+            movr        x4, x5
+            ngtr        x1, x7
+            addr        x7, x5           ; dst = src - cnt
+            st          ac, (x5)
+            incr        x4, x4
+            jmp         .sd_lp
+sd_fin:     ld          ac, .progend
+            ngtr        x1, x7
+            addr        x7, ac
+            st          ac, .progend
+            rets
+
+
+; ==========================================================================
+; ln_delete — remove line lnum (x0) if present.
+; ==========================================================================
+ln_delete:  save        x4
+            calls       .ln_find
+            ld          ac, .ln_match
+            movr.rz     ac, ac           ; skip jmp when match present
+            jmp         .lde_no
+            ld          x4, .ln_ptr
+            ld          ac, 1(x4)
+            addi        ac, ac, 2        ; size = header + tokens
+            st          ac, .lde_sz
+            ld          x0, .ln_ptr
+            ld          x1, .lde_sz
+            calls       .shift_dn
+lde_no:     rets
+
+lde_sz:     bss         1
+
+
+; ==========================================================================
+; ln_insert — store line lnum (x0); tokbuf/toklen hold its token block.
+; Replaces any existing line with the same number.
+; ==========================================================================
+ln_insert:  save        x4, x5, x6
+            st          x0, .li_num
+            calls       .ln_delete       ; remove old copy if any
+            ld          x0, .li_num
+            calls       .ln_find         ; insertion point -> ln_ptr
+            ld          ac, .toklen
+            addi        ac, ac, 2        ; new line size
+            st          ac, .li_sz
+            ld          x0, .ln_ptr
+            ld          x1, .li_sz
+            calls       .shift_up
+            ld          x4, .ln_ptr
+            ld          ac, .li_num
+            st          ac, (x4)         ; line number
+            ld          ac, .toklen
+            st          ac, 1(x4)        ; token count
+            addi        x4, x4, 2
+            ldea        x5, .tokbuf
+            ld          x6, .toklen
+            ngtr        x6, x6
+            movr.rz     x6, x6           ; no tokens?
+            jmp         .li_done
+li_cp:      ld          ac, (x5)
+            st          ac, (x4)
+            incr        x4, x4
+            incr        x5, x5
+            incr.rn     x6, x6
+            jmp         .li_cp
+li_done:    rets
+
+li_num:     bss         1
+li_sz:      bss         1
+
+
+; ==========================================================================
+; do_edit — store or delete a numbered program line from linebuf.
+; ==========================================================================
+do_edit:    save        x4, x5
+            xorr        ac, ac           ; editing invalidates CONT
+            st          ac, .cont_ok
+            ; parse the leading line number
+            ldea        x4, .linebuf
+            xorr        x5, x5           ; value
+de_num:     ld          ac, (x4)
+            callr       .id_digit        ; clobbers x6,x7 (x4,x5 safe)
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .de_done
+            ld          ac, (x4)
+            addi        ac, ac, -48
+            st          ac, .de_dig
+            movr        x5, mq
+            mul         .tenw
+            add         ac, .de_dig
+            movr        ac, x5
+            incr        x4, x4
+            jmp         .de_num
+de_done:    st          x5, .de_lnum     ; line number
+            st          x4, .de_rest     ; pointer to remaining text
+            ldea        x4, .linebuf     ; remaining count = (linebuf+linelen) - rest
+            ld          x5, .linelen
+            addr        x5, x4           ; x4 = end of line
+            ld          x5, .de_rest
+            ngtr        x5, x5
+            addr        x5, x4           ; x4 = end - rest
+            st          x4, .de_cnt
+            ld          x0, .de_rest     ; tokenize the remainder
+            ld          x1, .de_cnt
+            calls       .tok_line
+            calls       .tok_blklen      ; -> toklen
+            ; empty statement (toklen == 1, just EOL) -> delete
+            ld          ac, .toklen
+            subin.rn    ac, ac, 1        ; toklen == 1 ?
+            jmp         .de_store
+            ld          x0, .de_lnum
+            calls       .ln_delete
+            rets
+de_store:   ld          x0, .de_lnum
+            calls       .ln_insert
+            rets
+
+de_dig:     bss         1
+de_lnum:    bss         1
+de_rest:    bss         1
+de_cnt:     bss         1
+
+
+; ==========================================================================
+; st_list — LIST the stored program.
+; ==========================================================================
+st_list:    save        x4, x5
+            ldea        x4, .progbase
+sl_lp:      ld          x5, .progend
+            cmplt       x4, x5           ; ptr < progend ?
+            jmp         .sl_line
+            jmp         .sl_done
+sl_line:    st          x4, .sl_save
+            ld          ac, (x4)         ; line number
+            callr       .io_putn
+            ldea        ac, 32           ; space
+            callr       .io_putc
+            ld          x4, .sl_save
+            movr        x4, x0
+            addi        x0, x0, 2        ; token block
+            calls       .detok           ; prints tokens + CRLF
+            ld          x4, .sl_save
+            ld          ac, 1(x4)
+            addi        ac, ac, 2
+            addr        ac, x4           ; next line
+            jmp         .sl_lp
+sl_done:    rets
+
+sl_save:    bss         1
+
+
+; ==========================================================================
+; st_new — clear the program and all variables.
+; ==========================================================================
+st_new:     save        x4
+            ldea        ac, .progbase
+            st          ac, .progend
+            ld          ac, .memtop
+            st          ac, .varbot
+            ldea        ac, .strheap     ; reset string heap
+            st          ac, .strnext
+            ldea        ac, .arrheap     ; reset array heap
+            st          ac, .arrnext
+            xorr        ac, ac
+            st          ac, .for_sp
+            st          ac, .gosub_sp
+            st          ac, .data_init
+            st          ac, .data_ptr
+            st          ac, .cont_ok
+            rets
+
+
+; ==========================================================================
+; st_rem — REM: ignore the rest of the line.
+; ==========================================================================
+st_rem:     save        x4
+            calls       .skip_eol
+            rets
+
+
+; ==========================================================================
+; par_exec — execute the tokenized statement at x0 via the dispatch table.
+; ==========================================================================
+par_exec:   save        x4
+            st          x0, .cur_tok
+            ld          x4, .cur_tok
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; skip rets when statement present
+            rets                          ; empty line: nothing to do
+            st          ac, .pe_w
+            ; a VAR as the first token is an implicit LET
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; skip jmp when VAR
+            jmp         .pe_kw
+            ld          ac, .cur_tok     ; ep_tok = cur_tok (at the variable)
+            st          ac, .ep_tok
+            calls       .st_let
+            rets
+pe_kw:      ldea        x4, .st_tab
+pe_lp:      ld          ac, (x4)         ; tag (0 = end)
+            movr.rz     ac, ac
+            jmp         .pe_unk
+            ld          ac, .pe_w
+            sub         ac, (x4)
+            movr.rn     ac, ac           ; match ?
+            jmp         .pe_next
+            ld          ac, .cur_tok     ; ep_tok = cur_tok + 1 (past keyword)
+            addi        ac, ac, 1
+            st          ac, .ep_tok
+            ld          x0, 1(x4)        ; handler address
+            calls       (x0)             ; mask word lives at handler[0]
+            rets
+pe_next:    addi        x4, x4, 2
+            jmp         .pe_lp
+pe_unk:     ldea        x0, .msg_synt    ; unknown / not-yet-implemented
+            callr       .io_puts
+            callr       .io_crlf
+            rets
+
+pe_w:       bss         1
+cur_tok:    bss         1
+ep_tok:     bss         1
+
+
+; ==========================================================================
+; Variable table.  Each entry: name word 0, name word 1, value (3 words),
+; allocated downward from memtop (varbot = current bottom).
+; ==========================================================================
+; var_lookup — x0 = VAR token pointer.  Returns entry address in ac,
+; creating a zero-valued entry if the variable does not exist yet.
+var_lookup: save        x4, x5, x6, x7
+            movr        x0, x4
+            ld          ac, (x4)         ; tag | strbit | count
+            st          ac, .vl_tok
+            and         ac, .cntmask
+            st          ac, .vl_cnt
+            ld          ac, 1(x4)        ; body word 0
+            st          ac, .vl_nm0
+            ld          x5, .vl_cnt
+            ld          x6, .fivew
+            cmpgt       x5, x6           ; count > 5 ?
+            jmp         .vl_two
+            xorr        ac, ac
+            st          ac, .vl_nm1
+            jmp         .vl_scan
+vl_two:     ld          ac, 2(x4)        ; body word 1
+            st          ac, .vl_nm1
+vl_scan:    ld          x4, .varbot
+vl_lp:      ld          x5, .memtop
+            cmplt       x4, x5           ; ptr < memtop ?
+            jmp         .vl_chk
+            jmp         .vl_new
+vl_chk:     ld          ac, (x4)
+            sub         ac, .vl_nm0
+            movr.rn     ac, ac           ; nm0 match ?
+            jmp         .vl_next
+            ld          ac, 1(x4)
+            sub         ac, .vl_nm1
+            movr.rn     ac, ac           ; nm1 match ?
+            jmp         .vl_next
+            movr        x4, ac           ; found
+            rets
+vl_next:    addi        x4, x4, 4
+            jmp         .vl_lp
+vl_new:     ld          ac, .varbot      ; allocate a new 4-word entry
+            addi        ac, ac, -4
+            st          ac, .varbot
+            movr        ac, x4
+            ld          ac, .vl_nm0
+            st          ac, (x4)
+            ld          ac, .vl_nm1
+            st          ac, 1(x4)
+            ld          ac, .vl_tok      ; string variable ?
+            and         ac, .strvbit
+            movr.rz     ac, ac
+            jmp         .vl_nint
+            ldea        ac, 1            ; string: type 1, value = empty string
+            st          ac, 2(x4)
+            ldea        ac, .emptystr
+            st          ac, 3(x4)
+            jmp         .vl_ndone
+vl_nint:    xorr        ac, ac           ; integer: type 0, value 0
+            st          ac, 2(x4)
+            st          ac, 3(x4)
+vl_ndone:   movr        x4, ac
+            rets
+
+vl_tok:     bss         1
+vl_cnt:     bss         1
+vl_nm0:     bss         1
+vl_nm1:     bss         1
+
+
+; ==========================================================================
+; Array support.  An array variable is an ordinary 4-word table entry whose
+; packed name has bit 35 set (arrbit) — distinct from the same-named scalar.
+;   word 0,1  packed name (bit 35 of word 0 = array marker)
+;   word 2    element type (0 = integer, 1 = string)
+;   word 3    pointer to a data block in the array heap
+; Data block: [N, elem0 .. elem(N-1)], N = upper bound + 1.
+; ==========================================================================
+
+; arr_name — x0 = VAR token pointer.  Fills ar_nm0/ar_nm1 with the packed
+; name, bit 35 of ar_nm0 set to mark it as an array.
+arr_name:   save        x4, x5, x6
+            movr        x0, x4
+            ld          ac, (x4)
+            and          ac, .cntmask
+            st          ac, .ar_cnt
+            ld          ac, 1(x4)        ; body word 0
+            or          ac, .arrbit      ; mark as array
+            st          ac, .ar_nm0
+            ld          x5, .ar_cnt
+            ld          x6, .fivew
+            cmpgt       x5, x6           ; count > 5 ?
+            jmp         .an_two
+            xorr        ac, ac
+            st          ac, .ar_nm1
+            rets
+an_two:     ld          ac, 2(x4)        ; body word 1
+            st          ac, .ar_nm1
+            rets
+
+; arr_find — scan the variable table for an array entry matching
+; ar_nm0/ar_nm1.  Returns entry pointer in ac, or 0 if not found.
+arr_find:   save        x4, x5
+            ld          x4, .varbot
+af_lp:      ld          x5, .memtop
+            cmplt       x4, x5           ; ptr < memtop ?
+            jmp         .af_chk
+            xorr        ac, ac           ; reached top: not found
+            rets
+af_chk:     ld          ac, (x4)
+            sub         ac, .ar_nm0
+            movr.rn     ac, ac
+            jmp         .af_next
+            ld          ac, 1(x4)
+            sub         ac, .ar_nm1
+            movr.rn     ac, ac
+            jmp         .af_next
+            movr        x4, ac           ; found
+            rets
+af_next:    addi        x4, x4, 4
+            jmp         .af_lp
+
+; arr_alloc — x0 = dim0 size s0, x1 = dim1 size s1 (1 for a 1-D array),
+; x2 = initial element value.  Allocates a (2 + s0*s1) word block:
+;   block[0]=s0, block[1]=s1, then s0*s1 elements.  Returns block ptr.
+arr_alloc:  save        x4, x5
+            st          x0, .aa_s0
+            st          x1, .aa_s1
+            st          x2, .aa_init
+            ld          ac, .aa_s0       ; N = s0 * s1
+            movr        ac, mq
+            mul         .aa_s1
+            st          ac, .aa_n
+            ld          x4, .arrnext
+            st          x4, .aa_blk
+            ld          ac, .aa_n        ; new top = arrnext + N + 2 (header)
+            addi        ac, ac, 2
+            addr        x4, ac
+            st          ac, .aa_top
+            ld          x4, .aa_top
+            ld          x5, .arrend
+            cmple       x4, x5           ; new top <= arrend ?
+            jmp         .al_ok
+            ldea        x0, .msg_oom
+            jmp         .err_show
+al_ok:      ld          ac, .aa_top
+            st          ac, .arrnext
+            ld          x4, .aa_blk
+            ld          ac, .aa_s0
+            st          ac, (x4)         ; block[0] = s0
+            ld          ac, .aa_s1
+            st          ac, 1(x4)        ; block[1] = s1
+            addi        x4, x4, 2
+            ld          x5, .aa_n
+            ngtr        x5, x5           ; x5 = -N
+            ld          ac, .aa_init
+al_fl:      movr.rz     x5, x5           ; elements remaining ?
+            jmp         .al_done
+            st          ac, (x4)
+            addi        x4, x4, 1
+            incr        x5, x5
+            jmp         .al_fl
+al_done:    ld          ac, .aa_blk
+            rets
+
+; arr_get — x0 = VAR token pointer.  Returns the array entry pointer in ac,
+; auto-creating an 11-element (DIM ..(10)) array if it does not yet exist.
+arr_get:    save        x4
+            st          x0, .ag_tok
+            calls       .arr_name
+            ld          x4, .ag_tok      ; element type from the $ flag
+            ld          ac, (x4)
+            and         ac, .strvbit
+            movr.rz     ac, ac
+            jmp         .ag_int
+            ldea        ac, 1
+            st          ac, .ar_str
+            jmp         .ag_find
+ag_int:     xorr        ac, ac
+            st          ac, .ar_str
+ag_find:    calls       .arr_find        ; ac = entry or 0
+            movr.rz     ac, ac           ; skip jmp when found
+            jmp         .ag_make
+            rets                          ; found
+ag_make:    ld          ac, .ar_str      ; init value: "" for string, 0 for int
+            movr.rz     ac, ac
+            jmp         .ag_ci
+            ldea        ac, .emptystr
+            jmp         .ag_al
+ag_ci:      xorr        ac, ac
+ag_al:      movr        ac, x2           ; x2 = init value
+            ldea        x0, 11           ; default upper bound 10 -> 11 elements
+            ldea        x1, 1            ; 1-D (s1 = 1)
+            calls       .arr_alloc
+            st          ac, .ag_blk
+            ld          ac, .varbot      ; allocate a 4-word entry
+            addi        ac, ac, -4
+            st          ac, .varbot
+            movr        ac, x4
+            ld          ac, .ar_nm0
+            st          ac, (x4)
+            ld          ac, .ar_nm1
+            st          ac, 1(x4)
+            ld          ac, .ar_str
+            st          ac, 2(x4)
+            ld          ac, .ag_blk
+            st          ac, 3(x4)
+            movr        x4, ac
+            rets
+
+; arr_addr — ep_tok is at a VAR token known to be followed by '('.
+; Consumes  VAR ( index ) , evaluates the index, bounds-checks it, and
+; returns the element's memory address in ac.  The element type (0/1) is
+; left in aa_etype (read it immediately, before any further evaluation).
+; The entry pointer is held in a saved register across the index eval, so
+; nested array references such as A(B(I)) work correctly.
+arr_addr:   save        x4, x5, x6, x7
+            st          x0, .aa_tok
+            calls       .arr_get
+            movr        ac, x5           ; x5 = entry (survives ex_expr)
+            ld          x0, .aa_tok      ; advance ep_tok past the VAR token
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4           ; x4 = ep_tok + size  (at '(')
+            ld          ac, (x4)         ; consume '('
+            sub         ac, .v_lpar
+            movr.rn     ac, ac
+            jmp         .aa_serr
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; first index
+            movr        ac, x6           ; x6 = i0
+            ld          x4, .ep_tok      ; optional second index ?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .aa_one
+            addi        x4, x4, 1        ; consume ','
+            st          x4, .ep_tok
+            calls       .ex_expr         ; second index
+            movr        ac, x7           ; x7 = i1
+            jmp         .aa_rpar
+aa_one:     xorr        ac, ac           ; 1-D: i1 = 0
+            movr        ac, x7
+aa_rpar:    ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .aa_serr
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          x4, 3(x5)        ; block pointer
+            st          x4, .aa_blk
+            movr        x6, ac           ; i0 >= 0 ?
+            and         ac, .signbit
+            movr.rn     ac, ac
+            jmp         .aa_sub
+            ld          x4, .aa_blk      ; i0 < s0 ?
+            ld          x0, (x4)
+            cmplt       x6, x0
+            jmp         .aa_i0ok
+            jmp         .aa_sub
+aa_i0ok:    movr        x7, ac           ; i1 >= 0 ?
+            and         ac, .signbit
+            movr.rn     ac, ac
+            jmp         .aa_sub
+            ld          x4, .aa_blk      ; i1 < s1 ?
+            ld          x0, 1(x4)
+            cmplt       x7, x0
+            jmp         .aa_i1ok
+            jmp         .aa_sub
+aa_i1ok:    movr        x6, mq           ; offset = i0*s1 + i1
+            ld          x4, .aa_blk
+            mul         1(x4)            ; AC = i0 * s1
+            addr        x7, ac           ; AC = i0*s1 + i1
+            ld          x4, .aa_blk      ; element addr = block + 2 + offset
+            addi        x4, x4, 2
+            addr        x4, ac
+            st          ac, .aa_eaddr
+            ld          ac, 2(x5)        ; element type
+            st          ac, .aa_etype
+            ld          ac, .aa_eaddr
+            rets
+aa_sub:     ldea        x0, .msg_subr
+            jmp         .err_show
+aa_serr:    ldea        x0, .msg_synt
+            jmp         .err_show
+
+; is_array — x0 = VAR token pointer.  Returns 1 in ac if the token after
+; the variable is '(' (an array reference), else 0.  Does not advance.
+is_array:   save        x4, x5
+            movr        x0, x5
+            calls       .tok_size
+            movr        x5, x4
+            addr        ac, x4           ; x4 = VAR ptr + size = next token
+            ld          ac, (x4)
+            sub         ac, .v_lpar
+            movr.rn     ac, ac           ; '(' ?
+            jmp         .ia_no
+            ldea        ac, 1
+            rets
+ia_no:      xorr        ac, ac
+            rets
+
+ar_cnt:     bss         1
+ar_nm0:     bss         1
+ar_nm1:     bss         1
+ar_str:     bss         1
+aa_tok:     bss         1
+aa_n:       bss         1
+aa_s0:      bss         1
+aa_s1:      bss         1
+aa_init:    bss         1
+aa_blk:     bss         1
+aa_top:     bss         1
+aa_eaddr:   bss         1
+aa_etype:   bss         1
+ag_tok:     bss         1
+ag_blk:     bss         1
+
+
+; ==========================================================================
+; String runtime.  A "string value" is a pointer to a word whose low 28 bits
+; are the character count, followed by ceil(count/5) packed 7-bit body words
+; (the same layout as a TKN_STR token, so literals need no copying).  New
+; strings are bump-allocated from strheap.
+; ==========================================================================
+
+; str_alloc — x0 = character count.  Returns a zeroed dsn string in ac
+; (count word written; body words zeroed so incstb can OR into them).
+str_alloc:  save        x4, x5
+            st          x0, .sa_cnt
+            addi        x0, ac, 4        ; ac = count + 4; nbody = ceil(count/5)
+            div         .fivew
+            movr        mq, ac
+            addi        ac, ac, 1        ; total words = 1 + nbody
+            st          ac, .sa_tot
+            ld          x4, .strnext
+            st          x4, .sa_ptr
+            ld          ac, .sa_tot      ; new top after allocation
+            addr        x4, ac
+            st          ac, .sa_top
+            ld          x4, .strend      ; out of string space ?
+            ld          x5, .sa_top
+            cmple       x5, x4           ; new top <= strend ?
+            jmp         .sa_ok
+            ldea        x0, .msg_oom
+            jmp         .err_show
+sa_ok:      ld          ac, .sa_top
+            st          ac, .strnext
+            ld          x4, .sa_ptr      ; zero the allocation
+            ld          ac, .sa_tot
+            ngtr        ac, x5
+sa_zl:      xorr        ac, ac
+            st          ac, (x4)
+            incr        x4, x4
+            incr.rn     x5, x5
+            jmp         .sa_zl
+            ld          x4, .sa_ptr      ; write count word
+            ld          ac, .sa_cnt
+            st          ac, (x4)
+            ld          ac, .sa_ptr
+            rets
+
+sa_cnt:     bss         1
+sa_tot:     bss         1
+sa_ptr:     bss         1
+sa_top:     bss         1
+
+; str_cat — x0 = string a, x1 = string b.  Returns new string a+b in ac.
+str_cat:    save        x4, x5, x6, x7
+            st          x0, .sc_a
+            st          x1, .sc_b
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .sc_ca
+            ld          ac, (x1)
+            and         ac, .cntmask
+            st          ac, .sc_cb
+            ld          ac, .sc_ca
+            add         ac, .sc_cb
+            movr        ac, x0
+            calls       .str_alloc       ; ac = new string
+            st          ac, .sc_new
+            movr        ac, x7           ; dest BX pointer = new
+            ld          x6, .sc_a        ; copy a
+            ld          ac, .sc_ca
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .sc_b1
+sc_al:      incldb      ac, x6, 7
+            incstb      ac, x7, 7
+            incr.rn     x4, x4
+            jmp         .sc_al
+sc_b1:      ld          x6, .sc_b        ; copy b
+            ld          ac, .sc_cb
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .sc_dn
+sc_bl:      incldb      ac, x6, 7
+            incstb      ac, x7, 7
+            incr.rn     x4, x4
+            jmp         .sc_bl
+sc_dn:      ld          ac, .sc_new
+            rets
+
+sc_a:       bss         1
+sc_b:       bss         1
+sc_ca:      bss         1
+sc_cb:      bss         1
+sc_new:     bss         1
+
+; str_cmp — x0 = a, x1 = b.  Returns ac = -1/0/1 (lexicographic).
+str_cmp:    save        x4, x5, x6, x7
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .scm_ca
+            ld          ac, (x1)
+            and         ac, .cntmask
+            st          ac, .scm_cb
+            movr        x0, x6           ; a BX pointer
+            movr        x1, x7           ; b BX pointer
+            ld          x4, .scm_ca      ; min = min(ca, cb)
+            ld          x5, .scm_cb
+            cmple       x4, x5           ; ca <= cb ?
+            jmp         .scm_mina
+            ld          ac, .scm_cb
+            st          ac, .scm_min
+            jmp         .scm_cl
+scm_mina:   ld          ac, .scm_ca
+            st          ac, .scm_min
+scm_cl:     ld          ac, .scm_min
+            movr.rz     ac, ac           ; skip jmp when min != 0
+            jmp         .scm_len
+            ngtr        ac, x5           ; x5 = -min
+scm_loop:   incldb      ac, x6, 7        ; a char
+            st          ac, .scm_ach
+            incldb      ac, x7, 7        ; b char
+            st          ac, .scm_bch
+            ld          ac, .scm_ach
+            sub         ac, .scm_bch
+            movr.rz     ac, ac           ; skip jmp when chars differ
+            jmp         .scm_eqc
+            and         ac, .signbit     ; differ: sign of (a - b)
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .scm_pos
+            ld          ac, .neg1
+            rets
+scm_pos:    ldea        ac, 1
+            rets
+scm_eqc:    incr.rn     x5, x5           ; skip jmp when all min chars done
+            jmp         .scm_loop
+scm_len:    ld          ac, .scm_ca      ; equal prefix: shorter string is less
+            sub         ac, .scm_cb
+            movr.rz     ac, ac           ; skip jmp when lengths differ
+            jmp         .scm_eq
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .scm_lpos
+            ld          ac, .neg1
+            rets
+scm_lpos:   ldea        ac, 1
+            rets
+scm_eq:     xorr        ac, ac
+            rets
+
+scm_ca:     bss         1
+scm_cb:     bss         1
+scm_min:    bss         1
+scm_ach:    bss         1
+scm_bch:    bss         1
+
+; str_print — x0 = string pointer.  Prints the characters.
+str_print:  save        x4
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .spr_cnt
+            movr        x0, x6           ; BX pointer
+            ld          ac, .spr_cnt
+            ngtr        ac, x7
+            movr.rz     x7, x7           ; skip when empty
+            jmp         .spr_done
+spr_lp:     incldb      ac, x6, 7
+            callr       .io_putc         ; preserves x6, x7
+            incr.rn     x7, x7
+            jmp         .spr_lp
+spr_done:   rets
+
+spr_cnt:    bss         1
+
+; str_from_chars — x0 = word-per-char buffer, x1 = count.  Returns heap string.
+str_from_chars: save    x4, x5, x6, x7
+            st          x0, .sfc_src
+            st          x1, .sfc_cnt
+            ld          x0, .sfc_cnt
+            calls       .str_alloc
+            st          ac, .sfc_new
+            ld          x7, .sfc_new     ; dest BX pointer
+            ld          x6, .sfc_src
+            ld          ac, .sfc_cnt
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .sfc_dn
+sfc_lp:     ld          ac, (x6)
+            incr        x6, x6
+            incstb      ac, x7, 7
+            incr.rn     x4, x4
+            jmp         .sfc_lp
+sfc_dn:     ld          ac, .sfc_new
+            rets
+
+sfc_src:    bss         1
+sfc_cnt:    bss         1
+sfc_new:    bss         1
+
+; str_sub — x0 = string, x1 = 0-based start, x2 = count.  Returns substring.
+str_sub:    save        x4, x5, x6, x7
+            st          x0, .ss_s
+            st          x1, .ss_st
+            st          x2, .ss_n
+            ld          x0, .ss_n
+            calls       .str_alloc
+            st          ac, .ss_new
+            ld          x6, .ss_s        ; src BX; skip start chars
+            ld          ac, .ss_st
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .ss_copy
+ss_skip:    incldb      ac, x6, 7
+            incr.rn     x4, x4
+            jmp         .ss_skip
+ss_copy:    ld          x7, .ss_new      ; dest BX
+            ld          ac, .ss_n
+            ngtr        ac, x4
+            movr.rz     x4, x4
+            jmp         .ss_dn
+ss_cl:      incldb      ac, x6, 7
+            incstb      ac, x7, 7
+            incr.rn     x4, x4
+            jmp         .ss_cl
+ss_dn:      ld          ac, .ss_new
+            rets
+
+ss_s:       bss         1
+ss_st:      bss         1
+ss_n:       bss         1
+ss_new:     bss         1
+
+; str_chr — x0 = char code.  Returns a 1-character string.
+str_chr:    save        x4
+            st          x0, .numbuf
+            ldea        x0, .numbuf
+            ldea        x1, 1
+            calls       .str_from_chars
+            rets
+
+; str_instr — x0 = haystack string, x1 = needle string.  Returns the
+; 1-based position of the first occurrence of needle in haystack, or 0.
+; An empty needle matches at position 1.
+str_instr:  save        x4, x5, x6, x7
+            st          x0, .si_hay
+            st          x1, .si_ndl
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .si_hlen
+            ld          ac, (x1)
+            and         ac, .cntmask
+            st          ac, .si_nlen
+            ld          ac, .si_hlen     ; last start = hlen - nlen
+            sub         ac, .si_nlen
+            st          ac, .si_last
+            and         ac, .signbit
+            movr.rn     ac, ac           ; skip jmp when hlen >= nlen
+            jmp         .si_zero
+            xorr        ac, ac
+            st          ac, .si_start
+si_outer:   ld          x6, .si_hay      ; hay BX pointer; skip si_start chars
+            ld          x4, .si_start
+            ngtr        x4, x4
+            movr.rz     x4, x4           ; start == 0 ?
+            jmp         .si_cmp0
+si_skip:    incldb      ac, x6, 7
+            incr.rn     x4, x4
+            jmp         .si_skip
+si_cmp0:    ld          x7, .si_ndl      ; needle BX pointer
+            ld          x5, .si_nlen
+            ngtr        x5, x5
+            movr.rz     x5, x5           ; empty needle ?
+            jmp         .si_match
+si_cmplp:   incldb      ac, x6, 7        ; hay char
+            st          ac, .si_hc
+            incldb      ac, x7, 7        ; needle char
+            sub         ac, .si_hc
+            movr.rn     ac, ac           ; skip jmp when chars equal
+            jmp         .si_next
+            incr.rn     x5, x5           ; matched all needle chars ?
+            jmp         .si_cmplp
+si_match:   ld          ac, .si_start    ; found -> start + 1
+            addi        ac, ac, 1
+            rets
+si_next:    ld          ac, .si_start    ; try the next start position
+            addi        ac, ac, 1
+            st          ac, .si_start
+            ld          ac, .si_last
+            sub         ac, .si_start
+            and         ac, .signbit
+            movr.rn     ac, ac           ; skip jmp when start <= last
+            jmp         .si_zero
+            jmp         .si_outer
+si_zero:    xorr        ac, ac
+            rets
+
+si_hay:     bss         1
+si_ndl:     bss         1
+si_hlen:    bss         1
+si_nlen:    bss         1
+si_last:    bss         1
+si_start:   bss         1
+si_hc:      bss         1
+
+; str_fromint — x0 = integer.  Returns its decimal string (STR$).
+str_fromint: save       x4, x5, x6, x7
+            st          x0, .fi_v
+            ld          ac, .fi_v
+            movr.rn     ac, ac           ; zero ?  skip jmp when nonzero
+            jmp         .fi_nz
+            ldea        x6, .numbuf
+            ldea        ac, 48
+            st          ac, (x6)
+            ldea        x0, .numbuf
+            ldea        x1, 1
+            calls       .str_from_chars
+            rets
+fi_nz:      ld          ac, .fi_v        ; sign
+            and         ac, .signbit
+            movr.rz     ac, ac
+            jmp         .fi_abs
+            ld          ac, .fi_v
+            ngtr        ac, ac
+            st          ac, .fi_v
+            ldea        ac, 1
+            st          ac, .fi_neg
+            jmp         .fi_dig
+fi_abs:     xorr        ac, ac
+            st          ac, .fi_neg
+fi_dig:     xorr        x4, x4           ; digit count
+fi_dl:      ld          ac, .fi_v
+            div         .tenw
+            push        xy
+            incr        x4, x4
+            movr        mq, ac
+            st          ac, .fi_v
+            movr.rn     mq, mq           ; skip jmp when quotient 0
+            jmp         .fi_dl
+            ldea        x6, .numbuf      ; assemble: optional '-', then digits
+            ld          ac, .fi_neg
+            movr.rz     ac, ac
+            jmp         .fi_wr
+            ldea        ac, 45
+            st          ac, (x6)
+            incr        x6, x6
+fi_wr:      ngtr        x4, x5           ; x5 = -digitcount
+fi_pl:      pop         ac
+            addi        ac, ac, 48
+            st          ac, (x6)
+            incr        x6, x6
+            incr.rn     x5, x5
+            jmp         .fi_pl
+            movr        x6, ac           ; total = numbuf end - numbuf
+            ldea        x4, .numbuf
+            ngtr        x4, x4
+            addr        x4, ac
+            st          ac, .fi_total
+            ldea        x0, .numbuf
+            ld          x1, .fi_total
+            calls       .str_from_chars
+            rets
+
+fi_v:       bss         1
+fi_neg:     bss         1
+fi_total:   bss         1
+numbuf:     bss         16
+
+; str_val — x0 = string.  Returns the leading integer (VAL).
+str_val:    save        x4, x5, x6, x7
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .sv_cnt
+            movr        x0, x6           ; BX pointer
+            ld          ac, .sv_cnt
+            ngtr        ac, x4           ; -count
+            xorr        x5, x5           ; value
+            xorr        ac, ac
+            st          ac, .sv_neg
+            st          ac, .sv_started
+sv_lp:      movr.rz     x4, x4           ; characters remain ?
+            jmp         .sv_dn
+            incldb      ac, x6, 7
+            st          ac, .sv_ch
+            incr        x4, x4
+            st          x6, .sv_ptr      ; id_digit clobbers x6/x7 — preserve ptr
+            ld          ac, .sv_ch       ; digit ?
+            callr       .id_digit
+            ld          x6, .sv_ptr
+            movr.rz     ac, ac
+            jmp         .sv_nd
+            ld          ac, .sv_ch       ; accumulate
+            addi        ac, ac, -48
+            st          ac, .sv_d
+            movr        x5, mq
+            mul         .tenw
+            add         ac, .sv_d
+            movr        ac, x5
+            ldea        ac, 1
+            st          ac, .sv_started
+            jmp         .sv_lp
+sv_nd:      ld          ac, .sv_ch       ; leading '-' before any digit ?
+            subin.rn    ac, ac, 45
+            jmp         .sv_chksp
+            ld          ac, .sv_started
+            movr.rn     ac, ac           ; skip jmp when not started
+            jmp         .sv_lp           ; '-' after digits: stop
+            ldea        ac, 1
+            st          ac, .sv_neg
+            jmp         .sv_lp
+sv_chksp:   ld          ac, .sv_started  ; skip leading spaces; else stop
+            movr.rz     ac, ac
+            jmp         .sv_lp
+            ld          ac, .sv_ch
+            subin.rn    ac, ac, 32
+            jmp         .sv_dn
+            jmp         .sv_lp
+sv_dn:      ld          ac, .sv_neg
+            movr.rz     ac, ac
+            jmp         .sv_ret
+            ngtr        x5, x5
+sv_ret:     movr        x5, ac
+            rets
+
+sv_cnt:     bss         1
+sv_neg:     bss         1
+sv_started: bss         1
+sv_ch:      bss         1
+sv_d:       bss         1
+sv_ptr:     bss         1
+
+
+; ==========================================================================
+; Integer expression evaluator (recursive descent).  All routines read and
+; advance ep_tok and return the integer result in ac.
+; ==========================================================================
+
+; ex_prim — primary: INT literal, variable, function call, or ( expr ).
+ex_prim:    save        x4, x5, x6, x7
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            st          ac, .ex_w
+            and         ac, .tagmask
+            st          ac, .ex_t
+            sub         ac, .tknint
+            movr.rn     ac, ac           ; INT ?
+            jmp         .exp_nI
+            ld          ac, 1(x4)        ; value
+            st          ac, .ex_val
+            addi        x4, x4, 2
+            st          x4, .ep_tok
+            xorr        ac, ac           ; type = integer
+            st          ac, .vtype
+            ld          ac, .ex_val
+            rets
+exp_nI:     ld          ac, .ex_t
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; VAR ?
+            jmp         .exp_nVc
+            ld          x0, .ep_tok      ; array element reference?
+            calls       .is_array
+            movr.rz     ac, ac
+            jmp         .exp_scal
+            ld          x0, .ep_tok      ; VAR ( index ) -> element value
+            calls       .arr_addr
+            movr        ac, x4
+            ld          ac, (x4)
+            st          ac, .ex_val
+            ld          ac, .aa_etype
+            st          ac, .vtype
+            ld          ac, .ex_val
+            rets
+exp_scal:   ld          x0, .ep_tok
+            calls       .var_lookup      ; ac = entry
+            st          ac, .exp_ent
+            ld          x0, .ep_tok      ; advance past the VAR token
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          x4, .exp_ent     ; type (word 2) and value (word 3)
+            ld          ac, 2(x4)
+            st          ac, .vtype
+            ld          ac, 3(x4)
+            rets
+exp_nVc:    ld          ac, .ex_t
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; STR literal ?
+            jmp         .exp_nV
+            ; A literal in the program text is persistent (the text never
+            ; moves during RUN), so the value can point at the token directly.
+            ; Only a literal in the transient tokbuf (direct mode) is copied
+            ; into the heap.  This avoids leaking heap on every evaluation,
+            ; e.g. PRINT of a constant string inside a loop.
+            ld          x4, .ep_tok
+            ldea        x5, .progbase
+            cmplt       x4, x5           ; ep_tok < progbase -> transient
+            jmp         .exp_lcopy
+            ld          x5, .progend
+            cmplt       x4, x5           ; ep_tok < progend -> program text
+            jmp         .exp_lref
+            jmp         .exp_lcopy
+exp_lref:   ld          ac, .ep_tok      ; point at the literal in place
+            st          ac, .ex_val
+            jmp         .exp_ladv
+exp_lcopy:  ld          x0, .ep_tok      ; copy the transient literal to the heap
+            ldea        x1, .emptystr
+            calls       .str_cat
+            st          ac, .ex_val
+exp_ladv:   ld          x0, .ep_tok      ; advance past the token
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ldea        ac, 1            ; type = string
+            st          ac, .vtype
+            ld          ac, .ex_val
+            rets
+exp_nV:     ld          ac, .ex_w
+            sub         ac, .v_lpar
+            movr.rn     ac, ac           ; '(' ?
+            jmp         .exp_nL
+            ld          x4, .ep_tok      ; consume '('
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; sets vtype
+            st          ac, .ex_val
+            ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .exp_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          ac, .ex_val
+            rets
+exp_nL:     ld          ac, .ex_w        ; function call
+            callr       .is_func         ; ac = code (1..13) or 0
+            movr.rz     ac, ac
+            jmp         .exp_err
+            movr        ac, x5           ; x5 = code (survives arg evaluation)
+            ld          x4, .ep_tok      ; consume function name
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; expect '('
+            sub         ac, .v_lpar
+            movr.rn     ac, ac
+            jmp         .exp_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; argument 1
+            movr        ac, x6           ; x6 = arg1 value
+            ; codes 1..5 are the legacy single integer-argument functions
+            movr        x5, ac
+            addi        ac, ac, -6
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when code < 6
+            jmp         .fn_new
+            st          x6, .ex_arg      ; legacy path -> apply_fn
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .exp_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            st          x5, .ex_fn
+            calls       .apply_fn
+            rets
+fn_new:     movr        x5, ac           ; codes 11..13 take a second argument
+            addi        ac, ac, -11
+            and         ac, .signbit
+            movr.rn     ac, ac           ; skip jmp when code >= 11
+            jmp         .fn_close         ; codes 6..10: single argument
+            ld          x4, .ep_tok      ; expect ','
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .exp_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; argument 2
+            movr        ac, x7           ; x7 = arg2 value
+            ldea        ac, 30000        ; arg3 default (rest of string)
+            st          ac, .fn_a3
+            ld          x4, .ep_tok      ; optional ',' arg3 (MID$)
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .fn_close
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            st          ac, .fn_a3
+fn_close:   ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .exp_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ; dispatch by code (x5); arg1 in x6, arg2 in x7, arg3 in fn_a3
+            movr        x5, ac
+            subin.rn    ac, ac, 6
+            jmp         .fc_7
+            jmp         .fc_len
+fc_7:       movr        x5, ac
+            subin.rn    ac, ac, 7
+            jmp         .fc_8
+            jmp         .fc_asc
+fc_8:       movr        x5, ac
+            subin.rn    ac, ac, 8
+            jmp         .fc_9
+            jmp         .fc_val
+fc_9:       movr        x5, ac
+            subin.rn    ac, ac, 9
+            jmp         .fc_10
+            jmp         .fc_chr
+fc_10:      movr        x5, ac
+            subin.rn    ac, ac, 10
+            jmp         .fc_11
+            jmp         .fc_str
+fc_11:      movr        x5, ac
+            subin.rn    ac, ac, 11
+            jmp         .fc_12
+            jmp         .fc_left
+fc_12:      movr        x5, ac
+            subin.rn    ac, ac, 12
+            jmp         .fc_13
+            jmp         .fc_right
+fc_13:      movr        x5, ac
+            subin.rn    ac, ac, 13
+            jmp         .fc_instr
+            jmp         .fc_mid
+fc_instr:   movr        x6, x0           ; INSTR(s$, sub$)
+            movr        x7, x1
+            calls       .str_instr
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
+fc_len:     ld          ac, (x6)         ; LEN(s$)
+            and         ac, .cntmask
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
+fc_asc:     movr        x6, x4           ; ASC(s$) -> first char
+            incldb      ac, x4, 7
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
+fc_val:     movr        x6, x0           ; VAL(s$)
+            calls       .str_val
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
+fc_chr:     movr        x6, x0           ; CHR$(n)
+            calls       .str_chr
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_str:     movr        x6, x0           ; STR$(n)
+            calls       .str_fromint
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_left:    ld          ac, (x6)         ; LEFT$(s$, n)
+            and         ac, .cntmask
+            st          ac, .fn_len
+            movr        x7, ac
+            calls       .fn_minlen       ; ac = min(n, len)
+            movr        x6, x0
+            xorr        x1, x1
+            movr        ac, x2
+            calls       .str_sub
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_right:   ld          ac, (x6)         ; RIGHT$(s$, n)
+            and         ac, .cntmask
+            st          ac, .fn_len
+            movr        x7, ac
+            calls       .fn_minlen       ; ac = count = min(n, len)
+            st          ac, .fn_cnt
+            ld          ac, .fn_len      ; start = len - count
+            sub         ac, .fn_cnt
+            movr        ac, x1
+            movr        x6, x0
+            ld          x2, .fn_cnt
+            calls       .str_sub
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_mid:     ld          ac, (x6)         ; MID$(s$, start, len)
+            and         ac, .cntmask
+            st          ac, .fn_len
+            movr        x7, ac           ; start0 = start - 1
+            addi        ac, ac, -1
+            st          ac, .fn_st0
+            ld          ac, .fn_len      ; avail = len - start0
+            sub         ac, .fn_st0
+            st          ac, .fn_avail
+            and         ac, .signbit     ; start past end -> empty
+            movr.rz     ac, ac
+            jmp         .fc_mid2
+            ldea        ac, .emptystr
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_mid2:    ld          ac, .fn_avail    ; count = min(arg3, avail)
+            st          ac, .fn_len
+            ld          ac, .fn_a3
+            movr        ac, x7
+            calls       .fn_minlen
+            movr        x6, x0
+            ld          x1, .fn_st0
+            movr        ac, x2
+            calls       .str_sub
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+exp_err:    ldea        x0, .msg_synt
+            jmp         .err_show
+
+; fn_minlen — ac = min(x7, fn_len), clamped to >= 0.
+fn_minlen:  save        x4
+            movr        x7, ac
+            and         ac, .signbit     ; negative count -> 0
+            movr.rz     ac, ac
+            jmp         .fm_pos
+            xorr        ac, ac
+            rets
+fm_pos:     ld          x4, .fn_len
+            cmple       x7, x4           ; x7 <= len ?
+            jmp         .fm_keep
+            ld          ac, .fn_len
+            rets
+fm_keep:    movr        x7, ac
+            rets
+
+ex_w:       bss         1
+ex_t:       bss         1
+ex_val:     bss         1
+ex_fn:      bss         1
+ex_arg:     bss         1
+ex_argt:    bss         1
+exp_ent:    bss         1
+fn_a3:      bss         1
+fn_len:     bss         1
+fn_cnt:     bss         1
+fn_st0:     bss         1
+fn_avail:   bss         1
+vtype:      bss         1
+
+; is_func — token word in ac -> 1=PEEK 2=ABS 3=SGN 4=RND 5=INT, else 0.
+is_func:    st          ac, .if_w
+            sub         ac, .v_peek
+            movr.rn     ac, ac
+            jmp         .iff_2
+            ldea        ac, 1
+            retr
+iff_2:      ld          ac, .if_w
+            sub         ac, .v_abs
+            movr.rn     ac, ac
+            jmp         .iff_3
+            ldea        ac, 2
+            retr
+iff_3:      ld          ac, .if_w
+            sub         ac, .v_sgn
+            movr.rn     ac, ac
+            jmp         .iff_4
+            ldea        ac, 3
+            retr
+iff_4:      ld          ac, .if_w
+            sub         ac, .v_rnd
+            movr.rn     ac, ac
+            jmp         .iff_5
+            ldea        ac, 4
+            retr
+iff_5:      ld          ac, .if_w
+            sub         ac, .v_int
+            movr.rn     ac, ac
+            jmp         .iff_6
+            ldea        ac, 5
+            retr
+iff_6:      ld          ac, .if_w
+            sub         ac, .v_len
+            movr.rn     ac, ac
+            jmp         .iff_7
+            ldea        ac, 6
+            retr
+iff_7:      ld          ac, .if_w
+            sub         ac, .v_asc
+            movr.rn     ac, ac
+            jmp         .iff_8
+            ldea        ac, 7
+            retr
+iff_8:      ld          ac, .if_w
+            sub         ac, .v_val
+            movr.rn     ac, ac
+            jmp         .iff_9
+            ldea        ac, 8
+            retr
+iff_9:      ld          ac, .if_w
+            sub         ac, .v_chr
+            movr.rn     ac, ac
+            jmp         .iff_10
+            ldea        ac, 9
+            retr
+iff_10:     ld          ac, .if_w
+            sub         ac, .v_str
+            movr.rn     ac, ac
+            jmp         .iff_11
+            ldea        ac, 10
+            retr
+iff_11:     ld          ac, .if_w
+            sub         ac, .v_left
+            movr.rn     ac, ac
+            jmp         .iff_12
+            ldea        ac, 11
+            retr
+iff_12:     ld          ac, .if_w
+            sub         ac, .v_right
+            movr.rn     ac, ac
+            jmp         .iff_13
+            ldea        ac, 12
+            retr
+iff_13:     ld          ac, .if_w
+            sub         ac, .v_mid
+            movr.rn     ac, ac
+            jmp         .iff_14
+            ldea        ac, 13
+            retr
+iff_14:     ld          ac, .if_w
+            sub         ac, .v_instr
+            movr.rn     ac, ac
+            jmp         .iff_0
+            ldea        ac, 14
+            retr
+iff_0:      xorr        ac, ac
+            retr
+
+if_w:       bss         1
+
+; apply_fn — apply function ex_fn to ex_arg; result in ac.
+apply_fn:   save        x4
+            xorr        ac, ac           ; functions here all return integers
+            st          ac, .vtype
+            ld          ac, .ex_fn
+            subin.rn    ac, ac, 1
+            jmp         .af_2
+            ld          x4, .ex_arg      ; PEEK
+            ld          ac, (x4)
+            rets
+af_2:       ld          ac, .ex_fn
+            subin.rn    ac, ac, 2
+            jmp         .af_3
+            ld          ac, .ex_arg      ; ABS
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .af_apos
+            ld          ac, .ex_arg
+            ngtr        ac, ac
+            rets
+af_apos:    ld          ac, .ex_arg
+            rets
+af_3:       ld          ac, .ex_fn
+            subin.rn    ac, ac, 3
+            jmp         .af_4
+            ld          ac, .ex_arg      ; SGN
+            movr.rz     ac, ac           ; skip jmp when nonzero
+            jmp         .af_szero
+            ld          ac, .ex_arg
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .af_spos
+            ld          ac, .neg1
+            rets
+af_spos:    ldea        ac, 1
+            rets
+af_szero:   xorr        ac, ac
+            rets
+af_4:       ld          ac, .ex_fn
+            subin.rn    ac, ac, 4
+            jmp         .af_int
+            ld          ac, .rnd_seed    ; RND: LCG, result in [0, arg)
+            movr        ac, mq
+            mul         .rnd_mul
+            add         ac, .rnd_inc
+            st          ac, .rnd_seed
+            ld          x4, .ex_arg
+            movr.rz     x4, x4           ; skip jmp when arg != 0
+            jmp         .af_rzero
+            jmp         .af_rmod
+af_rzero:   xorr        ac, ac
+            rets
+af_rmod:    ld          ac, .rnd_seed
+            and         ac, .lo35        ; force non-negative
+            div         .ex_arg          ; xy = seed mod arg
+            movr        xy, ac
+            rets
+af_int:     ld          ac, .ex_arg      ; INT (identity for integers)
+            rets
+
+; ex_fact — unary minus, then primary.
+ex_fact:    save        x4
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_minus
+            movr.rn     ac, ac           ; unary '-' ?
+            jmp         .ef_prim
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_fact
+            ngtr        ac, ac
+            rets
+ef_prim:    calls       .ex_prim
+            rets
+
+; ex_term — factor ( ('*'|'/') factor )*.  Accumulator in saved x5.
+ex_term:    save        x4, x5
+            calls       .ex_fact
+            movr        ac, x5           ; x5 = accumulator
+et_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_mul
+            movr.rn     ac, ac           ; '*' ?
+            jmp         .et_cdiv
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_fact         ; operand in ac; x5 preserved
+            st          ac, .et_t
+            movr        x5, mq
+            mul         .et_t            ; ac = acc * operand
+            movr        ac, x5
+            jmp         .et_lp
+et_cdiv:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_div
+            movr.rn     ac, ac           ; '/' ?
+            jmp         .et_done
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_fact
+            st          ac, .et_t
+            movr        x5, ac
+            div         .et_t            ; mq = acc / operand
+            movr        mq, x5
+            jmp         .et_lp
+et_done:    movr        x5, ac
+            rets
+
+et_t:       bss         1
+
+; ex_add — term ( ('+'|'-') term )*.  Accumulator value in saved x5, its
+; type in saved x6.  '+' adds integers or concatenates strings; '-' is
+; integer-only.
+ex_add:     save        x4, x5, x6
+            calls       .ex_term
+            movr        ac, x5           ; x5 = accumulator value
+            ld          ac, .vtype
+            movr        ac, x6           ; x6 = accumulator type
+ea_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_plus
+            movr.rn     ac, ac           ; '+' ?
+            jmp         .ea_cmin
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_term         ; operand value in ac, type in vtype
+            st          ac, .ea_opv
+            ld          ac, .vtype
+            st          ac, .ea_opt
+            movr        x6, ac           ; accumulator type
+            movr.rz     ac, ac
+            jmp         .ea_iadd         ; accumulator integer -> integer add
+            jmp         .ea_strp         ; accumulator string  -> concatenate
+ea_strp:    ld          ac, .ea_opt
+            movr.rz     ac, ac
+            jmp         .ea_tmm          ; operand integer -> mismatch
+            movr        x5, x0           ; concat(acc, operand)
+            ld          x1, .ea_opv
+            calls       .str_cat
+            movr        ac, x5
+            jmp         .ea_lp
+ea_iadd:    ld          ac, .ea_opt
+            movr.rz     ac, ac
+            jmp         .ea_addok        ; operand integer -> add
+            jmp         .ea_tmm          ; operand string  -> mismatch
+ea_addok:   ld          ac, .ea_opv
+            addr        ac, x5
+            jmp         .ea_lp
+ea_cmin:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_minus
+            movr.rn     ac, ac           ; '-' ?
+            jmp         .ea_done
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            movr        x6, ac           ; '-' requires integer accumulator
+            movr.rz     ac, ac
+            jmp         .ea_subai
+            jmp         .ea_tmm
+ea_subai:   calls       .ex_term
+            st          ac, .ea_opv
+            ld          ac, .vtype       ; and integer operand
+            movr.rz     ac, ac
+            jmp         .ea_suboi
+            jmp         .ea_tmm
+ea_suboi:   ld          ac, .ea_opv
+            subr        ac, x5           ; x5 -= operand
+            jmp         .ea_lp
+ea_done:    movr        x6, ac           ; vtype = accumulator type
+            st          ac, .vtype
+            movr        x5, ac           ; ac = accumulator value
+            rets
+ea_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+ea_opv:     bss         1
+ea_opt:     bss         1
+
+; ex_expr — relational: add ( relop add )?  True = -1, false = 0.
+; left in saved x4, relop code in saved x6 across the right-hand evaluation.
+ex_expr:    save        x4, x5, x6
+            calls       .ex_add
+            movr        ac, x4           ; x4 = left value
+            ld          ac, .vtype       ; left type (global survives right eval)
+            st          ac, .ex_lt
+            ld          x5, .ep_tok
+            ld          ac, (x5)
+            callr       .is_relop        ; ac = code (1..6) or 0
+            movr.rz     ac, ac           ; skip jmp when relop present
+            jmp         .exx_done
+            movr        ac, x6           ; x6 = relop code
+            ld          x5, .ep_tok      ; consume relop
+            addi        x5, x5, 1
+            st          x5, .ep_tok
+            calls       .ex_add          ; right in ac; x4, x6 preserved
+            st          x4, .ex_l
+            st          ac, .ex_r
+            st          x6, .ex_relop
+            ld          ac, .ex_lt       ; operand types must match
+            sub         ac, .vtype
+            movr.rn     ac, ac
+            jmp         .exx_tmm
+            ld          ac, .ex_lt       ; string operands -> compare lexically
+            movr.rz     ac, ac
+            jmp         .exx_num
+            ld          x0, .ex_l
+            ld          x1, .ex_r
+            calls       .str_cmp         ; ac = -1/0/1
+            st          ac, .ex_l        ; reduce to (cmp relop 0)
+            xorr        ac, ac
+            st          ac, .ex_r
+exx_num:    calls       .rel_eval        ; ac = -1 / 0
+            xorr        x4, x4           ; result type = integer
+            st          x4, .vtype
+            rets
+exx_done:   movr        x4, ac
+            rets
+exx_tmm:    ldea        x0, .msg_tmm
+            jmp         .err_show
+
+ex_l:       bss         1
+ex_r:       bss         1
+ex_lt:      bss         1
+ex_relop:   bss         1
+
+; is_relop — token word in ac -> relop code (1=EQ 2=LT 3=GT 4=LE 5=GE 6=NE) or 0.
+is_relop:   st          ac, .ir_w
+            sub         ac, .v_eq
+            movr.rn     ac, ac
+            jmp         .ir_1
+            ldea        ac, 1
+            retr
+ir_1:       ld          ac, .ir_w
+            sub         ac, .tknlt
+            movr.rn     ac, ac
+            jmp         .ir_2
+            ldea        ac, 2
+            retr
+ir_2:       ld          ac, .ir_w
+            sub         ac, .tkngt
+            movr.rn     ac, ac
+            jmp         .ir_3
+            ldea        ac, 3
+            retr
+ir_3:       ld          ac, .ir_w
+            sub         ac, .tknle
+            movr.rn     ac, ac
+            jmp         .ir_4
+            ldea        ac, 4
+            retr
+ir_4:       ld          ac, .ir_w
+            sub         ac, .tknge
+            movr.rn     ac, ac
+            jmp         .ir_5
+            ldea        ac, 5
+            retr
+ir_5:       ld          ac, .ir_w
+            sub         ac, .tknne
+            movr.rn     ac, ac
+            jmp         .ir_0
+            ldea        ac, 6
+            retr
+ir_0:       xorr        ac, ac
+            retr
+
+ir_w:       bss         1
+
+; rel_eval — compare ex_l, ex_r per ex_relop; ac = -1 (true) or 0.
+rel_eval:   save        x4, x5
+            ld          ac, .ex_relop
+            subin.rn    ac, ac, 1
+            jmp         .rv_1
+            jmp         .re_eq
+rv_1:       ld          ac, .ex_relop
+            subin.rn    ac, ac, 2
+            jmp         .rv_2
+            jmp         .re_lt
+rv_2:       ld          ac, .ex_relop
+            subin.rn    ac, ac, 3
+            jmp         .rv_3
+            jmp         .re_gt
+rv_3:       ld          ac, .ex_relop
+            subin.rn    ac, ac, 4
+            jmp         .rv_4
+            jmp         .re_le
+rv_4:       ld          ac, .ex_relop
+            subin.rn    ac, ac, 5
+            jmp         .re_ne
+            jmp         .re_ge
+re_eq:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            movr.rz     ac, ac           ; skip jmp when not equal
+            jmp         .re_true
+            jmp         .re_false
+re_ne:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            movr.rz     ac, ac
+            jmp         .re_false
+            jmp         .re_true
+; Signed comparisons via d = ex_l - ex_r and the sign bit (bit 35).
+re_lt:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .re_false
+            jmp         .re_true
+re_ge:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .re_true
+            jmp         .re_false
+re_gt:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            st          ac, .rel_d
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .rgt_nn
+            jmp         .re_false
+rgt_nn:     ld          ac, .rel_d
+            movr.rz     ac, ac           ; skip jmp when d != 0
+            jmp         .re_false
+            jmp         .re_true
+re_le:      ld          ac, .ex_l
+            sub         ac, .ex_r
+            st          ac, .rel_d
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .rle_nn
+            jmp         .re_true
+rle_nn:     ld          ac, .rel_d
+            movr.rz     ac, ac           ; skip jmp when d != 0
+            jmp         .re_true
+            jmp         .re_false
+re_true:    ld          ac, .neg1
+            rets
+re_false:   xorr        ac, ac
+            rets
+
+rel_d:      bss         1
+
+
+; ==========================================================================
+; print_str_tok — print the body of the STR token at x0; advance ep_tok.
+; ==========================================================================
+print_str_tok: save     x4
+            ld          ac, (x0)
+            and         ac, .cntmask
+            st          ac, .ps_cnt
+            movr        x0, x6           ; BX pointer = tag word addr
+            ld          ac, .ps_cnt
+            ngtr        ac, x7
+            movr.rz     x7, x7
+            jmp         .ps_adv
+ps_lp:      incldb      ac, x6, 7
+            callr       .io_putc
+            incr.rn     x7, x7
+            jmp         .ps_lp
+ps_adv:     ld          x0, .ep_tok
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            rets
+
+ps_cnt:     bss         1
+
+
+; ==========================================================================
+; st_print — PRINT items separated by ';' (no gap) or ',' (tab).  A trailing
+; separator suppresses the newline.
+; ==========================================================================
+st_print:   save        x4
+            xorr        ac, ac
+            st          ac, .sp_supp
+sp_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; skip jmp when a token is present
+            jmp         .sp_eol
+            sub         ac, .v_colon     ; ':' ends the PRINT statement
+            movr.rz     ac, ac           ; skip jmp when not ':'
+            jmp         .sp_eol
+            ld          ac, (x4)
+            sub         ac, .v_else      ; ELSE also ends it
+            movr.rz     ac, ac           ; skip jmp when not ELSE
+            jmp         .sp_eol
+            jmp         .sp_item
+sp_eol:     ld          ac, .sp_supp
+            movr.rz     ac, ac           ; skip jmp when suppressing
+            jmp         .sp_nl
+            rets
+sp_nl:      callr       .io_crlf
+            rets
+sp_item:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_semi
+            movr.rn     ac, ac           ; ';' ?
+            jmp         .sp_ncom
+            ldea        ac, 1
+            st          ac, .sp_supp
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .sp_lp
+sp_ncom:    ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac           ; ',' ?
+            jmp         .sp_expr
+            ldea        ac, 1
+            st          ac, .sp_supp
+            ldea        ac, 9            ; tab
+            callr       .io_putc
+            ld          x4, .ep_tok
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .sp_lp
+sp_expr:    xorr        ac, ac
+            st          ac, .sp_supp
+            calls       .ex_expr         ; value in ac, type in vtype
+            st          ac, .sp_val
+            ld          ac, .vtype
+            movr.rz     ac, ac           ; skip jmp when string
+            jmp         .sp_pint
+            ld          x0, .sp_val      ; string: print its characters
+            calls       .str_print
+            jmp         .sp_lp
+sp_pint:    ld          ac, .sp_val
+            callr       .io_putn
+            jmp         .sp_lp
+
+sp_supp:    bss         1
+sp_val:     bss         1
+
+
+; ==========================================================================
+; st_let — assign:  [LET] var = expr  (ep_tok at the variable).
+; ==========================================================================
+st_let:     save        x4
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; VAR ?
+            jmp         .sl_err
+            ld          x0, .ep_tok      ; array element assignment?
+            calls       .is_array
+            movr.rz     ac, ac
+            jmp         .sl_scal
+            ; array:  VAR ( index ) = expr
+            ld          x0, .ep_tok
+            calls       .arr_addr        ; ac = element address; consumes ')'
+            st          ac, .sl_ent
+            ld          ac, .aa_etype    ; capture element type before value eval
+            st          ac, .sl_etype
+            ld          x4, .ep_tok      ; expect '='
+            ld          ac, (x4)
+            sub         ac, .v_eq
+            movr.rn     ac, ac
+            jmp         .sl_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            st          ac, .sl_val
+            ld          ac, .sl_etype    ; element type must match value type
+            sub         ac, .vtype
+            movr.rn     ac, ac
+            jmp         .sl_tmm
+            ld          x4, .sl_ent
+            ld          ac, .sl_val
+            st          ac, (x4)         ; store into element
+            rets
+sl_scal:    ld          x0, .ep_tok
+            calls       .var_lookup
+            st          ac, .sl_ent
+            ld          x0, .ep_tok      ; advance past variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; expect '='
+            sub         ac, .v_eq
+            movr.rn     ac, ac
+            jmp         .sl_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            st          ac, .sl_val
+            ld          x4, .sl_ent      ; declared type must match value type
+            ld          ac, 2(x4)
+            sub         ac, .vtype
+            movr.rn     ac, ac
+            jmp         .sl_tmm
+            ld          x4, .sl_ent
+            ld          ac, .sl_val
+            st          ac, 3(x4)        ; store value
+            rets
+sl_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+sl_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+sl_ent:     bss         1
+sl_val:     bss         1
+sl_etype:   bss         1
+
+
+; ==========================================================================
+; st_dim — DIM name(ub) [, name(ub)]...   Declares one or more arrays with
+; subscripts 0..ub (ub+1 elements).  Element type follows the $ suffix.
+; ==========================================================================
+st_dim:     save        x4
+sd_one:     ld          x4, .ep_tok      ; expect a VAR
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .sd_err
+            ld          x0, .ep_tok      ; packed, array-marked name
+            calls       .arr_name
+            ld          x4, .ep_tok      ; element type from the $ flag
+            ld          ac, (x4)
+            and         ac, .strvbit
+            movr.rz     ac, ac
+            jmp         .sd_int
+            ldea        ac, 1
+            st          ac, .ar_str
+            jmp         .sd_chk
+sd_int:     xorr        ac, ac
+            st          ac, .ar_str
+sd_chk:     calls       .arr_find        ; already dimensioned ?
+            movr.rz     ac, ac
+            jmp         .sd_cap
+            ldea        x0, .msg_redim
+            jmp         .err_show
+sd_cap:     ld          ac, .ar_nm0      ; capture name/type before evaluating
+            st          ac, .sd_nm0      ;   the bound (which may itself index
+            ld          ac, .ar_nm1      ;   another array and clobber ar_*)
+            st          ac, .sd_nm1
+            ld          ac, .ar_str
+            st          ac, .sd_str
+            ld          x0, .ep_tok      ; advance past the VAR
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; expect '('
+            sub         ac, .v_lpar
+            movr.rn     ac, ac
+            jmp         .sd_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; first upper bound
+            st          ac, .sd_ub0
+            xorr        ac, ac           ; assume 1-D
+            st          ac, .sd_2d
+            ld          x4, .ep_tok      ; optional second bound ?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .sd_rpar
+            addi        x4, x4, 1        ; consume ','
+            st          x4, .ep_tok
+            calls       .ex_expr         ; second upper bound
+            st          ac, .sd_ub1
+            ldea        ac, 1
+            st          ac, .sd_2d
+sd_rpar:    ld          x4, .ep_tok      ; expect ')'
+            ld          ac, (x4)
+            sub         ac, .v_rpar
+            movr.rn     ac, ac
+            jmp         .sd_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          ac, .sd_ub0      ; bound0 must be >= 0
+            and         ac, .signbit
+            movr.rn     ac, ac
+            jmp         .sd_sub
+            ld          ac, .sd_ub0      ; s0 = ub0 + 1
+            addi        ac, ac, 1
+            st          ac, .sd_s0
+            ld          ac, .sd_2d
+            movr.rz     ac, ac           ; skip jmp when 2-D
+            jmp         .sd_s1d
+            ld          ac, .sd_ub1      ; 2-D: bound1 must be >= 0
+            and         ac, .signbit
+            movr.rn     ac, ac
+            jmp         .sd_sub
+            ld          ac, .sd_ub1      ; s1 = ub1 + 1
+            addi        ac, ac, 1
+            st          ac, .sd_s1
+            jmp         .sd_init
+sd_s1d:     ldea        ac, 1            ; 1-D: s1 = 1
+            st          ac, .sd_s1
+sd_init:    ld          ac, .sd_str      ; init value: "" for string else 0
+            movr.rz     ac, ac
+            jmp         .sd_ci
+            ldea        ac, .emptystr
+            jmp         .sd_al
+sd_ci:      xorr        ac, ac
+sd_al:      movr        ac, x2           ; x2 = init value
+            ld          ac, .sd_s0
+            movr        ac, x0           ; x0 = s0
+            ld          ac, .sd_s1
+            movr        ac, x1           ; x1 = s1
+            calls       .arr_alloc       ; ac = block pointer
+            st          ac, .sd_blk
+            ld          ac, .varbot      ; allocate the 4-word entry
+            addi        ac, ac, -4
+            st          ac, .varbot
+            movr        ac, x4
+            ld          ac, .sd_nm0
+            st          ac, (x4)
+            ld          ac, .sd_nm1
+            st          ac, 1(x4)
+            ld          ac, .sd_str
+            st          ac, 2(x4)
+            ld          ac, .sd_blk
+            st          ac, 3(x4)
+            ld          x4, .ep_tok      ; another declaration ?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .sd_done
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .sd_one
+sd_done:    rets
+sd_sub:     ldea        x0, .msg_subr
+            jmp         .err_show
+sd_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+sd_ub0:     bss         1
+sd_ub1:     bss         1
+sd_2d:      bss         1
+sd_s0:      bss         1
+sd_s1:      bss         1
+sd_blk:     bss         1
+sd_nm0:     bss         1
+sd_nm1:     bss         1
+sd_str:     bss         1
+
+
+; ==========================================================================
+; err_show — print error message (x0), reset to the READY loop.
+; ==========================================================================
+err_show:   ldea        sp, .topstk
+            callr       .io_puts
+            callr       .io_crlf
+            xorr        ac, ac
+            st          ac, .runflag
+            jmp         .ready
+
+
+; ==========================================================================
+; run_exec — run the program from cur_line until END/STOP or past the end.
+; ==========================================================================
+; run_exec — token-granular program executor.  cur_line tracks the line
+; that contains cur_tok (so GOSUB/FOR can capture it); cur_tok is the
+; statement-level program counter.  Statements within a line are separated
+; by ':'; a 0 word (TKN_EOL) ends a line.  Control statements set cur_line +
+; cur_tok and the jumped flag.
+run_exec:   save        x4, x5
+            ldea        ac, 1
+            st          ac, .runflag
+            ld          ac, .cur_line    ; cur_tok = first token of cur_line
+            addi        ac, ac, 2
+            st          ac, .cur_tok
+            jmp         .re_lp
+
+; run_resume — like run_exec but continues from the existing cur_line and
+; cur_tok (used by CONT).  Same save mask, so re_done returns correctly.
+run_resume: save        x4, x5
+            ldea        ac, 1
+            st          ac, .runflag
+re_lp:      ld          ac, .runflag
+            movr.rz     ac, ac           ; skip jmp when running
+            jmp         .re_done
+            ld          x4, .cur_tok
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; TKN_EOL (0) ?
+            jmp         .re_eol
+            sub         ac, .v_colon     ; ':' separator ?
+            movr.rn     ac, ac
+            jmp         .re_stmt
+            addi        x4, x4, 1        ; skip the ':'
+            st          x4, .cur_tok
+            jmp         .re_lp
+re_eol:     ld          x4, .cur_line    ; advance to the next line
+            ld          ac, 1(x4)
+            addi        ac, ac, 2
+            addr        ac, x4
+            st          x4, .cur_line
+            ld          x5, .progend
+            cmplt       x4, x5           ; cur_line < progend ?
+            jmp         .re_nl
+            xorr        ac, ac           ; ran off the end: not continuable
+            st          ac, .cont_ok
+            jmp         .re_done
+re_nl:      ld          ac, .cur_line
+            addi        ac, ac, 2
+            st          ac, .cur_tok
+            jmp         .re_lp
+re_stmt:    xorr        ac, ac
+            st          ac, .jumped
+            ld          x0, .cur_tok
+            calls       .par_exec
+            ld          ac, .jumped
+            movr.rz     ac, ac           ; skip jmp when jumped
+            jmp         .re_adv
+            jmp         .re_lp           ; jumped: cur_line/cur_tok already set
+re_adv:     ld          ac, .ep_tok      ; next statement starts past this one
+            st          ac, .cur_tok
+            jmp         .re_lp
+re_done:    xorr        ac, ac
+            st          ac, .runflag
+            rets
+
+
+; exec_dir — run one direct-mode line (x0 = first token in tokbuf).
+; Executes ':'-separated statements until TKN_EOL.  Control statements
+; (GOTO/GOSUB) transition into run_exec themselves.
+exec_dir:save        x4
+            st          x0, .cur_tok
+ed_lp:      ld          x4, .cur_tok
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; TKN_EOL ?
+            jmp         .ed_done
+            sub         ac, .v_colon     ; ':' ?
+            movr.rn     ac, ac
+            jmp         .ed_stmt
+            addi        x4, x4, 1        ; skip ':'
+            st          x4, .cur_tok
+            jmp         .ed_lp
+ed_stmt:    xorr        ac, ac
+            st          ac, .jumped
+            ld          x0, .cur_tok
+            calls       .par_exec
+            ld          ac, .ep_tok      ; advance to the next statement
+            st          ac, .cur_tok
+            jmp         .ed_lp
+ed_done:    rets
+
+
+; skip_eol — advance ep_tok to the TKN_EOL (0) that ends the current line,
+; walking token by token (so an INT literal 0 is not mistaken for EOL).
+skip_eol:   save        x4
+            ld          x0, .ep_tok
+se_lp:      ld          ac, (x0)
+            movr.rz     ac, ac           ; nonzero token ?
+            jmp         .se_dn
+            calls       .tok_size
+            addr        ac, x0           ; x0 += token size
+            jmp         .se_lp
+se_dn:      st          x0, .ep_tok
+            rets
+
+
+; skip_stmt — advance ep_tok to the next statement boundary: the next ':'
+; or the TKN_EOL that ends the line (walking token by token).
+skip_stmt:  save        x4
+            ld          x0, .ep_tok
+sks_lp:     ld          ac, (x0)
+            movr.rz     ac, ac           ; nonzero token ?
+            jmp         .sks_dn          ; EOL
+            sub         ac, .v_colon
+            movr.rn     ac, ac           ; skip jmp when ':'
+            jmp         .sks_adv
+            jmp         .sks_dn          ; ':' -> stop
+sks_adv:    calls       .tok_size
+            addr        ac, x0           ; x0 += token size
+            jmp         .sks_lp
+sks_dn:     st          x0, .ep_tok
+            rets
+
+
+; ==========================================================================
+; st_run — RUN: execute the program from the first line.
+; ==========================================================================
+st_run:     save        x4
+            ld          ac, .memtop      ; RUN clears all variables and arrays
+            st          ac, .varbot      ;   (program text is kept)
+            ldea        ac, .strheap
+            st          ac, .strnext
+            ldea        ac, .arrheap
+            st          ac, .arrnext
+            ldea        ac, .progbase
+            st          ac, .cur_line
+            xorr        ac, ac
+            st          ac, .for_sp
+            st          ac, .gosub_sp
+            st          ac, .data_init   ; RUN rewinds DATA too
+            st          ac, .data_ptr
+            st          ac, .cont_ok     ; and invalidates any CONT point
+            calls       .run_exec
+            rets
+
+
+; ==========================================================================
+; st_goto — GOTO <line>.  During RUN sets cur_line + jumped; in direct mode
+; starts execution at the target.
+; ==========================================================================
+st_goto:    save        x4
+            calls       .ex_expr
+            st          ac, .goto_ln
+            ld          x0, .goto_ln
+            calls       .ln_find
+            ld          ac, .ln_match
+            movr.rz     ac, ac           ; skip jmp when found
+            jmp         .sg_err
+            ld          ac, .ln_ptr
+            st          ac, .cur_line
+            ld          ac, .runflag
+            movr.rz     ac, ac           ; skip jmp when running
+            jmp         .sg_direct
+            ld          ac, .ln_ptr      ; running: resume at target's first token
+            addi        ac, ac, 2
+            st          ac, .cur_tok
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+sg_direct:  calls       .run_exec
+            rets
+sg_err:     ldea        x0, .msg_undef
+            jmp         .err_show
+
+goto_ln:    bss         1
+
+
+; ==========================================================================
+; st_on — ON expr GOTO line,line,...   or   ON expr GOSUB line,line,...
+; Evaluates expr (1-based); jumps/calls the n-th line.  If expr is out of
+; range, execution falls through to the next statement.
+; ==========================================================================
+st_on:      save        x4, x5
+            calls       .ex_expr         ; selector index (1-based)
+            st          ac, .on_idx
+            ld          x4, .ep_tok      ; GOTO or GOSUB ?
+            ld          ac, (x4)
+            sub         ac, .v_goto
+            movr.rn     ac, ac
+            jmp         .on_chkgs
+            xorr        ac, ac           ; mode 0 = GOTO
+            st          ac, .on_mode
+            jmp         .on_kwok
+on_chkgs:   ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_gosub
+            movr.rn     ac, ac
+            jmp         .on_err
+            ldea        ac, 1            ; mode 1 = GOSUB
+            st          ac, .on_mode
+on_kwok:    ld          x4, .ep_tok      ; consume GOTO / GOSUB
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            xorr        ac, ac           ; selected line number (0 = none)
+            st          ac, .on_sel
+            ldea        ac, 1            ; current list position
+            st          ac, .on_cnt
+on_lp:      ld          x4, .ep_tok      ; expect an INT line number
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknint
+            movr.rn     ac, ac
+            jmp         .on_err
+            ld          ac, .on_cnt      ; this the selected position ?
+            sub         ac, .on_idx
+            movr.rn     ac, ac
+            jmp         .on_nosel
+            ld          x4, .ep_tok      ; record this line number
+            ld          ac, 1(x4)
+            st          ac, .on_sel
+on_nosel:   ld          x4, .ep_tok      ; advance past the INT token (2 words)
+            addi        x4, x4, 2
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; ',' -> more list entries
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .on_done
+            addi        x4, x4, 1        ; consume ','
+            st          x4, .ep_tok
+            ld          ac, .on_cnt
+            incr        ac, ac
+            st          ac, .on_cnt
+            jmp         .on_lp
+on_done:    ld          ac, .on_sel      ; ep_tok now past the whole list
+            movr.rn     ac, ac           ; skip jmp when no line selected
+            jmp         .on_jump
+            rets                          ; out of range: fall through
+on_jump:    ld          x0, .on_sel
+            calls       .ln_find
+            ld          ac, .ln_match
+            movr.rz     ac, ac
+            jmp         .on_uln
+            ld          ac, .on_mode
+            movr.rz     ac, ac           ; skip jmp when GOSUB (mode != 0)
+            jmp         .on_goto
+            ld          ac, .gosub_sp    ; GOSUB: push (cur_line, resume tok)
+            addr        ac, ac
+            ldea        x5, .gosub_st
+            addr        x5, ac
+            movr        ac, x5
+            ld          ac, .cur_line
+            st          ac, (x5)
+            ld          ac, .ep_tok
+            st          ac, 1(x5)
+            ld          ac, .gosub_sp
+            incr        ac, ac
+            st          ac, .gosub_sp
+on_goto:    ld          ac, .ln_ptr
+            st          ac, .cur_line
+            ld          ac, .runflag
+            movr.rz     ac, ac           ; skip jmp when running
+            jmp         .on_direct
+            ld          ac, .ln_ptr
+            addi        ac, ac, 2
+            st          ac, .cur_tok
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+on_direct:  calls       .run_exec
+            rets
+on_uln:     ldea        x0, .msg_undef
+            jmp         .err_show
+on_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+on_idx:     bss         1
+on_mode:    bss         1
+on_sel:     bss         1
+on_cnt:     bss         1
+
+
+; ==========================================================================
+; READ / DATA / RESTORE.
+;   DATA is inert at run time (its values are skipped).
+;   READ pulls successive DATA values into variables.
+;   RESTORE rewinds the DATA pointer to the first DATA value.
+; data_ptr = next value token (0 = exhausted once data_init is set).
+; data_cl  = line header of the line that contains data_ptr.
+; ==========================================================================
+
+; st_data — skip the DATA values to the next statement boundary.
+st_data:    save        x4
+            calls       .skip_stmt
+            rets
+
+; st_restore — rewind the DATA pointer.
+st_restore: save        x4
+            xorr        ac, ac
+            st          ac, .data_init
+            st          ac, .data_ptr
+            rets
+
+; data_seek — x0 = token pointer to start scanning; data_cl = the line that
+; contains it.  Finds the next DATA keyword, sets data_ptr to its first
+; value token (updating data_cl across line boundaries).  ac = 1 if found,
+; 0 at end of program.
+data_seek:  save        x4, x5
+            movr        x0, x4           ; x4 = scan pointer
+ds_lp:      ld          ac, (x4)
+            movr.rz     ac, ac           ; TKN_EOL ?
+            jmp         .ds_eol
+            and         ac, .tagmask
+            sub          ac, .v_data
+            movr.rn     ac, ac           ; DATA keyword ?
+            jmp         .ds_skip
+            addi        x4, x4, 1        ; values start right after DATA
+            st          x4, .data_ptr
+            ldea        ac, 1
+            rets
+ds_skip:    movr        x4, x0           ; advance by one token
+            calls       .tok_size
+            addr        ac, x4
+            jmp         .ds_lp
+ds_eol:     ld          x5, .data_cl     ; move to the next line
+            ld          ac, 1(x5)
+            addi        ac, ac, 2
+            addr        ac, x5
+            st          x5, .data_cl
+            ld          ac, .progend
+            cmplt       x5, ac           ; data_cl < progend ?
+            jmp         .ds_more
+            jmp         .ds_none         ; reached end of program
+ds_more:    ld          x4, .data_cl
+            addi        x4, x4, 2        ; first token of the new line
+            jmp         .ds_lp
+ds_none:    xorr        ac, ac
+            rets
+
+; rd_value — fetch the next DATA value.  Returns it in ac with vtype set.
+; Raises ?OUT OF DATA when the data is exhausted.
+rd_value:   save        x4, x5
+            ld          ac, .data_init
+            movr.rn     ac, ac           ; skip jmp when not initialised
+            jmp         .rv_chk
+            ldea        ac, 1            ; first READ: seek from program start
+            st          ac, .data_init
+            ldea        ac, .progbase
+            st          ac, .data_cl
+            ldea        x0, .progbase
+            addi        x0, x0, 2
+            calls       .data_seek
+            movr.rn     ac, ac           ; skip jmp when no DATA found
+            jmp         .rv_have
+            jmp         .rv_ood
+rv_chk:     ld          ac, .data_ptr
+            movr.rz     ac, ac           ; exhausted (0) ?
+            jmp         .rv_ood
+rv_have:    ld          x4, .data_ptr    ; read value token
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknint
+            movr.rn     ac, ac           ; INT ?
+            jmp         .rv_nstr
+            ld          ac, 1(x4)
+            st          ac, .rd_val
+            xorr        ac, ac
+            st          ac, .rd_vt
+            jmp         .rv_adv
+rv_nstr:    ld          x4, .data_ptr
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; STR ?
+            jmp         .rv_err
+            ld          x0, .data_ptr    ; copy the string literal to the heap
+            ldea        x1, .emptystr
+            calls       .str_cat
+            st          ac, .rd_val
+            ldea        ac, 1
+            st          ac, .rd_vt
+rv_adv:     ld          x0, .data_ptr    ; advance past this value
+            calls       .tok_size
+            ld          x4, .data_ptr
+            addr        ac, x4           ; x4 = token after the value
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac           ; ',' -> next value in this DATA
+            jmp         .rv_seek
+            addi        x4, x4, 1
+            st          x4, .data_ptr
+            jmp         .rv_ret
+rv_seek:    movr        x4, x0           ; seek the next DATA statement
+            calls       .data_seek
+            movr.rn     ac, ac           ; skip jmp when none left
+            jmp         .rv_ret
+            xorr        ac, ac           ; exhausted
+            st          ac, .data_ptr
+rv_ret:     ld          ac, .rd_vt
+            st          ac, .vtype
+            ld          ac, .rd_val
+            rets
+rv_ood:     ldea        x0, .msg_ood
+            jmp         .err_show
+rv_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+; st_read — READ var [, var]...   Assigns successive DATA values.  Targets
+; may be scalars or array elements.
+st_read:    save        x4
+sr_one:     ld          x4, .ep_tok      ; expect a VAR
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .sr_err
+            ld          x0, .ep_tok      ; array element or scalar ?
+            calls       .is_array
+            movr.rz     ac, ac
+            jmp         .sr_scal
+            ld          x0, .ep_tok      ; array element target
+            calls       .arr_addr
+            st          ac, .sr_addr
+            ld          ac, .aa_etype
+            st          ac, .sr_etype
+            jmp         .sr_rd
+sr_scal:    ld          x0, .ep_tok      ; scalar target
+            calls       .var_lookup
+            movr        ac, x4
+            ld          ac, 2(x4)
+            st          ac, .sr_etype
+            addi        x4, x4, 3        ; value address = entry + 3
+            st          x4, .sr_addr
+            ld          x0, .ep_tok      ; advance past the variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+sr_rd:      calls       .rd_value        ; value in ac, vtype set
+            st          ac, .sr_val
+            ld          ac, .sr_etype    ; type must match
+            sub         ac, .vtype
+            movr.rn     ac, ac
+            jmp         .sr_tmm
+            ld          x4, .sr_addr
+            ld          ac, .sr_val
+            st          ac, (x4)
+            ld          x4, .ep_tok      ; another variable ?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .sr_done
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .sr_one
+sr_done:    rets
+sr_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+sr_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+data_init:  bss         1
+data_ptr:   bss         1
+data_cl:    bss         1
+rd_val:     bss         1
+rd_vt:      bss         1
+sr_addr:    bss         1
+sr_etype:   bss         1
+sr_val:     bss         1
+
+
+; ==========================================================================
+; st_call — CALL <addr>: transfer control to a machine-language routine at
+; the evaluated address.  The routine runs in supervisor mode and must
+; return with retr (it links via callr).  No arguments or result are passed
+; through CALL itself; use POKE/PEEK to exchange values.
+; ==========================================================================
+st_call:    save        x4
+            calls       .ex_expr         ; routine address
+            movr        ac, x0
+            callr        (x0)             ; call it; returns here via retr
+            rets
+
+
+; ==========================================================================
+; st_if — IF <expr> THEN <clause> [ELSE <clause>].  A clause is a line
+; number (implicit GOTO) or one or more statements.  When the condition is
+; true the THEN clause runs and execution then reaches the ELSE keyword,
+; which (st_else) skips the rest of the line.  When false, execution jumps
+; to the ELSE clause if present, else skips the line.
+; ==========================================================================
+st_if:      save        x4
+            calls       .ex_expr
+            movr.rz     ac, ac           ; skip jmp when condition true
+            jmp         .if_false
+            ld          x4, .ep_tok      ; true: expect THEN
+            ld          ac, (x4)
+            sub         ac, .v_then
+            movr.rn     ac, ac
+            jmp         .if_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok      ; consume THEN
+            jmp         .if_clause
+if_false:   calls       .find_else       ; jump to an ELSE clause if present
+            movr.rz     ac, ac           ; skip jmp when ELSE found
+            jmp         .if_noelse
+if_clause:  ld          x4, .ep_tok      ; line number -> implicit GOTO
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknint
+            movr.rn     ac, ac
+            jmp         .if_inline
+            calls       .st_goto
+            rets
+if_inline:  rets                          ; statements run via the executor
+if_noelse:  rets                          ; ep_tok left at EOL
+if_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+; st_else — reached only after a true THEN clause has run; skip the rest
+; of the line (the ELSE clause).
+st_else:    save        x4
+            calls       .skip_eol
+            rets
+
+; find_else — scan from ep_tok within the current line for an ELSE keyword.
+; If found, set ep_tok past it and return 1; if TKN_EOL comes first, set
+; ep_tok at the EOL and return 0.
+find_else:  save        x4
+            ld          x0, .ep_tok
+fe_lp:      ld          ac, (x0)
+            movr.rz     ac, ac           ; EOL ?
+            jmp         .fe_eol
+            and         ac, .tagmask
+            sub         ac, .v_else
+            movr.rn     ac, ac           ; ELSE ?
+            jmp         .fe_adv
+            addi        x0, x0, 1         ; position past ELSE
+            st          x0, .ep_tok
+            ldea        ac, 1
+            rets
+fe_adv:     calls       .tok_size
+            addr        ac, x0
+            jmp         .fe_lp
+fe_eol:     st          x0, .ep_tok
+            xorr        ac, ac
+            rets
+
+
+; ==========================================================================
+; st_end / st_stop — stop program execution.  Both record a resume point
+; (the statement after this one) so CONT can pick up where it left off.
+; ==========================================================================
+st_end:     save        x4
+            calls       .save_cont
+            xorr        ac, ac
+            st          ac, .runflag
+            rets
+
+st_stop:    save        x4
+            calls       .save_cont
+            xorr        ac, ac
+            st          ac, .runflag
+            rets
+
+; save_cont — remember (cur_line, ep_tok) as the CONT resume point.
+save_cont:  save        x4
+            ld          ac, .cur_line
+            st          ac, .cont_line
+            ld          ac, .ep_tok
+            st          ac, .cont_tok
+            ldea        ac, 1
+            st          ac, .cont_ok
+            rets
+
+; st_cont — CONT: resume a STOPped/ENDed program at its saved position.
+st_cont:    save        x4
+            ld          ac, .cont_ok
+            movr.rz     ac, ac           ; have a resume point ?
+            jmp         .ct_err
+            ld          ac, .cont_line
+            st          ac, .cur_line
+            ld          ac, .cont_tok
+            st          ac, .cur_tok
+            calls       .run_resume
+            rets
+ct_err:     ldea        x0, .msg_cont
+            jmp         .err_show
+
+cont_line:  bss         1
+cont_tok:   bss         1
+cont_ok:    bss         1
+
+
+; ==========================================================================
+; st_gosub — GOSUB <line>: push the next line, then jump.
+; ==========================================================================
+st_gosub:   save        x4, x5, x6
+            calls       .ex_expr
+            st          ac, .goto_ln
+            ld          ac, .ep_tok      ; resume token = after the GOSUB stmt
+            st          ac, .gs_rtok
+            ld          x0, .goto_ln
+            calls       .ln_find
+            ld          ac, .ln_match
+            movr.rz     ac, ac           ; skip jmp when found
+            jmp         .gs_err
+            ld          ac, .gosub_sp    ; frame = gosub_st + sp*2
+            addr        ac, ac
+            ldea        x6, .gosub_st
+            addr        x6, ac
+            movr        ac, x6
+            ld          ac, .cur_line    ; push (resume line, resume token)
+            st          ac, (x6)
+            ld          ac, .gs_rtok
+            st          ac, 1(x6)
+            ld          ac, .gosub_sp
+            incr        ac, ac
+            st          ac, .gosub_sp
+            ld          ac, .ln_ptr
+            st          ac, .cur_line
+            ld          ac, .runflag
+            movr.rz     ac, ac           ; skip jmp when running
+            jmp         .gs_direct
+            ld          ac, .ln_ptr      ; running: resume at target's first token
+            addi        ac, ac, 2
+            st          ac, .cur_tok
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+gs_direct:  calls       .run_exec
+            rets
+gs_err:     ldea        x0, .msg_undef
+            jmp         .err_show
+
+gs_rtok:    bss         1
+
+
+; ==========================================================================
+; st_return — RETURN: pop the saved line and resume there.
+; ==========================================================================
+st_return:  save        x4, x5
+            ld          x4, .gosub_sp
+            movr.rz     x4, x4           ; skip jmp when stack non-empty
+            jmp         .rt_err
+            addi        x4, x4, -1
+            st          x4, .gosub_sp
+            addr        x4, x4           ; frame = gosub_st + sp*2
+            ldea        x5, .gosub_st
+            addr        x5, x4
+            ld          ac, (x4)         ; restore resume line + token
+            st          ac, .cur_line
+            ld          ac, 1(x4)
+            st          ac, .cur_tok
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+rt_err:     ldea        x0, .msg_rgos
+            jmp         .err_show
+
+
+; ==========================================================================
+; st_poke — POKE <addr>, <value>.
+; ==========================================================================
+st_poke:    save        x4
+            calls       .ex_expr
+            st          ac, .poke_a
+            ld          x4, .ep_tok      ; expect comma
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .pk_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            ld          x4, .poke_a
+            st          ac, (x4)
+            rets
+pk_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+poke_a:     bss         1
+
+
+; ==========================================================================
+; st_for — FOR var = start TO limit [STEP step]
+; ==========================================================================
+st_for:     save        x4, x5
+            ld          x4, .ep_tok      ; loop variable
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .sf_err
+            ld          x0, .ep_tok
+            calls       .var_lookup
+            movr        ac, x4           ; entry; mark loop variable integer
+            xorr        ac, ac
+            st          ac, 2(x4)
+            movr        x4, ac
+            addi        ac, ac, 3        ; value address (word 3)
+            st          ac, .sf_va
+            ld          x0, .ep_tok      ; advance past variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          ac, (x4)         ; expect '='
+            sub         ac, .v_eq
+            movr.rn     ac, ac
+            jmp         .sf_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; start
+            ld          x4, .sf_va
+            st          ac, (x4)
+            ld          x4, .ep_tok      ; expect TO
+            ld          ac, (x4)
+            sub         ac, .v_to
+            movr.rn     ac, ac
+            jmp         .sf_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr         ; limit
+            st          ac, .sf_lim
+            ld          x4, .ep_tok      ; optional STEP
+            ld          ac, (x4)
+            sub         ac, .v_step
+            movr.rn     ac, ac
+            jmp         .sf_nos
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_expr
+            st          ac, .sf_step
+            jmp         .sf_push
+sf_nos:     ldea        ac, 1
+            st          ac, .sf_step
+sf_push:    ld          ac, .ep_tok      ; resume token = first token after FOR
+            st          ac, .sf_rtok     ;   (loop body starts here)
+            ld          ac, .for_sp      ; frame = for_st + sp*5
+            st          ac, .sf_tmp
+            addr        ac, ac
+            addr        ac, ac
+            add         ac, .sf_tmp
+            ldea        x5, .for_st
+            addr        ac, x5
+            ld          ac, .sf_va
+            st          ac, (x5)
+            ld          ac, .sf_lim
+            st          ac, 1(x5)
+            ld          ac, .sf_step
+            st          ac, 2(x5)
+            ld          ac, .cur_line    ; resume line
+            st          ac, 3(x5)
+            ld          ac, .sf_rtok
+            st          ac, 4(x5)
+            ld          ac, .for_sp
+            incr        ac, ac
+            st          ac, .for_sp
+            rets
+sf_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+sf_va:      bss         1
+sf_lim:     bss         1
+sf_step:    bss         1
+sf_res:     bss         1
+sf_rtok:    bss         1
+sf_tmp:     bss         1
+
+
+; ==========================================================================
+; st_next — NEXT [var]: step the loop variable; loop or fall through.
+; ==========================================================================
+st_next:    save        x4, x5
+            ld          x4, .ep_tok      ; consume optional loop variable
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac           ; skip jmp when a VAR follows
+            jmp         .sn_chk
+            ld          x0, .ep_tok
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+sn_chk:     ld          ac, .for_sp
+            movr.rz     ac, ac           ; skip jmp when stack non-empty
+            jmp         .sn_err
+            ld          ac, .for_sp      ; top frame = for_st + (sp-1)*5
+            addi        ac, ac, -1
+            st          ac, .sn_tmp
+            addr        ac, ac
+            addr        ac, ac
+            add         ac, .sn_tmp
+            ldea        x5, .for_st
+            addr        ac, x5
+            ld          x4, (x5)         ; value address
+            ld          ac, (x4)
+            add         ac, 2(x5)        ; var += step
+            st          ac, (x4)
+            ld          ac, 2(x5)        ; step sign
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when step negative
+            jmp         .sn_pos
+            ld          x4, (x5)         ; negative step: continue if var >= limit
+            ld          ac, (x4)
+            sub         ac, 1(x5)        ; var - limit
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when var < limit
+            jmp         .sn_cont
+            jmp         .sn_end
+sn_pos:     ld          x4, (x5)         ; positive step: continue if var <= limit
+            ld          ac, (x4)
+            sub         ac, 1(x5)        ; var - limit
+            st          ac, .sn_d
+            movr.rz     ac, ac           ; skip jmp when nonzero
+            jmp         .sn_cont
+            ld          ac, .sn_d
+            and         ac, .signbit
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .sn_end
+            jmp         .sn_cont
+sn_cont:    ld          ac, 3(x5)        ; loop back to body (resume line + token)
+            st          ac, .cur_line
+            ld          ac, 4(x5)
+            st          ac, .cur_tok
+            ldea        ac, 1
+            st          ac, .jumped
+            rets
+sn_end:     ld          ac, .for_sp      ; pop frame, continue after NEXT
+            addi        ac, ac, -1
+            st          ac, .for_sp
+            rets
+sn_err:     ldea        x0, .msg_nfor
+            jmp         .err_show
+
+sn_d:       bss         1
+sn_tmp:     bss         1
+
+
+; ==========================================================================
+; parse_int — parse a signed integer from linebuf.  Returns value in ac.
+; ==========================================================================
+parse_int:  save        x4, x5
+            ldea        x4, .linebuf
+            xorr        x5, x5
+            xorr        ac, ac
+            st          ac, .pi_neg
+pi_sp:      ld          ac, (x4)         ; skip leading spaces
+            subin.rn    ac, ac, 32
+            jmp         .pi_chk
+            incr        x4, x4
+            jmp         .pi_sp
+pi_chk:     ld          ac, (x4)         ; optional '-'
+            subin.rn    ac, ac, 45
+            jmp         .pi_dl
+            incr        x4, x4
+            ldea        ac, 1
+            st          ac, .pi_neg
+pi_dl:      ld          ac, (x4)
+            callr       .id_digit
+            movr.rz     ac, ac           ; skip jmp when digit
+            jmp         .pi_done
+            ld          ac, (x4)
+            addi        ac, ac, -48
+            st          ac, .pi_d
+            movr        x5, mq
+            mul         .tenw
+            add         ac, .pi_d
+            movr        ac, x5
+            incr        x4, x4
+            jmp         .pi_dl
+pi_done:    ld          ac, .pi_neg
+            movr.rz     ac, ac           ; skip jmp when negative
+            jmp         .pi_ret
+            ngtr        x5, x5
+pi_ret:     movr        x5, ac
+            rets
+
+pi_neg:     bss         1
+pi_d:       bss         1
+
+
+; ==========================================================================
+; st_input — INPUT var : prompt "? ", read a line, assign an integer.
+; ==========================================================================
+st_input:   save        x4
+            ldea        x0, .msg_inq
+            callr       .io_puts
+            ldea        x0, .linebuf
+            ld          x1, .linemax
+            callr       .io_gets
+            st          ac, .linelen
+            calls       .parse_int
+            st          ac, .inp_val
+            ld          x4, .ep_tok      ; variable
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .si_err
+            ld          x0, .ep_tok
+            calls       .var_lookup
+            movr        ac, x4
+            xorr        ac, ac           ; type = integer
+            st          ac, 2(x4)
+            ld          ac, .inp_val
+            st          ac, 3(x4)
+            rets
+si_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+inp_val:    bss         1
+
+
+; ==========================================================================
+; st_get — GET var : read one character.  A numeric variable receives the
+; character code; a string variable receives a one-character string.
+; Targets may be scalars or array elements.
+; ==========================================================================
+st_get:     save        x4
+            ld          x4, .ep_tok      ; expect a VAR
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .gv_err
+            ld          x0, .ep_tok      ; array element or scalar ?
+            calls       .is_array
+            movr.rz     ac, ac
+            jmp         .gv_scal
+            ld          x0, .ep_tok
+            calls       .arr_addr
+            st          ac, .gv_addr
+            ld          ac, .aa_etype
+            st          ac, .gv_etype
+            jmp         .gv_read
+gv_scal:    ld          x0, .ep_tok
+            calls       .var_lookup
+            movr        ac, x4
+            ld          ac, 2(x4)
+            st          ac, .gv_etype
+            addi        x4, x4, 3
+            st          x4, .gv_addr
+            ld          x0, .ep_tok      ; advance past the variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+gv_read:    callr       .io_getc         ; ac = character code
+            st          ac, .gv_ch
+            ld          ac, .gv_etype    ; string target ?
+            movr.rz     ac, ac
+            jmp         .gv_int
+            ld          x0, .gv_ch       ; string: one-character string
+            calls       .str_chr
+            st          ac, .gv_val
+            jmp         .gv_store
+gv_int:     ld          ac, .gv_ch       ; numeric: the character code
+            st          ac, .gv_val
+gv_store:   ld          x4, .gv_addr
+            ld          ac, .gv_val
+            st          ac, (x4)
+            rets
+gv_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+
+gv_addr:    bss         1
+gv_etype:   bss         1
+gv_ch:      bss         1
+gv_val:     bss         1
+
+
+; ==========================================================================
+; Read-only data
+; ==========================================================================
+
+fgcw:       dw          0740000000000    ; psw1: IRQL = 15
+irqmask:    dw          02000            ; enable level 10
+nomask:     dw          0
+ttyconf:    dw          #1F9A0           ; ENABLED|INTR_RET|INTR_OUT|DESTRUCT|echo
+
+crlfbuf:    dw          13, 10
+
+msg_ban:    dsn         "VIBASIC V0.1"
+msg_free:   dsn         " WORDS FREE"
+msg_rdy:    dsn         "READY."
+msg_synt:   dsn         "?SYNTAX ERROR"
+msg_undef:  dsn         "?UNDEF'D LINE"
+msg_rgos:   dsn         "?RETURN WITHOUT GOSUB"
+msg_nfor:   dsn         "?NEXT WITHOUT FOR"
+msg_inq:    dsn         "? "
+msg_tmm:    dsn         "?TYPE MISMATCH"
+msg_oom:    dsn         "?OUT OF MEMORY"
+msg_subr:   dsn         "?BAD SUBSCRIPT"
+msg_redim:  dsn         "?REDIM'D ARRAY"
+msg_ood:    dsn         "?OUT OF DATA"
+msg_divz:   dsn         "?DIVISION BY ZERO"
+msg_badad:  dsn         "?BAD ADDRESS"
+msg_fault:  dsn         "?MACHINE FAULT"
+msg_cont:   dsn         "?CANT CONTINUE"
+
+; Statement dispatch table: [keyword tag value, handler], terminated by 0.
+; New statements are added here plus one handler — no change to par_exec.
+st_tab:     dw          #280000000, st_list      ; LIST
+            dw          #290000000, st_new       ; NEW
+            dw          #200000000, st_rem       ; REM
+            dw          #210000000, st_print     ; PRINT
+            dw          #220000000, st_let       ; LET
+            dw          #230000000, st_goto      ; GOTO
+            dw          #240000000, st_if        ; IF
+            dw          #260000000, st_end       ; END
+            dw          #270000000, st_run       ; RUN
+            dw          #2A0000000, st_gosub     ; GOSUB
+            dw          #2B0000000, st_return    ; RETURN
+            dw          #2C0000000, st_stop      ; STOP
+            dw          #2D0000000, st_poke      ; POKE
+            dw          #2E0000000, st_for       ; FOR
+            dw          #2F0000000, st_next      ; NEXT
+            dw          #320000000, st_input     ; INPUT
+            dw          #330000000, st_dim       ; DIM
+            dw          #340000000, st_on        ; ON
+            dw          #350000000, st_data      ; DATA
+            dw          #360000000, st_read      ; READ
+            dw          #370000000, st_restore   ; RESTORE
+            dw          #380000000, st_call      ; CALL
+            dw          #390000000, st_else      ; ELSE (skips when reached)
+            dw          #3A0000000, st_cont      ; CONT
+            dw          #3B0000000, st_get       ; GET
+            dw          0, 0
+
+
+; ==========================================================================
+; Token tag constants (tag value in bits 35:28).  Only those referenced by
+; code are kept as named words; the rest appear as literals in the tables.
+; ==========================================================================
+tagmask:    dw          #FF0000000       ; bits 35:28
+cntmask:    dw          #FFFFFF          ; bits 23:0 (packed-token char count)
+strvbit:    dw          #1000000         ; bit 24 (TKN_VAR string-type flag)
+signbit:    dw          #800000000       ; bit 35 (sign)
+arrbit:     dw          #1               ; bit 0 of a packed name marks an array
+                                         ;   entry.  Names pack 5 chars x 7 bits
+                                         ;   into bits 35:1 (char 0 at 35:29), so
+                                         ;   bit 0 is always free and keeps array
+                                         ;   A distinct from scalar A
+emptystr:   dw          0                ; the empty string (count = 0)
+
+tknint:     dw          #10000000        ; tag 0x01
+tknvar:     dw          #20000000        ; tag 0x02
+tknstr:     dw          #30000000        ; tag 0x03
+tknlt:      dw          #1A0000000       ; tag 0x1A  '<'
+tkngt:      dw          #1B0000000       ; tag 0x1B  '>'
+tknle:      dw          #1C0000000       ; tag 0x1C  '<='
+tknge:      dw          #1D0000000       ; tag 0x1D  '>='
+tknne:      dw          #1E0000000       ; tag 0x1E  '<>'
+
+; Operator / keyword token values used by the evaluator and statements
+v_plus:     dw          #100000000
+v_minus:    dw          #110000000
+v_mul:      dw          #120000000
+v_div:      dw          #130000000
+v_lpar:     dw          #140000000
+v_rpar:     dw          #150000000
+v_comma:    dw          #160000000
+v_semi:     dw          #170000000
+v_colon:    dw          #180000000       ; ':' statement separator
+v_eq:       dw          #190000000
+v_then:     dw          #250000000
+v_else:     dw          #390000000       ; ELSE keyword tag
+v_goto:     dw          #230000000
+v_gosub:    dw          #2A0000000
+v_data:     dw          #350000000       ; DATA keyword tag
+v_to:       dw          #300000000       ; TO, tag 0x30
+v_step:     dw          #310000000       ; STEP, tag 0x31
+v_peek:     dw          #400000000       ; PEEK function, tag 0x40
+v_abs:      dw          #410000000       ; ABS, tag 0x41
+v_sgn:      dw          #420000000       ; SGN, tag 0x42
+v_rnd:      dw          #430000000       ; RND, tag 0x43
+v_int:      dw          #440000000       ; INT, tag 0x44
+v_len:      dw          #450000000       ; LEN, tag 0x45
+v_asc:      dw          #460000000       ; ASC, tag 0x46
+v_val:      dw          #470000000       ; VAL, tag 0x47
+v_chr:      dw          #480000000       ; CHR$, tag 0x48
+v_str:      dw          #490000000       ; STR$, tag 0x49
+v_left:     dw          #4A0000000       ; LEFT$, tag 0x4A
+v_right:    dw          #4B0000000       ; RIGHT$, tag 0x4B
+v_mid:      dw          #4C0000000       ; MID$, tag 0x4C
+v_instr:    dw          #4D0000000       ; INSTR, tag 0x4D
+neg1:       dw          -1
+lo35:       dw          #7FFFFFFFF       ; low 35 bits (clears sign)
+rnd_mul:    dw          1103515245
+rnd_inc:    dw          12345
+rnd_seed:   dw          1
+
+; Keyword name strings (for forward lookup and detok)
+s_rem:      dsn         "REM"
+s_print:    dsn         "PRINT"
+s_let:      dsn         "LET"
+s_goto:     dsn         "GOTO"
+s_if:       dsn         "IF"
+s_then:     dsn         "THEN"
+s_end:      dsn         "END"
+s_run:      dsn         "RUN"
+s_list:     dsn         "LIST"
+s_new:      dsn         "NEW"
+s_gosub:    dsn         "GOSUB"
+s_return:   dsn         "RETURN"
+s_stop:     dsn         "STOP"
+s_poke:     dsn         "POKE"
+s_peek:     dsn         "PEEK"
+s_for:      dsn         "FOR"
+s_next:     dsn         "NEXT"
+s_to:       dsn         "TO"
+s_step:     dsn         "STEP"
+s_input:    dsn         "INPUT"
+s_dim:      dsn         "DIM"
+s_on:       dsn         "ON"
+s_data:     dsn         "DATA"
+s_read:     dsn         "READ"
+s_restore:  dsn         "RESTORE"
+s_call:     dsn         "CALL"
+s_else:     dsn         "ELSE"
+s_cont:     dsn         "CONT"
+s_get:      dsn         "GET"
+s_abs:      dsn         "ABS"
+s_sgn:      dsn         "SGN"
+s_rnd:      dsn         "RND"
+s_int:      dsn         "INT"
+s_len:      dsn         "LEN"
+s_asc:      dsn         "ASC"
+s_val:      dsn         "VAL"
+s_chr:      dsn         "CHR$"
+s_str:      dsn         "STR$"
+s_left:     dsn         "LEFT$"
+s_right:    dsn         "RIGHT$"
+s_mid:      dsn         "MID$"
+s_instr:    dsn         "INSTR"
+
+; Operator symbol strings (for detok)
+o_plus:     dsn         "+"
+o_minus:    dsn         "-"
+o_mul:      dsn         "*"
+o_div:      dsn         "/"
+o_lpar:     dsn         "("
+o_rpar:     dsn         ")"
+o_comma:    dsn         ","
+o_semi:     dsn         ";"
+o_colon:    dsn         ":"
+o_eq:       dsn         "="
+o_lt:       dsn         "<"
+o_gt:       dsn         ">"
+o_le:       dsn         "<="
+o_ge:       dsn         ">="
+o_ne:       dsn         "<>"
+
+; Forward keyword table: [dsn pointer, tag value], terminated by 0.
+kw_tab:     dw          s_rem,    #200000000
+            dw          s_print,  #210000000
+            dw          s_let,    #220000000
+            dw          s_goto,   #230000000
+            dw          s_if,     #240000000
+            dw          s_then,   #250000000
+            dw          s_end,    #260000000
+            dw          s_run,    #270000000
+            dw          s_list,   #280000000
+            dw          s_new,    #290000000
+            dw          s_gosub,  #2A0000000
+            dw          s_return, #2B0000000
+            dw          s_stop,   #2C0000000
+            dw          s_poke,   #2D0000000
+            dw          s_for,    #2E0000000
+            dw          s_next,   #2F0000000
+            dw          s_to,     #300000000
+            dw          s_step,   #310000000
+            dw          s_input,  #320000000
+            dw          s_dim,    #330000000
+            dw          s_on,     #340000000
+            dw          s_data,   #350000000
+            dw          s_read,   #360000000
+            dw          s_restore,#370000000
+            dw          s_call,   #380000000
+            dw          s_else,   #390000000
+            dw          s_cont,   #3A0000000
+            dw          s_get,    #3B0000000
+            dw          s_peek,   #400000000
+            dw          s_abs,    #410000000
+            dw          s_sgn,    #420000000
+            dw          s_rnd,    #430000000
+            dw          s_int,    #440000000
+            dw          s_len,    #450000000
+            dw          s_asc,    #460000000
+            dw          s_val,    #470000000
+            dw          s_chr,    #480000000
+            dw          s_str,    #490000000
+            dw          s_left,   #4A0000000
+            dw          s_right,  #4B0000000
+            dw          s_mid,    #4C0000000
+            dw          s_instr,  #4D0000000
+            dw          0, 0
+
+; Single-char operator table: [char code, tag value], terminated by 0.
+optab:      dw          43, #100000000
+            dw          45, #110000000
+            dw          42, #120000000
+            dw          47, #130000000
+            dw          40, #140000000
+            dw          41, #150000000
+            dw          44, #160000000
+            dw          59, #170000000
+            dw          58, #180000000
+            dw          61, #190000000
+            dw          0, 0
+
+; Reverse table for detok: [tag value, dsn pointer], terminated by 0.
+rev_tab:    dw          #100000000, o_plus
+            dw          #110000000, o_minus
+            dw          #120000000, o_mul
+            dw          #130000000, o_div
+            dw          #140000000, o_lpar
+            dw          #150000000, o_rpar
+            dw          #160000000, o_comma
+            dw          #170000000, o_semi
+            dw          #180000000, o_colon
+            dw          #190000000, o_eq
+            dw          #1A0000000, o_lt
+            dw          #1B0000000, o_gt
+            dw          #1C0000000, o_le
+            dw          #1D0000000, o_ge
+            dw          #1E0000000, o_ne
+            dw          #200000000, s_rem
+            dw          #210000000, s_print
+            dw          #220000000, s_let
+            dw          #230000000, s_goto
+            dw          #240000000, s_if
+            dw          #250000000, s_then
+            dw          #260000000, s_end
+            dw          #270000000, s_run
+            dw          #280000000, s_list
+            dw          #290000000, s_new
+            dw          #2A0000000, s_gosub
+            dw          #2B0000000, s_return
+            dw          #2C0000000, s_stop
+            dw          #2D0000000, s_poke
+            dw          #2E0000000, s_for
+            dw          #2F0000000, s_next
+            dw          #300000000, s_to
+            dw          #310000000, s_step
+            dw          #320000000, s_input
+            dw          #330000000, s_dim
+            dw          #340000000, s_on
+            dw          #350000000, s_data
+            dw          #360000000, s_read
+            dw          #370000000, s_restore
+            dw          #380000000, s_call
+            dw          #390000000, s_else
+            dw          #3A0000000, s_cont
+            dw          #3B0000000, s_get
+            dw          #400000000, s_peek
+            dw          #410000000, s_abs
+            dw          #420000000, s_sgn
+            dw          #430000000, s_rnd
+            dw          #440000000, s_int
+            dw          #450000000, s_len
+            dw          #460000000, s_asc
+            dw          #470000000, s_val
+            dw          #480000000, s_chr
+            dw          #490000000, s_str
+            dw          #4A0000000, s_left
+            dw          #4B0000000, s_right
+            dw          #4C0000000, s_mid
+            dw          #4D0000000, s_instr
+            dw          0, 0
+
+
+; ==========================================================================
+; Interpreter state (BSS)
+; ==========================================================================
+
+memtop:     bss         1                ; RAM size (first nonexistent word)
+varbot:     bss         1                ; bottom of variable table
+progend:    bss         1                ; end of program text
+runflag:    bss         1                ; nonzero while a program is running
+cur_line:   bss         1                ; current line during RUN
+jumped:     bss         1                ; set by GOTO/GOSUB to suppress advance
+gosub_sp:   bss         1                ; gosub stack pointer (frame index)
+gosub_st:   bss         64               ; gosub stack (2 words/frame: line, resume tok)
+for_sp:     bss         1                ; FOR stack pointer (frame index)
+for_st:     bss         80               ; FOR stack (5 words/frame)
+
+; I/O interrupt state
+out_ptr:    bss         1
+out_cnt:    bss         1
+out_actv:   bss         1
+out_done:   bss         1
+inp_rdy:    bss         1
+th_ac:      bss         1
+th_x2:      bss         1
+th_x3:      bss         1
+
+; Tokenizer state
+tk_src:     bss         1                ; current source pointer
+tk_send:    bss         1                ; source end pointer
+tk_dst:     bss         1                ; current dest pointer (into tokbuf)
+
+; Buffers
+linemax:    dw          120
+linelen:    bss         1
+linebuf:    bss         120              ; raw input line (word-per-char)
+tokbuf:     bss         300              ; tokenized statement
+outexp:     bss         256              ; io_puts expansion scratch
+
+; String heap (bump-allocated; reset on NEW)
+strnext:    bss         1
+strend:     bss         1
+strheap:    bss         4096
+strendl:
+
+; Array heap (bump-allocated; reset on NEW).  Each array block is
+; [N, elem0 .. elem(N-1)]; data lives here, never in the variable table,
+; so the fixed-stride variable scan is unaffected.
+arrnext:    bss         1
+arrend:     bss         1
+arrheap:    bss         4096
+arrendl:
+
+; Stack
+            bss         256
+topstk:
+
+; ==========================================================================
+; Heap / program text begins here, grows toward varbot (top of RAM).
+; ==========================================================================
+progbase:   bss         0
