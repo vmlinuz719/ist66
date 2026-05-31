@@ -1,5 +1,4 @@
-; vibasic.a700 - AI-GENERATED BASIC RUNTIME FOR RDC-700
-; THIS IS AI-GENERATED CODE - I CANNOT ATTEST TO ITS QUALITY
+; vibasic.a700
 ; ==========================================================================
 ; VIBASIC — a single-user line-number BASIC for the RDC-700.
 ; Boots from RIM paper tape; runs in supervisor mode.
