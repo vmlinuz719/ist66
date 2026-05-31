@@ -1229,16 +1229,50 @@ de_cnt:     bss         1
 
 
 ; ==========================================================================
-; st_list — LIST the stored program.
+; st_list — list the stored program.
+;   LIST           list every line
+;   LIST n         list from line n to the end
+;   LIST n, m      list lines n through m inclusive
 ; ==========================================================================
 st_list:    save        x4, x5
-            ldea        x4, .progbase
+            xorr        ac, ac           ; default range: 0 .. (all lines)
+            st          ac, .sl_from
+            ld          ac, .sl_big
+            st          ac, .sl_to
+            ld          x4, .ep_tok      ; any arguments?
+            ld          ac, (x4)
+            movr.rz     ac, ac           ; skip jmp when token != 0
+            jmp         .sl_go           ; TKN_EOL -> no args
+            sub         ac, .v_colon
+            movr.rn     ac, ac           ; skip jmp when token == ':'
+            jmp         .sl_a1
+            jmp         .sl_go           ; ':' -> no args
+sl_a1:      calls       .ex_expr         ; first arg = start line
+            st          ac, .sl_from
+            ld          x4, .ep_tok      ; second arg?
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac           ; skip jmp when token == ','
+            jmp         .sl_go           ; one arg -> list to the end
+            addi        x4, x4, 1        ; consume ','
+            st          x4, .ep_tok
+            calls       .ex_expr         ; second arg = end line
+            st          ac, .sl_to
+sl_go:      ldea        x4, .progbase
 sl_lp:      ld          x5, .progend
             cmplt       x4, x5           ; ptr < progend ?
             jmp         .sl_line
             jmp         .sl_done
-sl_line:    st          x4, .sl_save
+sl_line:    ld          x5, .sl_to
             ld          ac, (x4)         ; line number
+            cmpgt       ac, x5           ; lineno > to ?  (sorted -> stop)
+            jmp         .sl_done
+            ld          x5, .sl_from
+            ld          ac, (x4)
+            cmplt       ac, x5           ; lineno < from ?  skip this line
+            jmp         .sl_skip
+            st          x4, .sl_save
+            ld          ac, (x4)
             callr       .io_putn
             ldea        ac, 32           ; space
             callr       .io_putc
@@ -1247,13 +1281,16 @@ sl_line:    st          x4, .sl_save
             addi        x0, x0, 2        ; token block
             calls       .detok           ; prints tokens + CRLF
             ld          x4, .sl_save
-            ld          ac, 1(x4)
+sl_skip:    ld          ac, 1(x4)
             addi        ac, ac, 2
             addr        ac, x4           ; next line
             jmp         .sl_lp
 sl_done:    rets
 
 sl_save:    bss         1
+sl_from:    bss         1
+sl_to:      bss         1
+sl_big:     dw          #FFFFFFFFF       ; larger than any line number
 
 
 ; ==========================================================================
