@@ -1320,7 +1320,10 @@ pe_lp:      ld          ac, (x4)         ; tag (0 = end)
             rets
 pe_next:    addi        x4, x4, 2
             jmp         .pe_lp
-pe_unk:     ldea        x0, .msg_synt    ; unknown / not-yet-implemented
+pe_unk:     ld          ac, .cur_tok     ; abandon the rest of the line so the
+            st          ac, .ep_tok      ;   caller advances past the bad token
+            calls       .skip_eol        ;   (ep_tok -> TKN_EOL) instead of
+            ldea        x0, .msg_synt    ;   re-dispatching it forever
             callr       .io_puts
             callr       .io_crlf
             rets
