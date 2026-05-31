@@ -67,14 +67,17 @@ start:      xorr        ac, ac
             callr       .io_puts
             callr       .io_crlf
 
-            ldea        x0, .msg_rdy     ; initial "READY."
-            callr       .io_puts
-            callr       .io_crlf
-
 ; ----- READY loop ---------------------------------------------------------
 ; Read a line.  If it begins with a digit it is a program edit (store or
 ; delete a numbered line); otherwise it is a direct command: tokenize and
 ; execute, then print READY.
+;
+; prompt: print "READY." then read.  Entered after a direct command and on
+; every error return (err_show/exc_hdlr), so an error always lands back at a
+; fresh prompt.  ready: (no prompt) is used after a silent program edit.
+prompt:     ldea        x0, .msg_rdy
+            callr       .io_puts
+            callr       .io_crlf
 ready:      ldea        sp, .topstk      ; reset stack each command
             ldea        x0, .linebuf
             ld          x1, .linemax
@@ -95,10 +98,7 @@ rdy_dir:    ldea        x0, .linebuf     ; tokenize the whole line
             calls       .tok_line
             ldea        x0, .tokbuf
             calls       .exec_dir
-            ldea        x0, .msg_rdy
-            callr       .io_puts
-            callr       .io_crlf
-            jmp         .ready
+            jmp         .prompt          ; show "READY." then read next line
 
 
 ; ==========================================================================
@@ -166,7 +166,7 @@ eh_nmem:    ld          ac, .exc_code
 eh_other:   ldea        x0, .msg_fault
 eh_show:    callr       .io_puts
             callr       .io_crlf
-            jmp         .ready
+            jmp         .prompt
 
 excmask:    dw          #F000000         ; control-word bits 27:24
 exc_divz:   dw          #8000000         ; X_DIVZ (8) << 24
@@ -3162,7 +3162,7 @@ err_show:   ldea        sp, .topstk
             callr       .io_crlf
             xorr        ac, ac
             st          ac, .runflag
-            jmp         .ready
+            jmp         .prompt
 
 
 ; ==========================================================================
