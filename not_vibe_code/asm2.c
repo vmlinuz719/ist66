@@ -1480,8 +1480,8 @@ void output_r(uint64_t *work_area, uint64_t limit, FILE *out) {
 }
 
 int main(int argc, char *argv[]) {
-    uint64_t work_area[8192];
-    assembler_ctx_t *assembler = new_assembler(argv[1], 128, 128, work_area);
+    uint64_t work_area[32768];
+    assembler_ctx_t *assembler = new_assembler(argv[1], 1024, 1024, work_area);
     assembler_open(assembler, 0);
     
     while (!assembler->error && !read_symbol(assembler)) {
