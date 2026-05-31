@@ -279,24 +279,26 @@ putsn:      bss         1
 
 ; --- io_putn: output signed decimal integer in ac -------------------------
 ; Pushes digits on the hardware stack, then prints them.  Returns via retr.
+; Digits are extracted with the value held <= 0: non-negatives are folded
+; negative first so the loop never has to negate the most-negative integer
+; (-2^35), whose magnitude has no positive 36-bit representation.
 io_putn:    st          lr, .putn_lr
             st          ac, .putn_v
-            movr.rz     ac, ac           ; skip jmp when value != 0
-            jmp         .putn_zero       ; value == 0: print "0"
-putn_nz:    ld          ac, .putn_v
             movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
-            jmp         .putn_abs
-            jmp         .putn_neg
-putn_neg:   ldea        ac, 45           ; "-"
+            jmp         .putn_pos
+            ldea        ac, 45           ; '-' sign for negatives
             callr       .io_putc
-            ld          ac, .putn_v
+            jmp         .putn_dl0
+putn_pos:   ld          ac, .putn_v      ; fold non-negative to <= 0
             ngtr        ac, ac
             st          ac, .putn_v
-putn_abs:   xorr        ac, ac
+putn_dl0:   xorr        ac, ac
             st          ac, .putn_n      ; digit count = 0
-putn_dl:    ld          ac, .putn_v
-            div         .tenw            ; mq = v/10, xy = v%10
-            push        xy               ; save remainder digit
+putn_dl:    ld          ac, .putn_v      ; v <= 0
+            div         .tenw            ; mq = v/10, xy = v%10 (both <= 0)
+            movr        xy, ac
+            ngtr        ac, ac           ; digit = -(v % 10), 0..9
+            push        ac
             ld          ac, .putn_n
             incr        ac, ac
             st          ac, .putn_n
@@ -315,10 +317,6 @@ putn_pl:    pop         ac               ; digit 0..9
             st          ac, .putn_n
             movr.rn     ac, ac           ; skip jmp when count reaches 0
             jmp         .putn_pl
-            ld          lr, .putn_lr
-            retr
-putn_zero:  ldea        ac, 48           ; "0"
-            callr       .io_putc
             ld          lr, .putn_lr
             retr
 
@@ -2694,10 +2692,210 @@ ea_tmm:     ldea        x0, .msg_tmm
 ea_opv:     bss         1
 ea_opt:     bss         1
 
-; ex_expr — relational: add ( relop add )?  True = -1, false = 0.
-; left in saved x4, relop code in saved x6 across the right-hand evaluation.
-ex_expr:    save        x4, x5, x6
+; ex_shift — add ( ('SHL'|'SHR'|'ASR') add )*.  Integer-only bit shifts that
+; bind looser than +/- and tighter than the relational operators.  The shift
+; count is a constant field in the ALU shift instruction, so the runtime count
+; is OR'd into a template instruction with EDITS (edit-and-skip); the template
+; word sits immediately after the EDITS and is skipped after it fires.
+;   SHL  logical left      (movsz)
+;   SHR  logical right     (movsrz — fills vacated bits with 0)
+;   ASR  arithmetic right  (sign bit -> carry, then movsr fills with the sign)
+; Accumulator value in saved x5; the count register for EDITS is saved x4.
+ex_shift:   save        x4, x5
             calls       .ex_add
+            movr        ac, x5           ; x5 = accumulator (left) value
+es_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            st          ac, .es_tok
+            sub         ac, .v_shl
+            movr.rn     ac, ac           ; SHL ?
+            jmp         .es_cshr
+            xorr        ac, ac           ; op 0 = SHL
+            jmp         .es_have
+es_cshr:    ld          ac, .es_tok
+            sub         ac, .v_shr
+            movr.rn     ac, ac           ; SHR ?
+            jmp         .es_casr
+            ldea        ac, 1            ; op 1 = SHR
+            jmp         .es_have
+es_casr:    ld          ac, .es_tok
+            sub         ac, .v_asr
+            movr.rn     ac, ac           ; ASR ?
+            jmp         .es_done
+            ldea        ac, 2            ; op 2 = ASR
+es_have:    st          ac, .es_op
+            ld          ac, .vtype       ; left operand must be integer
+            movr.rz     ac, ac
+            jmp         .es_lint
+            jmp         .es_tmm
+es_lint:    ld          x4, .ep_tok      ; consume the shift operator
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_add          ; right operand = shift count
+            st          ac, .es_cnt
+            ld          ac, .vtype       ; count must be integer too
+            movr.rz     ac, ac
+            jmp         .es_rint
+            jmp         .es_tmm
+es_rint:    ld          ac, .es_cnt      ; clamp the count to [0, 36]
+            movrzn.rz   ac, ac, 1, 35    ; skip next when negative
+            jmp         .es_cpos
+            xorr        ac, ac           ; negative -> 0
+            st          ac, .es_cnt
+            jmp         .es_disp
+es_cpos:    ld          ac, .es_cnt
+            ld          x4, .const36
+            cmpgt       ac, x4           ; count > 36 ?
+            jmp         .es_clmp
+            jmp         .es_disp
+es_clmp:    ld          ac, .const36     ; > 36 -> 36
+            st          ac, .es_cnt
+es_disp:    ld          ac, .es_op
+            movr.rz     ac, ac           ; skip next when op != 0
+            jmp         .es_shl          ; op 0 = SHL
+            subin.rn    ac, ac, 1        ; skip next when op == 1
+            jmp         .es_asr          ; op 2 = ASR
+            jmp         .es_shr          ; op 1 = SHR
+es_shl:     movr        x5, ac           ; ac = value to shift
+            ld          x4, .es_cnt      ; x4 = count (bits 5:0)
+            edits       x4, .es_tshl     ; execute (movsz | count), skip template
+es_tshl:    movsz       ac, ac, ac, 0
+            jmp         .es_after
+es_shr:     movr        x5, ac
+            ld          x4, .es_cnt
+            edits       x4, .es_tshr
+es_tshr:    movsrz      ac, ac, ac, 0
+            jmp         .es_after
+es_asr:     movr        x5, ac
+            movrtn      ac, ac, 1        ; copy sign bit (35) into carry, keep ac
+            ld          x4, .es_cnt
+            edits       x4, .es_tsar
+es_tsar:    movsr       ac, ac, ac, 0    ; right shift; mask fills top with carry
+            jmp         .es_after
+es_after:   movr        ac, x5           ; x5 = shifted result
+            xorr        ac, ac           ; result type = integer
+            st          ac, .vtype
+            jmp         .es_lp
+es_done:    movr        x5, ac           ; ac = accumulator value
+            rets
+es_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+es_tok:     bss         1
+es_op:      bss         1
+es_cnt:     bss         1
+
+; ----- Bitwise / logical operators ---------------------------------------
+; Precedence, loosest to tightest:  OR/XOR  <  AND  <  NOT  <  relational.
+; These treat their integer operands as 36-bit bit vectors; because TRUE is
+; -1 (all ones) and FALSE is 0 they double as logical connectives, so
+; conditions like  IF A > 0 AND B > 0  parse without parentheses (relational
+; binds tighter than AND).  String operands raise ?TYPE MISMATCH.
+;
+; ex_expr — top of the expression grammar:  and_expr ( ('OR'|'XOR') and_expr )*
+ex_expr:    save        x4, x5
+            calls       .ex_and
+            movr        ac, x5           ; x5 = accumulator value
+bo_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            st          ac, .bo_tok
+            sub         ac, .v_or
+            movr.rn     ac, ac           ; OR ?
+            jmp         .bo_cxor
+            xorr        ac, ac           ; op 0 = OR
+            jmp         .bo_have
+bo_cxor:    ld          ac, .bo_tok
+            sub         ac, .v_xor
+            movr.rn     ac, ac           ; XOR ?
+            jmp         .bo_done
+            ldea        ac, 1            ; op 1 = XOR
+bo_have:    st          ac, .bo_op
+            ld          ac, .vtype       ; left operand must be integer
+            movr.rz     ac, ac
+            jmp         .bo_li
+            jmp         .bo_tmm
+bo_li:      ld          x4, .ep_tok      ; consume the operator
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_and          ; right operand
+            ld          x4, .vtype       ; right operand must be integer
+            movr.rz     x4, x4
+            jmp         .bo_ri
+            jmp         .bo_tmm
+bo_ri:      ld          x4, .bo_op
+            movr.rz     x4, x4           ; skip next when op != 0 (XOR)
+            jmp         .bo_or           ; op 0 = OR
+            xorr        ac, x5           ; op 1 = XOR: x5 ^= operand
+            jmp         .bo_after
+bo_or:      bisr        ac, x5           ; OR: x5 |= operand
+bo_after:   xorr        ac, ac           ; result type = integer
+            st          ac, .vtype
+            jmp         .bo_lp
+bo_done:    movr        x5, ac           ; ac = accumulator value
+            rets
+bo_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+bo_tok:     bss         1
+bo_op:      bss         1
+
+; ex_and — not_expr ( 'AND' not_expr )*.  Bitwise AND, integer-only.
+ex_and:     save        x4, x5
+            calls       .ex_not
+            movr        ac, x5           ; x5 = accumulator value
+ba_lp:      ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_and
+            movr.rn     ac, ac           ; AND ?
+            jmp         .ba_done
+            ld          ac, .vtype       ; left operand must be integer
+            movr.rz     ac, ac
+            jmp         .ba_li
+            jmp         .ba_tmm
+ba_li:      ld          x4, .ep_tok      ; consume AND
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            calls       .ex_not          ; right operand
+            ld          x4, .vtype       ; right operand must be integer
+            movr.rz     x4, x4
+            jmp         .ba_ri
+            jmp         .ba_tmm
+ba_ri:      andr        ac, x5           ; x5 &= operand
+            xorr        ac, ac           ; result type = integer
+            st          ac, .vtype
+            jmp         .ba_lp
+ba_done:    movr        x5, ac
+            rets
+ba_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+; ex_not — 'NOT' not_expr | rel_expr.  Unary one's complement, integer-only.
+ex_not:     save        x4
+            ld          x4, .ep_tok
+            ld          ac, (x4)
+            sub         ac, .v_not
+            movr.rn     ac, ac           ; NOT ?
+            jmp         .nt_rel
+            addi        x4, x4, 1        ; consume NOT
+            st          x4, .ep_tok
+            calls       .ex_not          ; NOT binds to the right
+            ld          x4, .vtype       ; operand must be integer
+            movr.rz     x4, x4
+            jmp         .nt_int
+            jmp         .nt_tmm
+nt_int:     comr        ac, ac           ; one's complement
+            xorr        x4, x4           ; result type = integer
+            st          x4, .vtype
+            rets
+nt_rel:     calls       .ex_rel
+            rets
+nt_tmm:     ldea        x0, .msg_tmm
+            jmp         .err_show
+
+; ex_rel — relational: shift ( relop shift )?  True = -1, false = 0.
+; left in saved x4, relop code in saved x6 across the right-hand evaluation.
+ex_rel:     save        x4, x5, x6
+            calls       .ex_shift
             movr        ac, x4           ; x4 = left value
             ld          ac, .vtype       ; left type (global survives right eval)
             st          ac, .ex_lt
@@ -2710,7 +2908,7 @@ ex_expr:    save        x4, x5, x6
             ld          x5, .ep_tok      ; consume relop
             addi        x5, x5, 1
             st          x5, .ep_tok
-            calls       .ex_add          ; right in ac; x4, x6 preserved
+            calls       .ex_shift         ; right in ac; x4, x6 preserved
             st          x4, .ex_l
             st          ac, .ex_r
             st          x6, .ex_relop
@@ -4247,6 +4445,14 @@ v_left:     dw          #4A0000000       ; LEFT$, tag 0x4A
 v_right:    dw          #4B0000000       ; RIGHT$, tag 0x4B
 v_mid:      dw          #4C0000000       ; MID$, tag 0x4C
 v_instr:    dw          #4D0000000       ; INSTR, tag 0x4D
+v_shl:      dw          #4E0000000       ; SHL  logical shift left,  tag 0x4E
+v_shr:      dw          #4F0000000       ; SHR  logical shift right, tag 0x4F
+v_asr:      dw          #500000000       ; ASR  arithmetic shift right, tag 0x50
+v_and:      dw          #510000000       ; AND  bitwise and, tag 0x51
+v_or:       dw          #520000000       ; OR   bitwise or,  tag 0x52
+v_xor:      dw          #530000000       ; XOR  bitwise xor, tag 0x53
+v_not:      dw          #540000000       ; NOT  one's complement, tag 0x54
+const36:    dw          36               ; shift-count clamp ceiling (0..36)
 neg1:       dw          -1
 lo35:       dw          #7FFFFFFFF       ; low 35 bits (clears sign)
 rnd_mul:    dw          1103515245
@@ -4296,6 +4502,13 @@ s_left:     dsn         "LEFT$"
 s_right:    dsn         "RIGHT$"
 s_mid:      dsn         "MID$"
 s_instr:    dsn         "INSTR"
+s_shl:      dsn         "SHL"
+s_shr:      dsn         "SHR"
+s_asr:      dsn         "ASR"
+s_and:      dsn         "AND"
+s_or:       dsn         "OR"
+s_xor:      dsn         "XOR"
+s_not:      dsn         "NOT"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -4357,6 +4570,13 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_right,  #4B0000000
             dw          s_mid,    #4C0000000
             dw          s_instr,  #4D0000000
+            dw          s_shl,    #4E0000000
+            dw          s_shr,    #4F0000000
+            dw          s_asr,    #500000000
+            dw          s_and,    #510000000
+            dw          s_or,     #520000000
+            dw          s_xor,    #530000000
+            dw          s_not,    #540000000
             dw          0, 0
 
 ; Single-char operator table: [char code, tag value], terminated by 0.
@@ -4430,6 +4650,13 @@ rev_tab:    dw          #100000000, o_plus
             dw          #4B0000000, s_right
             dw          #4C0000000, s_mid
             dw          #4D0000000, s_instr
+            dw          #4E0000000, s_shl
+            dw          #4F0000000, s_shr
+            dw          #500000000, s_asr
+            dw          #510000000, s_and
+            dw          #520000000, s_or
+            dw          #530000000, s_xor
+            dw          #540000000, s_not
             dw          0, 0
 
 
