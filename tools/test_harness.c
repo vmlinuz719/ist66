@@ -119,10 +119,18 @@ int main(int argc, char **argv) {
         if (cpu.min_pending < cur_irql) do_intr(&cpu, cpu.min_pending);
 
         if (cpu.running) {
-            uint64_t inst = read_mem(&cpu, cpu.c[C_PSW] >> 28, get_pc(&cpu));
-            if (inst == MEM_FAULT) do_except(&cpu, X_MEMX);
-            else if (inst == KEY_FAULT) do_except(&cpu, X_PPFR);
-            else exec_all(&cpu, inst);
+            if (cpu.do_edit) {
+                /* EDIT/EDITS: execute the fabricated instruction, then (for
+                 * EDITS) skip the template slot — mirrors cpu.c's run loop. */
+                exec_all(&cpu, cpu.xeq_inst);
+                cpu.do_edit = 0;
+                if (cpu.do_edsk) { set_pc(&cpu, get_pc(&cpu) + 1); cpu.do_edsk = 0; }
+            } else {
+                uint64_t inst = read_mem(&cpu, cpu.c[C_PSW] >> 28, get_pc(&cpu));
+                if (inst == MEM_FAULT) do_except(&cpu, X_MEMX);
+                else if (inst == KEY_FAULT) do_except(&cpu, X_PPFR);
+                else exec_all(&cpu, inst);
+            }
             if (cpu.do_inc) {
                 write_mem(&cpu, cpu.c[C_PSW] >> 28, cpu.inc_addr, cpu.inc_data);
                 cpu.do_inc = 0;
