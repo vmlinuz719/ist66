@@ -1697,20 +1697,32 @@ af_chk:     ld          ac, (x4)
 af_next:    addi        x4, x4, 5
             jmp         .af_lp
 
-; arr_alloc — x0 = dim0 size s0, x1 = dim1 size s1 (1 for a 1-D array),
-; x2 = initial element value.  Allocates a (2 + s0*s1) word block:
-;   block[0]=s0, block[1]=s1, then s0*s1 elements.  Returns block ptr.
+; arr_alloc — x0 = s0, x1 = s1 (1 for 1-D), x2 = init value (string element),
+; x3 = element type (1 = string -> 1-word elements, 2 = numeric -> 2-word
+; doubles).  Allocates 2 + s0*s1*esize words: [s0, s1, elements...].
+; Numeric elements are initialized to +0.0; string elements to x2.  Block ptr
+; in ac.
 arr_alloc:  save        x4, x5
             st          x0, .aa_s0
             st          x1, .aa_s1
             st          x2, .aa_init
+            movr        x3, ac           ; element size from the type
+            subin.rn    ac, ac, 2        ; numeric (double) ?
+            jmp         .aa_e1
+            ldea        ac, 2
+            jmp         .aa_esz
+aa_e1:      ldea        ac, 1
+aa_esz:     st          ac, .aa_es
             ld          ac, .aa_s0       ; N = s0 * s1
             movr        ac, mq
             mul         .aa_s1
             st          ac, .aa_n
+            movr        ac, mq           ; words = N * esize
+            mul         .aa_es
+            st          ac, .aa_nw
             ld          x4, .arrnext
             st          x4, .aa_blk
-            ld          ac, .aa_n        ; new top = arrnext + N + 2 (header)
+            ld          ac, .aa_nw       ; new top = arrnext + N*esize + 2
             addi        ac, ac, 2
             addr        x4, ac
             st          ac, .aa_top
@@ -1728,10 +1740,17 @@ al_ok:      ld          ac, .aa_top
             ld          ac, .aa_s1
             st          ac, 1(x4)        ; block[1] = s1
             addi        x4, x4, 2
-            ld          x5, .aa_n
-            ngtr        x5, x5           ; x5 = -N
-            ld          ac, .aa_init
-al_fl:      movr.rz     x5, x5           ; elements remaining ?
+            ld          ac, .aa_es       ; per-word fill: 0 for doubles, init str
+            subin.rn    ac, ac, 2
+            jmp         .al_fstr
+            xorr        ac, ac
+            jmp         .al_fset
+al_fstr:    ld          ac, .aa_init
+al_fset:    st          ac, .aa_fv
+            ld          x5, .aa_nw
+            ngtr        x5, x5           ; x5 = -(N*esize)
+            ld          ac, .aa_fv
+al_fl:      movr.rz     x5, x5           ; words remaining ?
             jmp         .al_done
             st          ac, (x4)
             addi        x4, x4, 1
@@ -1739,6 +1758,11 @@ al_fl:      movr.rz     x5, x5           ; elements remaining ?
             jmp         .al_fl
 al_done:    ld          ac, .aa_blk
             rets
+
+aa_es:      bss         1
+aa_nw:      bss         1
+aa_fv:      bss         1
+aa_off:     bss         1
 
 ; arr_get — x0 = VAR token pointer.  Returns the array entry pointer in ac,
 ; auto-creating an 11-element (DIM ..(10)) array if it does not yet exist.
@@ -1753,19 +1777,20 @@ arr_get:    save        x4
             ldea        ac, 1
             st          ac, .ar_str
             jmp         .ag_find
-ag_int:     xorr        ac, ac
+ag_int:     ldea        ac, 2            ; numeric arrays hold doubles (type 2)
             st          ac, .ar_str
 ag_find:    calls       .arr_find        ; ac = entry or 0
             movr.rz     ac, ac           ; skip jmp when found
             jmp         .ag_make
             rets                          ; found
-ag_make:    ld          ac, .ar_str      ; init value: "" for string, 0 for int
-            movr.rz     ac, ac
+ag_make:    ld          ac, .ar_str      ; init: "" for string, 0.0 for numeric
+            subin.rn    ac, ac, 1        ; string ?
             jmp         .ag_ci
             ldea        ac, .emptystr
             jmp         .ag_al
 ag_ci:      xorr        ac, ac
-ag_al:      movr        ac, x2           ; x2 = init value
+ag_al:      movr        ac, x2           ; x2 = init value (string element)
+            ld          x3, .ar_str      ; x3 = element type
             ldea        x0, 11           ; default upper bound 10 -> 11 elements
             ldea        x1, 1            ; 1-D (s1 = 1)
             calls       .arr_alloc
@@ -1806,6 +1831,9 @@ arr_addr:   save        x4, x5, x6, x7
             addi        x4, x4, 1
             st          x4, .ep_tok
             calls       .ex_expr         ; first index
+            movr        ac, x0           ; coerce float index to int
+            ld          x1, .vtype
+            calls       .toint
             movr        ac, x6           ; x6 = i0
             ld          x4, .ep_tok      ; optional second index ?
             ld          ac, (x4)
@@ -1815,6 +1843,9 @@ arr_addr:   save        x4, x5, x6, x7
             addi        x4, x4, 1        ; consume ','
             st          x4, .ep_tok
             calls       .ex_expr         ; second index
+            movr        ac, x0           ; coerce float index to int
+            ld          x1, .vtype
+            calls       .toint
             movr        ac, x7           ; x7 = i1
             jmp         .aa_rpar
 aa_one:     xorr        ac, ac           ; 1-D: i1 = 0
@@ -1848,13 +1879,18 @@ aa_i1ok:    movr        x6, mq           ; offset = i0*s1 + i1
             ld          x4, .aa_blk
             mul         1(x4)            ; AC = i0 * s1
             addr        x7, ac           ; AC = i0*s1 + i1
-            ld          x4, .aa_blk      ; element addr = block + 2 + offset
-            addi        x4, x4, 2
-            addr        x4, ac
-            st          ac, .aa_eaddr
+            st          ac, .aa_off
             ld          ac, 2(x5)        ; element type
             st          ac, .aa_etype
-            ld          ac, .aa_eaddr
+            subin.rn    ac, ac, 2        ; numeric (double, esize 2) ?
+            jmp         .aa_off1
+            ld          ac, .aa_off      ; double: offset *= 2
+            movsz       ac, ac, ac, 1
+            st          ac, .aa_off
+aa_off1:    ld          x4, .aa_blk      ; element addr = block + 2 + offset*esize
+            addi        x4, x4, 2
+            ld          ac, .aa_off
+            addr        x4, ac
             rets
 aa_sub:     ldea        x0, .msg_subr
             jmp         .err_show
@@ -2360,13 +2396,15 @@ exp_nF:     ld          ac, .ex_t
             movr.rz     ac, ac
             jmp         .exp_scal
             ld          x0, .ep_tok      ; VAR ( index ) -> element value
-            calls       .arr_addr
-            movr        ac, x4
-            ld          ac, (x4)
-            st          ac, .ex_val
+            calls       .arr_addr        ; ac = element address
+            movr        ac, x4           ; x4 = element address
             ld          ac, .aa_etype
             st          ac, .vtype
-            ld          ac, .ex_val
+            subin.rn    ac, ac, 2        ; double element ?
+            jmp         .exp_aint
+            movr        x4, ac           ; double: value = element address (ptr)
+            rets
+exp_aint:   ld          ac, (x4)         ; string: value = stored pointer word
             rets
 exp_scal:   ld          x0, .ep_tok
             calls       .var_lookup      ; ac = entry
@@ -2459,6 +2497,8 @@ exp_nL:     ld          ac, .ex_w        ; function call
             movrzn.rz   ac, ac, 1, 35    ; skip jmp when code < 6
             jmp         .fn_new
             st          x6, .ex_arg      ; legacy path -> apply_fn
+            ld          ac, .vtype       ; remember the argument type
+            st          ac, .ex_argt
             ld          x4, .ep_tok
             ld          ac, (x4)
             sub         ac, .v_rpar
@@ -2549,11 +2589,25 @@ fc_asc:     movr        x6, x4           ; ASC(s$) -> first char
             xorr        x4, x4
             st          x4, .vtype
             rets
-fc_val:     movr        x6, x0           ; VAL(s$)
-            calls       .str_val
-            xorr        x4, x4
-            st          x4, .vtype
+; fc_val is a continuation of ex_prim (jumped to, runs in ex_prim's frame, so
+; it uses x4-x6 freely and returns via ex_prim's rets).  x6 = arg1 string ptr.
+fc_val:     ld          ac, (x6)         ; VAL(s$): unpack to linebuf, parse_num
+            and         ac, .cntmask
+            st          ac, .fv_cnt
+            ngtr        ac, x5           ; x5 = -count
+            ldea        x4, .linebuf
+fv_lp:      movr.rz     x5, x5           ; characters remain ?
+            jmp         .fv_end
+            incldb      ac, x6, 7        ; next char (x6 = BX pointer)
+            st          ac, (x4)
+            addi        x4, x4, 1
+            incr        x5, x5
+            jmp         .fv_lp
+fv_end:     ld          ac, .fv_cnt
+            st          ac, .linelen
+            calls       .parse_num       ; ac = value; vtype set
             rets
+fv_cnt:     bss         1
 fc_chr:     movr        x6, x0           ; CHR$(n)
             calls       .str_chr
             ldea        x4, 1
@@ -2741,8 +2795,8 @@ iff_0:      xorr        ac, ac
 if_w:       bss         1
 
 ; apply_fn — apply function ex_fn to ex_arg; result in ac.
-apply_fn:   save        x4
-            xorr        ac, ac           ; functions here all return integers
+apply_fn:   save        x4, x5
+            xorr        ac, ac           ; most of these return integers
             st          ac, .vtype
             ld          ac, .ex_fn
             subin.rn    ac, ac, 1
@@ -2753,7 +2807,22 @@ apply_fn:   save        x4
 af_2:       ld          ac, .ex_fn
             subin.rn    ac, ac, 2
             jmp         .af_3
-            ld          ac, .ex_arg      ; ABS
+            ld          ac, .ex_argt     ; ABS
+            subin.rn    ac, ac, 2        ; float ?
+            jmp         .af_aint
+            callr       .f_temp          ; float: copy, clear the sign bit
+            movr        ac, x4
+            ld          x5, .ex_arg
+            ld          ac, (x5)
+            and         ac, .lo35
+            st          ac, (x4)
+            ld          ac, 1(x5)
+            st          ac, 1(x4)
+            ldea        ac, 2
+            st          ac, .vtype
+            movr        x4, ac
+            rets
+af_aint:    ld          ac, .ex_arg
             movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .af_apos
             ld          ac, .ex_arg
@@ -2764,7 +2833,14 @@ af_apos:    ld          ac, .ex_arg
 af_3:       ld          ac, .ex_fn
             subin.rn    ac, ac, 3
             jmp         .af_4
-            ld          ac, .ex_arg      ; SGN
+            ld          ac, .ex_argt     ; SGN
+            subin.rn    ac, ac, 2        ; float ?
+            jmp         .af_sint
+            ld          x0, .ex_arg      ; float: sign via compare to 0.0
+            ldea        x1, .fzero
+            callr       .fp_cmp          ; ac = -1/0/1
+            rets
+af_sint:    ld          ac, .ex_arg
             movr.rz     ac, ac           ; skip jmp when nonzero
             jmp         .af_szero
             ld          ac, .ex_arg
@@ -2795,7 +2871,13 @@ af_rmod:    ld          ac, .rnd_seed
             div         .ex_arg          ; xy = seed mod arg
             movr        xy, ac
             rets
-af_int:     ld          ac, .ex_arg      ; INT (identity for integers)
+af_int:     ld          ac, .ex_argt     ; INT
+            subin.rn    ac, ac, 2        ; float ?
+            jmp         .af_iint
+            ld          x0, .ex_arg      ; float: truncate toward zero
+            calls       .dbl_to_int
+            rets
+af_iint:    ld          ac, .ex_arg      ; integer identity
             rets
 
 ; ex_fact — unary minus, then primary.
@@ -3601,13 +3683,30 @@ st_let:     save        x4, x5
             st          x4, .ep_tok
             calls       .ex_expr
             st          ac, .sl_val
-            ld          ac, .sl_etype    ; element type must match value type
+            ld          ac, .sl_etype    ; double element ?
+            subin.rn    ac, ac, 2
+            jmp         .sl_aint
+            ld          ac, .vtype       ; numeric element: value must be numeric
+            subin.rn    ac, ac, 1
+            jmp         .sl_afp
+            jmp         .sl_tmm
+sl_afp:     ld          x0, .sl_val      ; promote and copy the 2 double words
+            ld          x1, .vtype
+            calls       .promote
+            movr        ac, x5
+            ld          x4, .sl_ent
+            ld          ac, (x5)
+            st          ac, (x4)
+            ld          ac, 1(x5)
+            st          ac, 1(x4)
+            rets
+sl_aint:    ld          ac, .sl_etype    ; string element: types must match
             sub         ac, .vtype
             movr.rn     ac, ac
             jmp         .sl_tmm
             ld          x4, .sl_ent
             ld          ac, .sl_val
-            st          ac, (x4)         ; store into element
+            st          ac, (x4)         ; store pointer into element
             rets
 sl_scal:    ld          x0, .ep_tok
             calls       .var_lookup
@@ -3685,7 +3784,7 @@ sd_one:     ld          x4, .ep_tok      ; expect a VAR
             ldea        ac, 1
             st          ac, .ar_str
             jmp         .sd_chk
-sd_int:     xorr        ac, ac
+sd_int:     ldea        ac, 2            ; numeric arrays hold doubles (type 2)
             st          ac, .ar_str
 sd_chk:     calls       .arr_find        ; already dimensioned ?
             movr.rz     ac, ac
@@ -3749,13 +3848,14 @@ sd_rpar:    ld          x4, .ep_tok      ; expect ')'
             jmp         .sd_init
 sd_s1d:     ldea        ac, 1            ; 1-D: s1 = 1
             st          ac, .sd_s1
-sd_init:    ld          ac, .sd_str      ; init value: "" for string else 0
-            movr.rz     ac, ac
+sd_init:    ld          ac, .sd_str      ; init: "" for string, 0.0 for numeric
+            subin.rn    ac, ac, 1        ; string ?
             jmp         .sd_ci
             ldea        ac, .emptystr
             jmp         .sd_al
 sd_ci:      xorr        ac, ac
-sd_al:      movr        ac, x2           ; x2 = init value
+sd_al:      movr        ac, x2           ; x2 = init value (string element)
+            ld          x3, .sd_str      ; x3 = element type
             ld          ac, .sd_s0
             movr        ac, x0           ; x0 = s0
             ld          ac, .sd_s1
@@ -4691,15 +4791,111 @@ pi_d:       bss         1
 ; ==========================================================================
 ; st_input — INPUT var : prompt "? ", read a line, assign an integer.
 ; ==========================================================================
-st_input:   save        x4
+; parse_num — parse a signed number from linebuf (count in linelen).  Returns
+; ac = value and vtype = 0 (int) or 2 (float double pointer).
+parse_num:  save        x4, x5, x6
+            ldea        x4, .linebuf
+            ld          x5, .linelen
+            addr        x4, x5           ; x5 = linebuf + linelen = end
+            st          x5, .tk_send
+            ldea        x4, .linebuf
+            xorr        ac, ac
+            st          ac, .pn_neg
+pn_sp:      ld          x6, .tk_send     ; skip leading spaces
+            cmplt       x4, x6
+            jmp         .pn_spc
+            jmp         .pn_zero
+pn_spc:     ld          ac, (x4)
+            subin.rn    ac, ac, 32
+            jmp         .pn_sgn
+            incr        x4, x4
+            jmp         .pn_sp
+pn_sgn:     ld          ac, (x4)         ; optional sign
+            subin.rn    ac, ac, 45       ; '-'
+            jmp         .pn_pls
+            ldea        ac, 1
+            st          ac, .pn_neg
+            incr        x4, x4
+            jmp         .pn_idl
+pn_pls:     ld          ac, (x4)
+            subin.rn    ac, ac, 43       ; '+'
+            jmp         .pn_idl
+            incr        x4, x4
+pn_idl:     xorr        x5, x5           ; integer accumulator
+pn_id2:     ld          x6, .tk_send
+            cmplt       x4, x6
+            jmp         .pn_idc
+            jmp         .pn_iend
+pn_idc:     ld          ac, (x4)
+            callr       .id_digit
+            movr.rz     ac, ac
+            jmp         .pn_iend
+            ld          ac, (x4)
+            addi        ac, ac, -48
+            st          ac, .pn_dig
+            movr        x5, mq
+            mul         .tenw
+            add         ac, .pn_dig
+            movr        ac, x5
+            incr        x4, x4
+            jmp         .pn_id2
+pn_iend:    st          x4, .tk_src      ; tk_src after the integer digits
+            ld          x6, .tk_send     ; float if '.' / 'E' / 'e' follows
+            cmplt       x4, x6
+            jmp         .pn_pk
+            jmp         .pn_intr
+pn_pk:      ld          ac, (x4)
+            subin.rn    ac, ac, 46       ; '.'
+            jmp         .pn_pk2
+            jmp         .pn_flt
+pn_pk2:     ld          ac, (x4)
+            subin.rn    ac, ac, 69       ; 'E'
+            jmp         .pn_pk3
+            jmp         .pn_flt
+pn_pk3:     ld          ac, (x4)
+            subin.rn    ac, ac, 101      ; 'e'
+            jmp         .pn_intr
+            jmp         .pn_flt
+pn_intr:    ld          ac, .pn_neg      ; integer result
+            movr.rz     ac, ac
+            jmp         .pn_ipos
+            ngtr        x5, x5
+pn_ipos:    movr        x5, ac
+            xorr        x4, x4
+            st          x4, .vtype
+            rets
+pn_flt:     movr        x5, x0           ; integer part -> x0
+            calls       .parse_flt       ; ac = double ptr; tk_src advanced
+            st          ac, .pn_fp
+            ld          ac, .pn_neg
+            movr.rz     ac, ac
+            jmp         .pn_fpos
+            ld          x0, .pn_fp
+            calls       .fp_neg
+            jmp         .pn_fset
+pn_fpos:    ld          ac, .pn_fp
+pn_fset:    ldea        x4, 2
+            st          x4, .vtype
+            rets
+pn_zero:    xorr        ac, ac
+            st          ac, .vtype
+            rets
+
+pn_neg:     bss         1
+pn_dig:     bss         1
+pn_fp:      bss         1
+
+st_input:   save        x4, x5
             ldea        x0, .msg_inq
             callr       .io_puts
             ldea        x0, .linebuf
             ld          x1, .linemax
             callr       .io_gets
             st          ac, .linelen
-            calls       .parse_int
+            calls       .parse_num
             st          ac, .inp_val
+            ld          ac, .vtype
+            st          ac, .inp_vt
             ld          x4, .ep_tok      ; variable
             ld          ac, (x4)
             and         ac, .tagmask
@@ -4708,16 +4904,32 @@ st_input:   save        x4
             jmp         .si_err
             ld          x0, .ep_tok
             calls       .var_lookup
-            movr        ac, x4
-            xorr        ac, ac           ; type = integer
-            st          ac, 2(x4)
-            ld          ac, .inp_val
+            st          ac, .si_ent
+            ld          x0, .ep_tok      ; advance past the variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          x4, .si_ent
+            ld          ac, .inp_vt
+            st          ac, 2(x4)        ; type
+            subin.rn    ac, ac, 2        ; float ?
+            jmp         .si_int
+            ld          x5, .inp_val     ; float: copy the 2 double words
+            ld          ac, (x5)
+            st          ac, 3(x4)
+            ld          ac, 1(x5)
+            st          ac, 4(x4)
+            rets
+si_int:     ld          ac, .inp_val
             st          ac, 3(x4)
             rets
+si_ent:     bss         1
 si_err:     ldea        x0, .msg_synt
             jmp         .err_show
 
 inp_val:    bss         1
+inp_vt:     bss         1
 
 
 ; ==========================================================================
@@ -5194,6 +5406,7 @@ fpp_buf:    bss         8
 fpu_on:     dw          4
 ften:       dw          #415000000, 0        ; 10.0
 fone:       dw          #3FC000000, 0        ; 1.0
+fzero:      dw          0, 0                 ; 0.0
 mask8:      dw          #FF
 mask28:     dw          #FFFFFFF
 msg_inf:    dsn         "INF"
