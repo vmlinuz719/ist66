@@ -334,6 +334,12 @@ int rdc700_fconorm(
         return F_INSG;
     }
 
+    if (diff_exp == 64) {
+        dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
+        dst_l->signif   = (lesser.signif >> 63) & 1;   // just the round bit
+        return 0;
+    }
+
     if (diff_exp) {
         uint64_t round_one = (lesser.signif >> (diff_exp - 1)) & 1;
         uint64_t new_signif = (lesser.signif >> diff_exp) + round_one;
