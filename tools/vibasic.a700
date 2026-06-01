@@ -2710,13 +2710,9 @@ fn_st0:     bss         1
 fn_avail:   bss         1
 vtype:      bss         1
 
-; is_func — token word in ac -> 1=PEEK 2=ABS 3=SGN 4=RND 5=INT, else 0.
+; is_func — token word in ac -> 2=ABS 3=SGN 4=RND 5=INT, etc., else 0.
+;   (PEEK is a statement now, so code 1 is unused.)
 is_func:    st          ac, .if_w
-            sub         ac, .v_peek
-            movr.rn     ac, ac
-            jmp         .iff_2
-            ldea        ac, 1
-            retr
 iff_2:      ld          ac, .if_w
             sub         ac, .v_abs
             movr.rn     ac, ac
@@ -2822,12 +2818,6 @@ if_w:       bss         1
 apply_fn:   save        x4, x5
             xorr        ac, ac           ; most of these return integers
             st          ac, .vtype
-            ld          ac, .ex_fn
-            subin.rn    ac, ac, 1
-            jmp         .af_2
-            ld          x4, .ex_arg      ; PEEK
-            ld          ac, (x4)
-            rets
 af_2:       ld          ac, .ex_fn
             subin.rn    ac, ac, 2
             jmp         .af_3
@@ -4650,6 +4640,54 @@ poke_a:     bss         1
 
 
 ; ==========================================================================
+; st_peek — PEEK <addr>, <var>.  Reads M[addr] into a numeric variable as an
+; integer (the statement form replacing the old PEEK() function).
+; ==========================================================================
+st_peek:    save        x4, x5
+            calls       .ex_expr         ; address
+            st          ac, .peek_a
+            ld          x4, .ep_tok      ; expect comma
+            ld          ac, (x4)
+            sub         ac, .v_comma
+            movr.rn     ac, ac
+            jmp         .pek_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            ld          x4, .ep_tok      ; expect a VAR
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknvar
+            movr.rn     ac, ac
+            jmp         .pek_err
+            ld          ac, (x4)         ; reject a string variable
+            and         ac, .strvbit
+            movr.rn     ac, ac           ; skip jmp when numeric (strbit clear)
+            jmp         .pek_tmm
+            ld          x0, .ep_tok
+            calls       .var_lookup
+            st          ac, .peek_e
+            ld          x0, .ep_tok      ; advance past the variable
+            calls       .tok_size
+            ld          x4, .ep_tok
+            addr        ac, x4
+            st          x4, .ep_tok
+            ld          x4, .peek_e      ; var = M[addr] (integer)
+            ld          x5, .peek_a
+            ld          ac, (x5)
+            st          ac, 3(x4)
+            xorr        ac, ac
+            st          ac, 2(x4)        ; type 0 = integer
+            rets
+pek_err:    ldea        x0, .msg_synt
+            jmp         .err_show
+pek_tmm:    ldea        x0, .msg_tmm
+            jmp         .err_show
+
+peek_a:     bss         1
+peek_e:     bss         1
+
+
+; ==========================================================================
 ; st_for — FOR var = start TO limit [STEP step]
 ; ==========================================================================
 st_for:     save        x4, x5
@@ -4847,7 +4885,7 @@ pi_d:       bss         1
 
 
 ; ==========================================================================
-; st_input — INPUT var : prompt "? ", read a line, assign an integer.
+; INPUT support (st_input is below parse_num).
 ; ==========================================================================
 ; parse_num — parse a signed number from linebuf (count in linelen).  Returns
 ; ac = value and vtype = 0 (int) or 2 (float double pointer).
@@ -4943,23 +4981,61 @@ pn_neg:     bss         1
 pn_dig:     bss         1
 pn_fp:      bss         1
 
+; st_input — INPUT ["prompt";] var.  Prints a prompt ("? " by default, or a
+; leading string literal followed by ';'), reads a line, and assigns it to a
+; scalar variable: a $ variable receives the whole line as a string, a numeric
+; variable the parsed number (integer or float).
 st_input:   save        x4, x5
-            ldea        x0, .msg_inq
+            ld          x4, .ep_tok      ; optional prompt: "literal" ';'
+            ld          ac, (x4)
+            and         ac, .tagmask
+            sub         ac, .tknstr
+            movr.rn     ac, ac           ; leading string literal ?
+            jmp         .si_dfl
+            calls       .ex_expr         ; evaluate and print the prompt
+            movr        ac, x0
+            calls       .str_print
+            ld          x4, .ep_tok      ; expect ';'
+            ld          ac, (x4)
+            sub         ac, .v_semi
+            movr.rn     ac, ac
+            jmp         .si_err
+            addi        x4, x4, 1
+            st          x4, .ep_tok
+            jmp         .si_read
+si_dfl:     ldea        x0, .msg_inq     ; default prompt "? "
             callr       .io_puts
-            ldea        x0, .linebuf
+si_read:    ldea        x0, .linebuf
             ld          x1, .linemax
             callr       .io_gets
             st          ac, .linelen
-            calls       .parse_num
-            st          ac, .inp_val
-            ld          ac, .vtype
-            st          ac, .inp_vt
-            ld          x4, .ep_tok      ; variable
+si_trim:    ld          x4, .linelen     ; strip the trailing CR / LF
+            movr.rz     x4, x4
+            jmp         .si_var
+            ldea        x5, .linebuf
+            addi        x4, x4, -1
+            addr        x4, x5           ; x5 = &linebuf[linelen-1]
+            ld          ac, (x5)
+            subin.rn    ac, ac, 10       ; LF ?
+            jmp         .si_trcr
+            jmp         .si_trd
+si_trcr:    ld          ac, (x5)
+            subin.rn    ac, ac, 13       ; CR ?
+            jmp         .si_var
+            jmp         .si_trd
+si_trd:     ld          ac, .linelen
+            addi        ac, ac, -1
+            st          ac, .linelen
+            jmp         .si_trim
+si_var:     ld          x4, .ep_tok      ; target variable
             ld          ac, (x4)
             and         ac, .tagmask
             sub         ac, .tknvar
             movr.rn     ac, ac
             jmp         .si_err
+            ld          ac, (x4)         ; remember string vs numeric target
+            and         ac, .strvbit
+            st          ac, .si_str
             ld          x0, .ep_tok
             calls       .var_lookup
             st          ac, .si_ent
@@ -4968,9 +5044,26 @@ st_input:   save        x4, x5
             ld          x4, .ep_tok
             addr        ac, x4
             st          x4, .ep_tok
+            ld          ac, .si_str      ; string target ?
+            movr.rz     ac, ac
+            jmp         .si_num
+            ldea        x0, .linebuf     ; string: store the whole line
+            ld          x1, .linelen
+            calls       .str_from_chars
+            st          ac, .si_val
+            ld          x4, .si_ent
+            ldea        ac, 1
+            st          ac, 2(x4)        ; type 1 = string
+            ld          ac, .si_val
+            st          ac, 3(x4)
+            rets
+si_num:     calls       .parse_num
+            st          ac, .inp_val
+            ld          ac, .vtype
+            st          ac, .inp_vt
             ld          x4, .si_ent
             ld          ac, .inp_vt
-            st          ac, 2(x4)        ; type
+            st          ac, 2(x4)        ; type (int or float)
             subin.rn    ac, ac, 2        ; float ?
             jmp         .si_int
             ld          x5, .inp_val     ; float: copy the 2 double words
@@ -4983,6 +5076,8 @@ si_int:     ld          ac, .inp_val
             st          ac, 3(x4)
             rets
 si_ent:     bss         1
+si_str:     bss         1
+si_val:     bss         1
 si_err:     ldea        x0, .msg_synt
             jmp         .err_show
 
@@ -5722,6 +5817,7 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #2B0000000, st_return    ; RETURN
             dw          #2C0000000, st_stop      ; STOP
             dw          #2D0000000, st_poke      ; POKE
+            dw          #400000000, st_peek      ; PEEK (statement)
             dw          #2E0000000, st_for       ; FOR
             dw          #2F0000000, st_next      ; NEXT
             dw          #320000000, st_input     ; INPUT
