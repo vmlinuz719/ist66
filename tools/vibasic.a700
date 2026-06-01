@@ -2491,12 +2491,18 @@ exp_nL:     ld          ac, .ex_w        ; function call
             st          x4, .ep_tok
             calls       .ex_expr         ; argument 1
             movr        ac, x6           ; x6 = arg1 value
-            ; codes 1..5 are the legacy single integer-argument functions
+            ; codes 15..17 (SQR/EXP/LOG) also take the legacy single-arg path
+            movr        x5, ac           ; ac = code
+            addi        ac, ac, -15
+            movrzn.rn   ac, ac, 1, 35    ; skip jmp when code >= 15
+            jmp         .fn_disp
+            jmp         .fn_legacy
+fn_disp:    ; codes 1..5 are the legacy single integer-argument functions
             movr        x5, ac
             addi        ac, ac, -6
             movrzn.rz   ac, ac, 1, 35    ; skip jmp when code < 6
             jmp         .fn_new
-            st          x6, .ex_arg      ; legacy path -> apply_fn
+fn_legacy:  st          x6, .ex_arg      ; legacy path -> apply_fn
             ld          ac, .vtype       ; remember the argument type
             st          ac, .ex_argt
             ld          x4, .ep_tok
@@ -2786,8 +2792,26 @@ iff_13:     ld          ac, .if_w
 iff_14:     ld          ac, .if_w
             sub         ac, .v_instr
             movr.rn     ac, ac
-            jmp         .iff_0
+            jmp         .iff_15
             ldea        ac, 14
+            retr
+iff_15:     ld          ac, .if_w
+            sub         ac, .v_sqr
+            movr.rn     ac, ac
+            jmp         .iff_16
+            ldea        ac, 15
+            retr
+iff_16:     ld          ac, .if_w
+            sub         ac, .v_exp
+            movr.rn     ac, ac
+            jmp         .iff_17
+            ldea        ac, 16
+            retr
+iff_17:     ld          ac, .if_w
+            sub         ac, .v_log
+            movr.rn     ac, ac
+            jmp         .iff_0
+            ldea        ac, 17
             retr
 iff_0:      xorr        ac, ac
             retr
@@ -2871,13 +2895,47 @@ af_rmod:    ld          ac, .rnd_seed
             div         .ex_arg          ; xy = seed mod arg
             movr        xy, ac
             rets
-af_int:     ld          ac, .ex_argt     ; INT
+af_int:     ld          ac, .ex_fn
+            subin.rn    ac, ac, 5        ; INT (code 5) ?
+            jmp         .af_sqr
+            ld          ac, .ex_argt     ; INT
             subin.rn    ac, ac, 2        ; float ?
             jmp         .af_iint
             ld          x0, .ex_arg      ; float: truncate toward zero
             calls       .dbl_to_int
             rets
 af_iint:    ld          ac, .ex_arg      ; integer identity
+            rets
+
+; SQR / EXP / LOG (codes 15/16/17): promote the argument to a double and
+; dispatch to the matching FP routine; result is a float (vtype = 2).
+af_sqr:     ld          ac, .ex_fn
+            subin.rn    ac, ac, 15       ; SQR ?
+            jmp         .af_exp
+            calls       .af_farg         ; x0 = ptr to double arg
+            calls       .fp_sqrt
+            jmp         .af_fdone
+af_exp:     ld          ac, .ex_fn
+            subin.rn    ac, ac, 16       ; EXP ?
+            jmp         .af_log
+            calls       .af_farg
+            calls       .fp_exp
+            jmp         .af_fdone
+af_log:     calls       .af_farg         ; code 17 = LOG (only one left)
+            calls       .fp_log
+af_fdone:   movr        ac, x4           ; remember result pointer
+            ldea        ac, 2
+            st          ac, .vtype
+            movr        x4, ac
+            rets
+
+; af_farg — promote the function argument (ex_arg/ex_argt) to a double;
+;   returns the double pointer in x0.
+af_farg:    save        x4
+            ld          x0, .ex_arg
+            ld          x1, .ex_argt
+            calls       .promote         ; ac = ptr to double
+            movr        ac, x0
             rets
 
 ; ex_fact — unary minus, then primary.
@@ -5144,6 +5202,206 @@ fpc_zero:   xorr        ac, ac
             retr
 
 ; ==========================================================================
+; fp_sqrt — x0 = ptr to double (>= 0) -> ac = ptr to temp double = sqrt(x).
+;   Newton: y <- (y + x/y)/2, six iterations from an exponent-halved guess
+;   (guess = m * 2^(E>>1), within a factor of sqrt(2) of the answer).
+; ==========================================================================
+fp_sqrt:    save        x4, x5
+            ld          ac, (x0)
+            and         ac, .bit35
+            movr.rn     ac, ac           ; skip jmp when positive
+            jmp         .fsq_neg
+            ldgn        f0, (x0)
+            mvlk.rz     f0, f0           ; x == 0 -> result 0
+            jmp         .fsq_zero
+            stexp       f0, .fsq_e       ; guess y = m * 2^(E>>1)
+            ld          ac, .fsq_e
+            movrtn      ac, ac, 1        ; sign bit -> carry
+            movsr       ac, ac, ac, 1    ; arithmetic E >> 1
+            st          ac, .fsq_e
+            ldexp       f0, .fsq_e       ; f0 = y
+            ldea        ac, 6
+            st          ac, .fsq_cnt
+fsq_it:     ldgn        f1, (x0)         ; f1 = x
+            dvlng       f1, f0, f1       ; f1 = x / y
+            adlng       f0, f1, f0       ; f0 = y + x/y
+            mlgnr       f0, .fhalf       ; f0 = (y + x/y) / 2
+            ld          ac, .fsq_cnt
+            addi        ac, ac, -1
+            st          ac, .fsq_cnt
+            movr.rn     ac, ac           ; skip jmp when count == 0
+            jmp         .fsq_it
+            jmp         .fp_store        ; store f0 -> temp double, rets
+fsq_zero:   ldea        ac, .fzero
+            rets
+fsq_neg:    ldea        x0, .msg_qty
+            jmp         .err_show
+fsq_e:      bss         1
+fsq_cnt:    bss         1
+
+; ==========================================================================
+; fp_exp — x0 = ptr to double -> ac = ptr to temp double = e^x.
+;   2^t with t = x/ln2 = n + f (n = round t).  e^x = 2^n * e^(f*ln2):
+;   compute e^g (g = f*ln2, |g| <= ln2/2) by Taylor series, then add n to
+;   the result exponent.
+; ==========================================================================
+fp_exp:     save        x4, x5
+            ldgn        f0, (x0)
+            mlgnr       f0, .finvln2     ; f0 = t = x / ln2
+            stgnr       f0, .fxp_t
+            ld          ac, .fxp_t       ; n = round(t)
+            and         ac, .bit35
+            movr.rn     ac, ac           ; skip jmp when t >= 0
+            jmp         .fxp_neg
+            adgnr       f0, .fhalf       ; t + 0.5
+            jmp         .fxp_rnd
+fxp_neg:    sbgnr       f0, .fhalf       ; t - 0.5
+fxp_rnd:    stgnr       f0, .fxp_th
+            ldea        x0, .fxp_th
+            calls       .dbl_to_int      ; ac = n (truncate toward 0)
+            st          ac, .fxp_n
+            ld          x0, .fxp_n       ; nd = (double) n
+            calls       .int_to_dbl
+            movr        ac, x4
+            ldgn        f0, .fxp_t       ; f0 = t
+            sbgnr       f0, (x4)         ; f0 = t - n = f
+            mlgnr       f0, .fln2        ; f0 = g = f * ln2
+            stgnr       f0, .fxp_g
+            ldg         f2, .fone        ; sum  = 1
+            ldg         f1, .fone        ; term = 1
+            ldg         f0, .fone        ; kd   = 1
+            stgnr       f0, .fxp_kd
+            ldea        ac, 16
+            st          ac, .fxp_k
+fxp_lp:     mlgnr       f1, .fxp_g       ; term *= g
+            dvgnr       f1, .fxp_kd      ; term /= k
+            stgnr       f1, .fxp_tt      ; stop once the term is negligible (keeps
+            ld          ac, .fxp_tt      ;   the conormalized add away from a
+            and         ac, .lo35        ;   ~64-bit exponent gap).  Use |term| so
+            st          ac, .fxp_tt      ;   the alternating sign doesn't confuse
+            ldg         f3, .fxp_tt      ;   stexp (which keeps the sign bit).
+            stexp       f3, .fxp_te
+            ld          ac, .fxp_te
+            addi        ac, ac, 40
+            movrzn.rz   ac, ac, 1, 35    ; skip jmp when |term| exponent < -40
+            jmp         .fxp_cont
+            jmp         .fxp_done
+fxp_cont:   adlng       f2, f1, f2       ; sum  += term
+            ldg         f0, .fxp_kd      ; k += 1
+            adgnr       f0, .fone
+            stgnr       f0, .fxp_kd
+            ld          ac, .fxp_k
+            addi        ac, ac, -1
+            st          ac, .fxp_k
+            movr.rn     ac, ac           ; skip jmp when count == 0
+            jmp         .fxp_lp
+fxp_done:   stexp       f2, .fxp_e       ; multiply by 2^n: exponent += n
+            ld          ac, .fxp_e
+            add         ac, .fxp_n
+            st          ac, .fxp_e
+            ldexp       f2, .fxp_e
+            mvlng       f2, f0           ; f0 = result (fp_store stores f0)
+            jmp         .fp_store
+fxp_t:      bss         2
+fxp_th:     bss         2
+fxp_g:      bss         2
+fxp_kd:     bss         2
+fxp_tt:     bss         2
+fxp_n:      bss         1
+fxp_k:      bss         1
+fxp_te:     bss         1
+fxp_e:      bss         1
+
+; ==========================================================================
+; fp_log — x0 = ptr to double (> 0) -> ac = ptr to temp double = ln(x).
+;   ln(x) = E*ln2 + ln(m), m in [1,2) reduced to [1/sqrt2, sqrt2];
+;   ln(m) = 2*(u + u^3/3 + u^5/5 + ...), u = (m-1)/(m+1) (|u| < 0.18).
+; ==========================================================================
+fp_log:     save        x4, x5
+            ld          ac, (x0)
+            and         ac, .bit35
+            movr.rn     ac, ac           ; skip jmp when positive
+            jmp         .flg_neg
+            ldgn        f0, (x0)
+            mvlk.rz     f0, f0           ; x == 0 -> error
+            jmp         .flg_neg
+            stexp       f0, .flg_e       ; m in [1,2), exponent E
+            xorr        ac, ac
+            st          ac, .flg_t
+            ldexp       f0, .flg_t       ; f0 = m (exponent forced to 0)
+            ldg         f1, .fsqrt2      ; if m >= sqrt2: m /= 2, E += 1
+            sblng       f0, f1, f3
+            mvlk.lz     f3, f3           ; skip next when m - sqrt2 < 0
+            jmp         .flg_noh
+            mlgnr       f0, .fhalf
+            ld          ac, .flg_e
+            addi        ac, ac, 1
+            st          ac, .flg_e
+flg_noh:    ldg         f1, .fone        ; u = (m-1)/(m+1)
+            sblng       f0, f1, f2       ; f2 = m - 1
+            adlng       f0, f1, f3       ; f3 = m + 1
+            dvlng       f2, f3, f0       ; f0 = u
+            ; run the series on |u| (so stexp/early-exit see a positive term),
+            ; then reapply the sign: artanh(u) = sign(u) * artanh(|u|).
+            stgnr       f0, .flg_u
+            ld          ac, .flg_u
+            and         ac, .bit35
+            st          ac, .flg_sgn     ; remember sign of u
+            ld          ac, .flg_u
+            and         ac, .lo35        ; clear sign -> |u|
+            st          ac, .flg_u
+            ldg         f0, .flg_u       ; f0 = |u|
+            mllng       f0, f0, f0       ; f0 = u^2
+            stgnr       f0, .flg_u2
+            ldg         f1, .flg_u       ; term = |u|
+            ldg         f2, .flg_u       ; sum  = |u|
+            ldg         f0, .fthree      ; kd = 3
+            stgnr       f0, .flg_kd
+            ldea        ac, 14
+            st          ac, .flg_k
+flg_lp:     mlgnr       f1, .flg_u2      ; term *= u^2
+            stexp       f1, .flg_te      ; stop once the term is negligible: this
+            ld          ac, .flg_te      ;   keeps the conormalized add away from
+            addi        ac, ac, 40       ;   a ~64-bit exponent gap (term ~ 2^-40
+            movrzn.rz   ac, ac, 1, 35    ;   is already far below 7-digit display)
+            jmp         .flg_cont        ; skip jmp when term exponent < -40
+            jmp         .flg_done
+flg_cont:   mvlng       f1, f3           ; f3 = term
+            dvgnr       f3, .flg_kd      ; f3 = term / k
+            adlng       f2, f3, f2       ; sum += term/k
+            ldg         f0, .flg_kd      ; k += 2
+            adgnr       f0, .ftwo
+            stgnr       f0, .flg_kd
+            ld          ac, .flg_k
+            addi        ac, ac, -1
+            st          ac, .flg_k
+            movr.rn     ac, ac           ; skip jmp when count == 0
+            jmp         .flg_lp
+flg_done:   adlng       f2, f2, f2       ; 2 * artanh(|u|)
+            ld          ac, .flg_sgn     ; reapply sign of u
+            movr.rn     ac, ac           ; skip nglng when u >= 0
+            nglng       f2, f2           ; u < 0 -> negate
+            stgnr       f2, .flg_lm      ; ln(m)
+            ld          x0, .flg_e       ; Ed = (double) E
+            calls       .int_to_dbl
+            movr        ac, x4
+            ldgn        f0, (x4)
+            mlgnr       f0, .fln2        ; f0 = E * ln2
+            adgnr       f0, .flg_lm      ; f0 = E*ln2 + ln(m)
+            jmp         .fp_store
+flg_neg:    ldea        x0, .msg_qty
+            jmp         .err_show
+flg_e:      bss         1
+flg_t:      bss         1
+flg_te:     bss         1
+flg_sgn:    bss         1
+flg_k:      bss         1
+flg_u:      bss         2
+flg_u2:     bss         2
+flg_kd:     bss         2
+flg_lm:     bss         2
+
+; ==========================================================================
 ; fp_print — x0 = pointer to a double; print it in decimal.
 ;   Normalizes |value| into [1,10) (decimal exponent D), extracts 7 digits,
 ;   then formats fixed (D in [-4,6]) or exponential.
@@ -5407,10 +5665,17 @@ fpu_on:     dw          4
 ften:       dw          #415000000, 0        ; 10.0
 fone:       dw          #3FC000000, 0        ; 1.0
 fzero:      dw          0, 0                 ; 0.0
+fhalf:      dw          #3F4000000, #000000000   ; 0.5
+ftwo:       dw          #404000000, #000000000   ; 2.0
+fthree:     dw          #406000000, #000000000   ; 3.0
+fln2:       dw          #3F58B90BF, #BE8E7BC00   ; ln 2  = 0.6931471805599453
+finvln2:    dw          #3FDC551D9, #4AE0BF800   ; 1/ln2 = 1.4426950408889634
+fsqrt2:     dw          #3FDA82799, #9FCEF3400   ; sqrt2 = 1.4142135623730951
 mask8:      dw          #FF
 mask28:     dw          #FFFFFFF
 msg_inf:    dsn         "INF"
 msg_ovf:    dsn         "?OVERFLOW"
+msg_qty:    dsn         "?ILLEGAL QUANTITY"
 
 
 ; ==========================================================================
@@ -5536,6 +5801,9 @@ v_and:      dw          #510000000       ; AND  bitwise and, tag 0x51
 v_or:       dw          #520000000       ; OR   bitwise or,  tag 0x52
 v_xor:      dw          #530000000       ; XOR  bitwise xor, tag 0x53
 v_not:      dw          #540000000       ; NOT  one's complement, tag 0x54
+v_sqr:      dw          #560000000       ; SQR  square root,        tag 0x56
+v_exp:      dw          #570000000       ; EXP  e^x,                tag 0x57
+v_log:      dw          #580000000       ; LOG  natural log,        tag 0x58
 const36:    dw          36               ; shift-count clamp ceiling (0..36)
 neg1:       dw          -1
 lo35:       dw          #7FFFFFFFF       ; low 35 bits (clears sign)
@@ -5594,6 +5862,9 @@ s_and:      dsn         "AND"
 s_or:       dsn         "OR"
 s_xor:      dsn         "XOR"
 s_not:      dsn         "NOT"
+s_sqr:      dsn         "SQR"
+s_exp:      dsn         "EXP"
+s_log:      dsn         "LOG"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -5663,6 +5934,9 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_or,     #520000000
             dw          s_xor,    #530000000
             dw          s_not,    #540000000
+            dw          s_sqr,    #560000000
+            dw          s_exp,    #570000000
+            dw          s_log,    #580000000
             dw          0, 0
 
 ; Single-char operator table: [char code, tag value], terminated by 0.
@@ -5745,6 +6019,9 @@ rev_tab:    dw          #100000000, o_plus
             dw          #520000000, s_or
             dw          #530000000, s_xor
             dw          #540000000, s_not
+            dw          #560000000, s_sqr
+            dw          #570000000, s_exp
+            dw          #580000000, s_log
             dw          0, 0
 
 
