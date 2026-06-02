@@ -62,7 +62,7 @@ void *ppt(void *vctx) {
         }
         
         else if (command == 1) {
-            // msleep(2);
+            msleep(2);
             int ch = fgetc(ctx->file);
             if (ch == EOF) {
                 // fclose(ctx->file);
