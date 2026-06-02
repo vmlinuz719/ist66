@@ -2710,9 +2710,13 @@ fn_st0:     bss         1
 fn_avail:   bss         1
 vtype:      bss         1
 
-; is_func — token word in ac -> 2=ABS 3=SGN 4=RND 5=INT, etc., else 0.
-;   (PEEK is a statement now, so code 1 is unused.)
+; is_func — token word in ac -> 1=PEEK 2=ABS 3=SGN 4=RND 5=INT, else 0.
 is_func:    st          ac, .if_w
+            sub         ac, .v_peek
+            movr.rn     ac, ac
+            jmp         .iff_2
+            ldea        ac, 1
+            retr
 iff_2:      ld          ac, .if_w
             sub         ac, .v_abs
             movr.rn     ac, ac
@@ -2806,8 +2810,32 @@ iff_16:     ld          ac, .if_w
 iff_17:     ld          ac, .if_w
             sub         ac, .v_log
             movr.rn     ac, ac
-            jmp         .iff_0
+            jmp         .iff_18
             ldea        ac, 17
+            retr
+iff_18:     ld          ac, .if_w
+            sub         ac, .v_sin
+            movr.rn     ac, ac
+            jmp         .iff_19
+            ldea        ac, 18
+            retr
+iff_19:     ld          ac, .if_w
+            sub         ac, .v_cos
+            movr.rn     ac, ac
+            jmp         .iff_20
+            ldea        ac, 19
+            retr
+iff_20:     ld          ac, .if_w
+            sub         ac, .v_tan
+            movr.rn     ac, ac
+            jmp         .iff_21
+            ldea        ac, 20
+            retr
+iff_21:     ld          ac, .if_w
+            sub         ac, .v_atan
+            movr.rn     ac, ac
+            jmp         .iff_0
+            ldea        ac, 21
             retr
 iff_0:      xorr        ac, ac
             retr
@@ -2818,6 +2846,12 @@ if_w:       bss         1
 apply_fn:   save        x4, x5
             xorr        ac, ac           ; most of these return integers
             st          ac, .vtype
+            ld          ac, .ex_fn
+            subin.rn    ac, ac, 1
+            jmp         .af_2
+            ld          x4, .ex_arg      ; PEEK
+            ld          ac, (x4)
+            rets
 af_2:       ld          ac, .ex_fn
             subin.rn    ac, ac, 2
             jmp         .af_3
@@ -2897,8 +2931,8 @@ af_int:     ld          ac, .ex_fn
 af_iint:    ld          ac, .ex_arg      ; integer identity
             rets
 
-; SQR / EXP / LOG (codes 15/16/17): promote the argument to a double and
-; dispatch to the matching FP routine; result is a float (vtype = 2).
+; SQR EXP LOG SIN COS TAN ATAN (codes 15..21): promote the argument to a
+; double and dispatch to the matching FP routine; result is float (vtype 2).
 af_sqr:     ld          ac, .ex_fn
             subin.rn    ac, ac, 15       ; SQR ?
             jmp         .af_exp
@@ -2911,8 +2945,32 @@ af_exp:     ld          ac, .ex_fn
             calls       .af_farg
             calls       .fp_exp
             jmp         .af_fdone
-af_log:     calls       .af_farg         ; code 17 = LOG (only one left)
+af_log:     ld          ac, .ex_fn
+            subin.rn    ac, ac, 17       ; LOG ?
+            jmp         .af_sin
+            calls       .af_farg
             calls       .fp_log
+            jmp         .af_fdone
+af_sin:     ld          ac, .ex_fn
+            subin.rn    ac, ac, 18       ; SIN ?
+            jmp         .af_cos
+            calls       .af_farg
+            calls       .fp_sin
+            jmp         .af_fdone
+af_cos:     ld          ac, .ex_fn
+            subin.rn    ac, ac, 19       ; COS ?
+            jmp         .af_tan
+            calls       .af_farg
+            calls       .fp_cos
+            jmp         .af_fdone
+af_tan:     ld          ac, .ex_fn
+            subin.rn    ac, ac, 20       ; TAN ?
+            jmp         .af_atan
+            calls       .af_farg
+            calls       .fp_tan
+            jmp         .af_fdone
+af_atan:    calls       .af_farg         ; code 21 = ATAN (only one left)
+            calls       .fp_atan
 af_fdone:   movr        ac, x4           ; remember result pointer
             ldea        ac, 2
             st          ac, .vtype
@@ -4640,54 +4698,6 @@ poke_a:     bss         1
 
 
 ; ==========================================================================
-; st_peek — PEEK <addr>, <var>.  Reads M[addr] into a numeric variable as an
-; integer (the statement form replacing the old PEEK() function).
-; ==========================================================================
-st_peek:    save        x4, x5
-            calls       .ex_expr         ; address
-            st          ac, .peek_a
-            ld          x4, .ep_tok      ; expect comma
-            ld          ac, (x4)
-            sub         ac, .v_comma
-            movr.rn     ac, ac
-            jmp         .pek_err
-            addi        x4, x4, 1
-            st          x4, .ep_tok
-            ld          x4, .ep_tok      ; expect a VAR
-            ld          ac, (x4)
-            and         ac, .tagmask
-            sub         ac, .tknvar
-            movr.rn     ac, ac
-            jmp         .pek_err
-            ld          ac, (x4)         ; reject a string variable
-            and         ac, .strvbit
-            movr.rn     ac, ac           ; skip jmp when numeric (strbit clear)
-            jmp         .pek_tmm
-            ld          x0, .ep_tok
-            calls       .var_lookup
-            st          ac, .peek_e
-            ld          x0, .ep_tok      ; advance past the variable
-            calls       .tok_size
-            ld          x4, .ep_tok
-            addr        ac, x4
-            st          x4, .ep_tok
-            ld          x4, .peek_e      ; var = M[addr] (integer)
-            ld          x5, .peek_a
-            ld          ac, (x5)
-            st          ac, 3(x4)
-            xorr        ac, ac
-            st          ac, 2(x4)        ; type 0 = integer
-            rets
-pek_err:    ldea        x0, .msg_synt
-            jmp         .err_show
-pek_tmm:    ldea        x0, .msg_tmm
-            jmp         .err_show
-
-peek_a:     bss         1
-peek_e:     bss         1
-
-
-; ==========================================================================
 ; st_for — FOR var = start TO limit [STEP step]
 ; ==========================================================================
 st_for:     save        x4, x5
@@ -5497,6 +5507,249 @@ flg_kd:     bss         2
 flg_lm:     bss         2
 
 ; ==========================================================================
+; fp_sintaylor — x0 = ptr to r (|r| <= pi/2) -> ac = ptr to sin(r).
+;   sin(r) = r - r^3/3! + r^5/5! - ...  term *= -r^2 then /= two successive
+;   integers; stop once the term is negligible (|term| exponent < -40).
+; ==========================================================================
+fp_sintaylor: save      x4, x5
+            ldgn        f0, (x0)
+            stgnr       f0, .fst_r
+            ldg         f0, .fst_r
+            mllng       f0, f0, f0       ; r^2
+            nglng       f0, f0           ; -r^2
+            stgnr       f0, .fst_nr2
+            ldg         f1, .fst_r       ; term = r
+            ldg         f2, .fst_r       ; sum  = r
+            ldg         f0, .ftwo        ; dn = 2
+            stgnr       f0, .fst_dn
+            ldea        ac, 18
+            st          ac, .fst_k
+fst_lp:     mlgnr       f1, .fst_nr2     ; term *= -r^2
+            stgnr       f1, .fst_tt      ; early exit on |term| exponent < -40
+            ld          ac, .fst_tt
+            and         ac, .lo35
+            st          ac, .fst_tt
+            ldg         f3, .fst_tt
+            stexp       f3, .fst_te
+            ld          ac, .fst_te
+            addi        ac, ac, 40
+            movrzn.rz   ac, ac, 1, 35
+            jmp         .fst_cont
+            jmp         .fst_done
+fst_cont:   dvgnr       f1, .fst_dn      ; term /= dn ; dn += 1
+            ldg         f0, .fst_dn
+            adgnr       f0, .fone
+            stgnr       f0, .fst_dn
+            dvgnr       f1, .fst_dn      ; term /= dn ; dn += 1
+            ldg         f0, .fst_dn
+            adgnr       f0, .fone
+            stgnr       f0, .fst_dn
+            adlng       f2, f1, f2       ; sum += term
+            ld          ac, .fst_k
+            addi        ac, ac, -1
+            st          ac, .fst_k
+            movr.rn     ac, ac
+            jmp         .fst_lp
+fst_done:   mvlng       f2, f0           ; f0 = sum
+            jmp         .fp_store
+fst_r:      bss         2
+fst_nr2:    bss         2
+fst_dn:     bss         2
+fst_tt:     bss         2
+fst_te:     bss         1
+fst_k:      bss         1
+
+; ==========================================================================
+; fp_sin — x0 = ptr double (radians) -> ac = ptr to sin(x).
+;   k = round(x/pi), r = x - k*pi (|r| <= pi/2); sin(x) = (-1)^k sin(r).
+; ==========================================================================
+fp_sin:     save        x4, x5
+            ldgn        f0, (x0)
+            stgnr       f0, .fsn_x
+            dvgnr       f0, .pi          ; x / pi
+            stgnr       f0, .fsn_q
+            ld          ac, .fsn_q       ; k = round(x/pi)
+            and         ac, .bit35
+            movr.rn     ac, ac           ; skip jmp when x/pi >= 0
+            jmp         .fsn_neg
+            adgnr       f0, .fhalf
+            jmp         .fsn_rnd
+fsn_neg:    sbgnr       f0, .fhalf
+fsn_rnd:    stgnr       f0, .fsn_th
+            ldea        x0, .fsn_th
+            calls       .dbl_to_int
+            st          ac, .fsn_k
+            ld          x0, .fsn_k       ; r = x - k*pi
+            calls       .int_to_dbl
+            movr        ac, x4
+            ldgn        f0, (x4)
+            mlgnr       f0, .pi
+            stgnr       f0, .fsn_kp
+            ldgn        f0, .fsn_x
+            sbgnr       f0, .fsn_kp
+            stgnr       f0, .fsn_r
+            ldea        x0, .fsn_r
+            calls       .fp_sintaylor
+            st          ac, .fsn_sp
+            ld          ac, .fsn_k       ; (-1)^k : negate when k is odd
+            and         ac, .int1
+            movr.rn     ac, ac           ; skip jmp when k is even
+            jmp         .fsn_odd
+            ld          ac, .fsn_sp      ; even: sin(r) unchanged
+            rets
+fsn_odd:    ld          x0, .fsn_sp      ; odd: -sin(r)
+            calls       .fp_neg
+            rets
+fsn_x:      bss         2
+fsn_q:      bss         2
+fsn_th:     bss         2
+fsn_kp:     bss         2
+fsn_r:      bss         2
+fsn_k:      bss         1
+fsn_sp:     bss         1
+
+; ==========================================================================
+; fp_cos — x0 = ptr double -> ac = ptr to cos(x) = sin(x + pi/2).
+; ==========================================================================
+fp_cos:     save        x4
+            ldgn        f0, (x0)
+            adgnr       f0, .halfpi      ; x + pi/2
+            callr       .f_temp
+            movr        ac, x4
+            stgnr       f0, (x4)
+            movr        x4, x0           ; x0 = ptr to (x + pi/2)
+            calls       .fp_sin
+            rets
+
+; ==========================================================================
+; fp_tan — x0 = ptr double -> ac = ptr to tan(x) = sin(x) / cos(x).
+; ==========================================================================
+fp_tan:     save        x4, x5
+            st          x0, .ftn_x
+            calls       .fp_sin
+            st          ac, .ftn_s
+            ld          x0, .ftn_x
+            calls       .fp_cos
+            movr        ac, x1           ; x1 = cos pointer
+            ld          x0, .ftn_s       ; x0 = sin pointer
+            calls       .fp_div
+            rets
+ftn_x:      bss         1
+ftn_s:      bss         1
+
+; ==========================================================================
+; fp_atan — x0 = ptr double -> ac = ptr to atan(x) (radians).
+;   |x|>1: atan = sign*pi/2 - atan(1/|x|).  Then for the (now <=1) argument,
+;   if it exceeds 2-sqrt3, atan(t) = pi/6 + atan((sqrt3*t-1)/(sqrt3+t)) so the
+;   series argument stays within +-0.27 and converges fast.
+; ==========================================================================
+fp_atan:    save        x4, x5
+            ld          ac, (x0)
+            and         ac, .bit35
+            st          ac, .fat_sgn
+            ldgn        f0, (x0)
+            stgnr       f0, .fat_t
+            ld          ac, .fat_t
+            and         ac, .lo35        ; |x|
+            st          ac, .fat_t
+            ldg         f0, .fat_t       ; invert when |x| > 1
+            ldg         f1, .fone
+            sblng       f0, f1, f3       ; f3 = t - 1
+            xorr        ac, ac
+            st          ac, .fat_inv
+            mvlk.lz     f3, f3           ; skip next when t - 1 < 0
+            jmp         .fat_noinv
+            ldg         f0, .fone
+            dvgnr       f0, .fat_t       ; 1/t
+            stgnr       f0, .fat_t
+            ldea        ac, 1
+            st          ac, .fat_inv
+fat_noinv:  xorr        ac, ac
+            st          ac, .fat_red
+            ldg         f0, .fat_t       ; pi/6 reduction when t > 2-sqrt3
+            ldg         f1, .t2ms3
+            sblng       f0, f1, f3       ; f3 = t - (2-sqrt3)
+            mvlk.lz     f3, f3           ; skip next when t small enough
+            jmp         .fat_small
+            ldg         f0, .fat_t
+            mlgnr       f0, .sqrt3       ; sqrt3*t
+            sbgnr       f0, .fone        ; sqrt3*t - 1
+            stgnr       f0, .fat_num
+            ldg         f0, .fat_t
+            adgnr       f0, .sqrt3       ; t + sqrt3
+            stgnr       f0, .fat_den
+            ldgn        f0, .fat_num
+            dvgnr       f0, .fat_den
+            stgnr       f0, .fat_t
+            ldea        ac, 1
+            st          ac, .fat_red
+fat_small:  ldgn        f0, .fat_t       ; atan(u) = u - u^3/3 + u^5/5 - ...
+            stgnr       f0, .fat_u
+            mllng       f0, f0, f0
+            nglng       f0, f0
+            stgnr       f0, .fat_nu2     ; -u^2
+            ldg         f1, .fat_u       ; term = u
+            ldg         f2, .fat_u       ; sum  = u
+            ldg         f0, .fthree      ; dn = 3
+            stgnr       f0, .fat_dn
+            ldea        ac, 30
+            st          ac, .fat_k
+fat_lp:     mlgnr       f1, .fat_nu2     ; term *= -u^2
+            stgnr       f1, .fat_tt      ; early exit on |term| exponent < -40
+            ld          ac, .fat_tt
+            and         ac, .lo35
+            st          ac, .fat_tt
+            ldg         f3, .fat_tt
+            stexp       f3, .fat_te
+            ld          ac, .fat_te
+            addi        ac, ac, 40
+            movrzn.rz   ac, ac, 1, 35
+            jmp         .fat_cont
+            jmp         .fat_sdone
+fat_cont:   mvlng       f1, f3
+            dvgnr       f3, .fat_dn      ; term / dn
+            adlng       f2, f3, f2       ; sum += term/dn
+            ldg         f0, .fat_dn      ; dn += 2
+            adgnr       f0, .ftwo
+            stgnr       f0, .fat_dn
+            ld          ac, .fat_k
+            addi        ac, ac, -1
+            st          ac, .fat_k
+            movr.rn     ac, ac
+            jmp         .fat_lp
+fat_sdone:  ld          ac, .fat_red     ; add pi/6 when the reduction was used
+            movr.rn     ac, ac           ; skip the add when red == 0
+            adgnr       f2, .pi6
+            ld          ac, .fat_inv     ; pi/2 - result when inverted
+            movr.rn     ac, ac           ; skip jmp when inv == 0
+            jmp         .fat_doinv
+            jmp         .fat_noinv2
+fat_doinv:  ldg         f0, .halfpi
+            sblng       f0, f2, f2
+fat_noinv2: stgnr       f2, .fat_res     ; reapply the sign of x
+            ld          ac, .fat_sgn
+            movr.rn     ac, ac           ; skip jmp when x >= 0
+            jmp         .fat_neg
+            ldgn        f0, .fat_res
+            jmp         .fat_store
+fat_neg:    ldgn        f0, .fat_res
+            nglng       f0, f0
+fat_store:  jmp         .fp_store
+fat_sgn:    bss         1
+fat_t:      bss         2
+fat_inv:    bss         1
+fat_red:    bss         1
+fat_num:    bss         2
+fat_den:    bss         2
+fat_u:      bss         2
+fat_nu2:    bss         2
+fat_dn:     bss         2
+fat_tt:     bss         2
+fat_te:     bss         1
+fat_k:      bss         1
+fat_res:    bss         2
+
+; ==========================================================================
 ; fp_print — x0 = pointer to a double; print it in decimal.
 ;   Normalizes |value| into [1,10) (decimal exponent D), extracts 7 digits,
 ;   then formats fixed (D in [-4,6]) or exponential.
@@ -5766,6 +6019,12 @@ fthree:     dw          #406000000, #000000000   ; 3.0
 fln2:       dw          #3F58B90BF, #BE8E7BC00   ; ln 2  = 0.6931471805599453
 finvln2:    dw          #3FDC551D9, #4AE0BF800   ; 1/ln2 = 1.4426950408889634
 fsqrt2:     dw          #3FDA82799, #9FCEF3400   ; sqrt2 = 1.4142135623730951
+pi:         dw          #406487ED5, #110B46000   ; pi    = 3.141592653589793
+halfpi:     dw          #3FE487ED5, #110B46000   ; pi/2  = 1.5707963267948966
+pi6:        dw          #3F430548E, #0B5CD9400   ; pi/6  = 0.5235987755982988
+sqrt3:      dw          #3FEED9EBA, #16132A800   ; sqrt3 = 1.7320508075688772
+t2ms3:      dw          #3EC498517, #A7B356000   ; 2-sqrt3 = 0.2679491924311228
+int1:       dw          1                        ; integer 1 (odd-quadrant test)
 mask8:      dw          #FF
 mask28:     dw          #FFFFFFF
 msg_inf:    dsn         "INF"
@@ -5817,7 +6076,6 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #2B0000000, st_return    ; RETURN
             dw          #2C0000000, st_stop      ; STOP
             dw          #2D0000000, st_poke      ; POKE
-            dw          #400000000, st_peek      ; PEEK (statement)
             dw          #2E0000000, st_for       ; FOR
             dw          #2F0000000, st_next      ; NEXT
             dw          #320000000, st_input     ; INPUT
@@ -5900,6 +6158,10 @@ v_not:      dw          #540000000       ; NOT  one's complement, tag 0x54
 v_sqr:      dw          #560000000       ; SQR  square root,        tag 0x56
 v_exp:      dw          #570000000       ; EXP  e^x,                tag 0x57
 v_log:      dw          #580000000       ; LOG  natural log,        tag 0x58
+v_sin:      dw          #590000000       ; SIN  sine (radians),     tag 0x59
+v_cos:      dw          #5A0000000       ; COS  cosine (radians),   tag 0x5A
+v_tan:      dw          #5B0000000       ; TAN  tangent (radians),  tag 0x5B
+v_atan:     dw          #5C0000000       ; ATAN arctangent,         tag 0x5C
 const36:    dw          36               ; shift-count clamp ceiling (0..36)
 neg1:       dw          -1
 lo35:       dw          #7FFFFFFFF       ; low 35 bits (clears sign)
@@ -5961,6 +6223,10 @@ s_not:      dsn         "NOT"
 s_sqr:      dsn         "SQR"
 s_exp:      dsn         "EXP"
 s_log:      dsn         "LOG"
+s_sin:      dsn         "SIN"
+s_cos:      dsn         "COS"
+s_tan:      dsn         "TAN"
+s_atan:     dsn         "ATAN"
 
 ; Operator symbol strings (for detok)
 o_plus:     dsn         "+"
@@ -6033,6 +6299,10 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_sqr,    #560000000
             dw          s_exp,    #570000000
             dw          s_log,    #580000000
+            dw          s_sin,    #590000000
+            dw          s_cos,    #5A0000000
+            dw          s_tan,    #5B0000000
+            dw          s_atan,   #5C0000000
             dw          0, 0
 
 ; Single-char operator table: [char code, tag value], terminated by 0.
@@ -6118,6 +6388,10 @@ rev_tab:    dw          #100000000, o_plus
             dw          #560000000, s_sqr
             dw          #570000000, s_exp
             dw          #580000000, s_log
+            dw          #590000000, s_sin
+            dw          #5A0000000, s_cos
+            dw          #5B0000000, s_tan
+            dw          #5C0000000, s_atan
             dw          0, 0
 
 
