@@ -4729,7 +4729,11 @@ st_for:     save        x4, x5
             calls       .ex_expr         ; start
             ld          x4, .sf_va
             st          ac, (x4)
-            ld          x4, .ep_tok      ; expect TO
+            ld          ac, .vtype       ; start must be integer
+            movr.rz     ac, ac
+            jmp         .sf_s1
+            jmp         .sf_terr
+sf_s1:      ld          x4, .ep_tok      ; expect TO
             ld          ac, (x4)
             sub         ac, .v_to
             movr.rn     ac, ac
@@ -4738,7 +4742,11 @@ st_for:     save        x4, x5
             st          x4, .ep_tok
             calls       .ex_expr         ; limit
             st          ac, .sf_lim
-            ld          x4, .ep_tok      ; optional STEP
+            ld          ac, .vtype       ; limit must be integer
+            movr.rz     ac, ac
+            jmp         .sf_s2
+            jmp         .sf_terr
+sf_s2:      ld          x4, .ep_tok      ; optional STEP
             ld          ac, (x4)
             sub         ac, .v_step
             movr.rn     ac, ac
@@ -4747,7 +4755,10 @@ st_for:     save        x4, x5
             st          x4, .ep_tok
             calls       .ex_expr
             st          ac, .sf_step
+            ld          ac, .vtype       ; step must be integer
+            movr.rz     ac, ac
             jmp         .sf_push
+            jmp         .sf_terr
 sf_nos:     ldea        ac, 1
             st          ac, .sf_step
 sf_push:    ld          ac, .ep_tok      ; resume token = first token after FOR
@@ -4774,6 +4785,8 @@ sf_push:    ld          ac, .ep_tok      ; resume token = first token after FOR
             st          ac, .for_sp
             rets
 sf_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+sf_terr:    ldea        x0, .msg_tmm
             jmp         .err_show
 
 sf_va:      bss         1
