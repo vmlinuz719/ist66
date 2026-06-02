@@ -1788,6 +1788,7 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
         default: {
             // Illegal
             do_except(cpu, X_INST);
+            return;
         }
     }
     
@@ -1837,6 +1838,8 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
     
     switch ((inst >> 27) & 0x1FF) {
         case 0100: { // LCH
+            if (sh > 36) sh = 36;
+
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1854,6 +1857,8 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
         case 0101: { // DCH
+            if (sh > 36) sh = 36;
+
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -2092,8 +2097,8 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
                 }
                 data &= MASK_36;
             
-                cpu->c[ac] = data & MASK_36;
-                if (ac == C_SDR) {
+                cpu->c[(ac & 0x7)] = data & MASK_36;
+                if ((ac & 0x7) == C_SDR) {
                     seg_invalidate_all(cpu);
                     tlb_invalidate_all(cpu);
                 }
