@@ -880,7 +880,12 @@ ti_kw:      ld          ac, (x6)         ; dsn ptr (0 = end)
             movr.rz     ac, ac           ; skip jmp when match
             jmp         .ti_knext
             ld          ac, 1(x6)         ; matched: emit tag word
-            callr       .tok_emit1
+            callr       .tok_emit1        ; (preserves ac = the tag word)
+            sub         ac, .remkw        ; was it REM ?
+            movr.rz     ac, ac           ; skip jmp when not REM
+            jmp         .ti_rem
+            rets
+ti_rem:     calls       .tok_remc        ; capture rest of line as raw comment
             rets
 ti_knext:   addi        x6, x6, 2
             jmp         .ti_kw
@@ -900,6 +905,42 @@ idmax:      dw          10
 idbuf:      bss         12
 idlen:      bss         1
 id_stype:   bss         1
+
+
+; ==========================================================================
+; tok_remc — capture the rest of the line after REM as a raw TKN_REM token.
+; Leading spaces are skipped; the remaining chars (to CR/LF/end) are packed
+; verbatim so LIST reproduces the comment exactly, including punctuation and
+; words longer than an identifier.
+; ==========================================================================
+tok_remc:   save        x4, x5
+            callr       .tok_sksp        ; skip leading spaces
+            ld          x4, .tk_src      ; comment start
+            st          x4, .trc_st
+            ld          x5, .tk_send
+trc_lp:     cmplt       x4, x5           ; src < send ?
+            jmp         .trc_c
+            jmp         .trc_end
+trc_c:      ld          ac, (x4)
+            subin.rn    ac, ac, 13       ; CR ?
+            jmp         .trc_n13
+            jmp         .trc_end
+trc_n13:    ld          ac, (x4)
+            subin.rn    ac, ac, 10       ; LF ?
+            jmp         .trc_n10
+            jmp         .trc_end
+trc_n10:    incr        x4, x4
+            jmp         .trc_lp
+trc_end:    st          x4, .tk_src      ; advance past comment
+            movr        x4, ac           ; ac = end
+            sub         ac, .trc_st      ; ac = char count
+            movr        ac, x2           ; x2 = count
+            ld          x1, .trc_st      ; x1 = source pointer
+            ld          x0, .tknrem      ; x0 = tag
+            calls       .emit_packed
+            rets
+
+trc_st:     bss         1
 
 
 ; ==========================================================================
@@ -1094,12 +1135,18 @@ dt_nF:      ld          ac, .dt_tag
 dt_nV:      ld          ac, .dt_tag
             sub         ac, .tknstr
             movr.rn     ac, ac           ; STR ?
-            jmp         .dt_nS
+            jmp         .dt_nR
             ldea        ac, 34           ; opening quote
             callr       .io_putc
             calls       .dt_packed       ; print string body
             ldea        ac, 34           ; closing quote
             callr       .io_putc
+            jmp         .dt_sp
+dt_nR:      ld          ac, .dt_tag
+            sub         ac, .tknrem
+            movr.rn     ac, ac           ; REM comment ?
+            jmp         .dt_nS
+            calls       .dt_packed       ; print comment body verbatim
             jmp         .dt_sp
 dt_nS:      ld          ac, .dt_word     ; operator or keyword
             calls       .rev_print
@@ -1196,6 +1243,11 @@ tz_nF:      ld          ac, .tz_tag
 tz_nV:      ld          ac, .tz_tag
             sub         ac, .tknstr
             movr.rn     ac, ac           ; STR ?
+            jmp         .tz_nR
+            jmp         .tz_pk
+tz_nR:      ld          ac, .tz_tag
+            sub         ac, .tknrem
+            movr.rn     ac, ac           ; REM comment ?
             jmp         .tz_nS
             jmp         .tz_pk
 tz_nS:      ldea        ac, 1            ; operator / keyword
@@ -4729,7 +4781,11 @@ st_for:     save        x4, x5
             calls       .ex_expr         ; start
             ld          x4, .sf_va
             st          ac, (x4)
-            ld          x4, .ep_tok      ; expect TO
+            ld          ac, .vtype       ; start must be integer
+            movr.rz     ac, ac
+            jmp         .sf_s1
+            jmp         .sf_terr
+sf_s1:      ld          x4, .ep_tok      ; expect TO
             ld          ac, (x4)
             sub         ac, .v_to
             movr.rn     ac, ac
@@ -4738,7 +4794,11 @@ st_for:     save        x4, x5
             st          x4, .ep_tok
             calls       .ex_expr         ; limit
             st          ac, .sf_lim
-            ld          x4, .ep_tok      ; optional STEP
+            ld          ac, .vtype       ; limit must be integer
+            movr.rz     ac, ac
+            jmp         .sf_s2
+            jmp         .sf_terr
+sf_s2:      ld          x4, .ep_tok      ; optional STEP
             ld          ac, (x4)
             sub         ac, .v_step
             movr.rn     ac, ac
@@ -4747,7 +4807,10 @@ st_for:     save        x4, x5
             st          x4, .ep_tok
             calls       .ex_expr
             st          ac, .sf_step
+            ld          ac, .vtype       ; step must be integer
+            movr.rz     ac, ac
             jmp         .sf_push
+            jmp         .sf_terr
 sf_nos:     ldea        ac, 1
             st          ac, .sf_step
 sf_push:    ld          ac, .ep_tok      ; resume token = first token after FOR
@@ -4774,6 +4837,8 @@ sf_push:    ld          ac, .ep_tok      ; resume token = first token after FOR
             st          ac, .for_sp
             rets
 sf_err:     ldea        x0, .msg_synt
+            jmp         .err_show
+sf_terr:    ldea        x0, .msg_tmm
             jmp         .err_show
 
 sf_va:      bss         1
@@ -6109,6 +6174,8 @@ tknint:     dw          #10000000        ; tag 0x01
 tknvar:     dw          #20000000        ; tag 0x02
 tknstr:     dw          #30000000        ; tag 0x03
 tknflt:     dw          #40000000        ; tag 0x04 (TKN_FLT + 2 double words)
+tknrem:     dw          #50000000        ; tag 0x05 (REM comment: raw packed text)
+remkw:      dw          #200000000       ; the REM keyword tag word
 tknlt:      dw          #1A0000000       ; tag 0x1A  '<'
 tkngt:      dw          #1B0000000       ; tag 0x1B  '>'
 tknle:      dw          #1C0000000       ; tag 0x1C  '<='
