@@ -65,7 +65,7 @@ int f80_round_to_f72(rdc700_float_t *src, rdc700_float_t *dst) {
 
     int round_one = src->signif & 1;
     uint64_t new_signif = (src->signif >> 1) + round_one;
-    if ((new_signif & (1L << 63))) {
+    if ((new_signif & (1ULL << 63))) {
         exp++;
         if (exp > (254 + 16383 - 127)) {
             dst->sign_exp = src->sign_exp | 0x7FFF;
@@ -239,7 +239,7 @@ void rdc700_fnorm(rdc700_float_t *src, rdc700_float_t *dst) {
 
     uint16_t new_exp = src->sign_exp & 0x7FFF;
     uint64_t new_signif = src->signif;
-    while (new_exp > 1 && !(new_signif & (1L << 63))) {
+    while (new_exp > 1 && !(new_signif & (1ULL << 63))) {
         new_signif <<= 1;
         new_exp--;
     }
@@ -424,7 +424,7 @@ int rdc700_fadd(
     }
     if (carry) {
         uint64_t round_one = dst->signif & 1;
-        dst->signif = ((dst->signif >> 1) | (1L << 63)) + round_one;
+        dst->signif = ((dst->signif >> 1) | (1ULL << 63)) + round_one;
         dst->sign_exp = greater->sign_exp + 1;
         if ((dst->sign_exp & 0x7FFF) == 0x7FFF) return F_OVRF;
     } else {
@@ -542,7 +542,7 @@ int rdc700_fdiv(
     else if (is_inf(src)) {
         if (is_inf(tgt)) {
             dst->sign_exp = new_sign_exp | 16383;
-            dst->signif = 1L << 63;
+            dst->signif = 1ULL << 63;
         } else {
             dst->sign_exp = new_sign_exp | 0x7FFF;
             dst->signif = 0;
@@ -621,7 +621,7 @@ void print_rdc_float(rdc700_float_t *f) {
 
     if (0 <= exp && exp <= 63) {
         whole = f->signif >> (63 - exp);
-        frac = f->signif << (exp + 1);
+        frac = exp == 63 ? 0 : (f->signif << (exp + 1));
         exp = 0;
     }
 
@@ -629,7 +629,7 @@ void print_rdc_float(rdc700_float_t *f) {
     uint64_t frac_out = 0;
 
     while (frac) {
-        if ((frac & (1L << 63))) {
+        if ((frac & (1ULL << 63))) {
             frac_out += frac_digit;
         }
         frac_digit >>= 1;
