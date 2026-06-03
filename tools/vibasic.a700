@@ -187,8 +187,7 @@ tty_intr:   st          ac, .th_ac
             st          x2, .th_x2
             st          x3, .th_x3
 
-            ld          ac, .out_actv
-            movr.rz     ac, ac          ; skip jmp if output active
+            tstmz       .out_actv        ; skip jmp if output active
             jmp         .ti_inp
 
             ld          x2, .out_ptr
@@ -252,11 +251,26 @@ iputl_lm:   lmwait      .irqmask
 
 ; --- io_putc: output single char in ac ------------------------------------
 ; Tail-calls io_putl, which returns to io_putc's caller.
-io_putc:    st          ac, .onechar
+; When cap_on != 0, the char is appended to cap_buf instead of the console
+; (used by STR$ to format a float via fp_print into a string).  The capture
+; branch clobbers only ac/x0/x1, a subset of the console path's clobbers.
+io_putc:    tstmnz      .cap_on          ; capture active ?  skip when off
+            jmp         .ioc_cap
+            st          ac, .onechar
             ldea        x0, .onechar
             ldea        x1, 1
             jmp         .io_putl
+ioc_cap:    ld          x0, .cap_cnt
+            ldea        x1, .cap_buf
+            addr        x0, x1           ; x1 = cap_buf + cnt
+            st          ac, (x1)
+            incr        x0, x0
+            st          x0, .cap_cnt
+            retr
 onechar:    bss         1
+cap_on:     bss         1                ; nonzero => io_putc captures to cap_buf
+cap_cnt:    bss         1
+cap_buf:    bss         32               ; >= longest fp_print output
 
 ; --- io_crlf: output CR LF ------------------------------------------------
 io_crlf:    ldea        x0, .crlfbuf
@@ -303,9 +317,7 @@ putn_dl:    ld          ac, .putn_v      ; v <= 0
             movr        xy, ac
             ngtr        ac, ac           ; digit = -(v % 10), 0..9
             push        ac
-            ld          ac, .putn_n
-            incr        ac, ac
-            st          ac, .putn_n
+            inctnz      .putn_n
             movr        mq, ac           ; ac = quotient
             st          ac, .putn_v
             movr.rn     mq, mq           ; skip jmp when quotient == 0 (done)
@@ -316,10 +328,7 @@ putn_pr:    ld          ac, .putn_n
 putn_pl:    pop         ac               ; digit 0..9
             addi        ac, ac, 48
             callr       .io_putc
-            ld          ac, .putn_n
-            incr        ac, ac
-            st          ac, .putn_n
-            movr.rn     ac, ac           ; skip jmp when count reaches 0
+            inctnz      .putn_n          ; skip jmp when count reaches 0
             jmp         .putn_pl
             ld          lr, .putn_lr
             retr
@@ -483,8 +492,7 @@ emit_packed:save        x4, x5, x6, x7
             st          ac, .ep_nbody
             ld          x4, .ep_tagad    ; zero the body words (incstb only ORs)
             incr        x4, x4
-            ld          x5, .ep_nbody
-            ngtr        x5, x5
+            ldneg       x5, .ep_nbody
             movr.rz     x5, x5           ; skip when nbody == 0
             jmp         .ep_zd
 ep_zlp:     xorr        ac, ac
@@ -494,8 +502,7 @@ ep_zlp:     xorr        ac, ac
             jmp         .ep_zlp
 ep_zd:      ld          x7, .ep_tagad    ; BX pointer = tag word addr (shift 0)
             ld          x1, .ep_src
-            ld          x5, .ep_cnt
-            ngtr        x5, x5
+            ldneg       x5, .ep_cnt
             movr.rz     x5, x5           ; skip when count == 0
             jmp         .ep_fin
 ep_lp:      ld          ac, (x1)
@@ -666,9 +673,7 @@ pf_fc:      ld          ac, (x4)
             ld          x0, .pf_m
             calls       .fp_add
             st          ac, .pf_m
-            ld          ac, .pf_fd
-            incr        ac, ac
-            st          ac, .pf_fd
+            inctnz      .pf_fd
             ld          x4, .tk_src
             incr        x4, x4
             st          x4, .tk_src
@@ -733,8 +738,7 @@ pf_edc:     ld          ac, (x4)
 pf_edn:     ld          ac, .pf_eneg
             movr.rz     ac, ac           ; skip jmp when negative exponent
             jmp         .pf_scale
-            ld          ac, .pf_e
-            ngtr        ac, ac
+            ldneg       ac, .pf_e
             st          ac, .pf_e
 pf_scale:   ld          ac, .pf_e        ; scale = exp - fraction-digits
             ld          x4, .pf_fd
@@ -742,8 +746,7 @@ pf_scale:   ld          ac, .pf_e        ; scale = exp - fraction-digits
             st          ac, .pf_sc
             movrzn.rz   ac, ac, 1, 35    ; skip jmp when scale negative
             jmp         .pf_mul
-            ld          ac, .pf_sc       ; scale < 0: divide by 10 |scale| times
-            ngtr        ac, ac
+            ldneg       ac, .pf_sc       ; scale < 0: divide by 10 |scale| times
             st          ac, .pf_sc
 pf_divl:    ld          ac, .pf_sc
             movr.rz     ac, ac           ; skip jmp when scale != 0
@@ -838,9 +841,7 @@ ti_c:       ld          ac, (x4)
             ldea        x6, .idbuf
             addr        x5, x6           ; idbuf + len
             st          ac, (x6)
-            incr        x5, x5
-            ld          x6, .idmax
-            cmplt       x5, x6           ; len < 10 ? keep scanning
+            inctne      x5, .idmax       ; len++; skip jmp when len == 10 (stop)
             jmp         .ti_adv
             jmp         .ti_done
 ti_adv:     incr        x4, x4
@@ -858,9 +859,7 @@ ti_done:    st          x4, .tk_src
             addr        ac, x6
             ldea        ac, 36
             st          ac, (x6)
-            ld          ac, .idlen
-            incr        ac, ac
-            st          ac, .idlen
+            inctnz      .idlen
             ld          x4, .tk_src
             incr        x4, x4
             st          x4, .tk_src
@@ -1381,8 +1380,7 @@ sd_fin:     ld          ac, .progend
 ; ==========================================================================
 ln_delete:  save        x4
             calls       .ln_find
-            ld          ac, .ln_match
-            movr.rz     ac, ac           ; skip jmp when match present
+            tstmz       .ln_match        ; skip jmp when match present
             jmp         .lde_no
             ld          x4, .ln_ptr
             ld          ac, 1(x4)
@@ -1418,8 +1416,7 @@ ln_insert:  save        x4, x5, x6
             st          ac, 1(x4)        ; token count
             addi        x4, x4, 2
             ldea        x5, .tokbuf
-            ld          x6, .toklen
-            ngtr        x6, x6
+            ldneg       x6, .toklen
             movr.rz     x6, x6           ; no tokens?
             jmp         .li_done
 li_cp:      ld          ac, (x5)
@@ -1461,8 +1458,7 @@ de_done:    st          x5, .de_lnum     ; line number
             ldea        x4, .linebuf     ; remaining count = (linebuf+linelen) - rest
             ld          x5, .linelen
             addr        x5, x4           ; x4 = end of line
-            ld          x5, .de_rest
-            ngtr        x5, x5
+            ldneg       x5, .de_rest
             addr        x5, x4           ; x4 = end - rest
             st          x4, .de_cnt
             ld          x0, .de_rest     ; tokenize the remainder
@@ -1799,8 +1795,7 @@ al_ok:      ld          ac, .aa_top
             jmp         .al_fset
 al_fstr:    ld          ac, .aa_init
 al_fset:    st          ac, .aa_fv
-            ld          x5, .aa_nw
-            ngtr        x5, x5           ; x5 = -(N*esize)
+            ldneg       x5, .aa_nw       ; x5 = -(N*esize)
             ld          ac, .aa_fv
 al_fl:      movr.rz     x5, x5           ; words remaining ?
             jmp         .al_done
@@ -2235,16 +2230,14 @@ str_instr:  save        x4, x5, x6, x7
             xorr        ac, ac
             st          ac, .si_start
 si_outer:   ld          x6, .si_hay      ; hay BX pointer; skip si_start chars
-            ld          x4, .si_start
-            ngtr        x4, x4
+            ldneg       x4, .si_start
             movr.rz     x4, x4           ; start == 0 ?
             jmp         .si_cmp0
 si_skip:    incldb      ac, x6, 7
             incr.rn     x4, x4
             jmp         .si_skip
 si_cmp0:    ld          x7, .si_ndl      ; needle BX pointer
-            ld          x5, .si_nlen
-            ngtr        x5, x5
+            ldneg       x5, .si_nlen
             movr.rz     x5, x5           ; empty needle ?
             jmp         .si_match
 si_cmplp:   incldb      ac, x6, 7        ; hay char
@@ -2280,8 +2273,7 @@ si_hc:      bss         1
 ; str_fromint — x0 = integer.  Returns its decimal string (STR$).
 str_fromint: save       x4, x5, x6, x7
             st          x0, .fi_v
-            ld          ac, .fi_v
-            movr.rn     ac, ac           ; zero ?  skip jmp when nonzero
+            tstmnz      .fi_v            ; zero ?  skip jmp when nonzero
             jmp         .fi_nz
             ldea        x6, .numbuf
             ldea        ac, 48
@@ -2293,8 +2285,7 @@ str_fromint: save       x4, x5, x6, x7
 fi_nz:      ld          ac, .fi_v        ; sign
             movrzn.rz   ac, ac, 1, 35
             jmp         .fi_abs
-            ld          ac, .fi_v
-            ngtr        ac, ac
+            ldneg       ac, .fi_v
             st          ac, .fi_v
             ldea        ac, 1
             st          ac, .fi_neg
@@ -2311,8 +2302,7 @@ fi_dl:      ld          ac, .fi_v
             movr.rn     mq, mq           ; skip jmp when quotient 0
             jmp         .fi_dl
             ldea        x6, .numbuf      ; assemble: optional '-', then digits
-            ld          ac, .fi_neg
-            movr.rz     ac, ac
+            tstmz       .fi_neg
             jmp         .fi_wr
             ldea        ac, 45
             st          ac, (x6)
@@ -2375,8 +2365,7 @@ sv_lp:      movr.rz     x4, x4           ; characters remain ?
 sv_nd:      ld          ac, .sv_ch       ; leading '-' before any digit ?
             subin.rn    ac, ac, 45
             jmp         .sv_chksp
-            ld          ac, .sv_started
-            movr.rn     ac, ac           ; skip jmp when not started
+            tstmnz      .sv_started      ; skip jmp when not started
             jmp         .sv_lp           ; '-' after digits: stop
             ldea        ac, 1
             st          ac, .sv_neg
@@ -2671,8 +2660,26 @@ fc_chr:     movr        x6, x0           ; CHR$(n)
             ldea        x4, 1
             st          x4, .vtype
             rets
-fc_str:     movr        x6, x0           ; STR$(n)
+fc_str:     ld          ac, .vtype       ; STR$(n)
+            subin.rn    ac, ac, 2        ; float arg (vtype == 2) ?  skip when so
+            jmp         .fc_str_i
+            jmp         .fc_str_f
+fc_str_i:   movr        x6, x0           ; integer -> decimal string
             calls       .str_fromint
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
+fc_str_f:   xorr        ac, ac           ; float -> capture fp_print into cap_buf
+            st          ac, .cap_cnt
+            ldea        ac, 1
+            st          ac, .cap_on
+            movr        x6, x0           ; x0 = pointer to the double
+            calls       .fp_print
+            xorr        ac, ac
+            st          ac, .cap_on
+            ldea        x0, .cap_buf     ; build heap string from captured chars
+            ld          x1, .cap_cnt
+            calls       .str_from_chars
             ldea        x4, 1
             st          x4, .vtype
             rets
@@ -2925,8 +2932,7 @@ af_2:       ld          ac, .ex_fn
 af_aint:    ld          ac, .ex_arg
             movrzn.rz   ac, ac, 1, 35    ; skip jmp when negative
             jmp         .af_apos
-            ld          ac, .ex_arg
-            ngtr        ac, ac
+            ldneg       ac, .ex_arg
             rets
 af_apos:    ld          ac, .ex_arg
             rets
@@ -3357,8 +3363,7 @@ es_casr:    ld          ac, .es_tok
             jmp         .es_done
             ldea        ac, 2            ; op 2 = ASR
 es_have:    st          ac, .es_op
-            ld          ac, .vtype       ; left operand must be integer
-            movr.rz     ac, ac
+            tstmz       .vtype           ; left operand must be integer
             jmp         .es_lint
             jmp         .es_tmm
 es_lint:    ld          x4, .ep_tok      ; consume the shift operator
@@ -3366,8 +3371,7 @@ es_lint:    ld          x4, .ep_tok      ; consume the shift operator
             st          x4, .ep_tok
             calls       .ex_add          ; right operand = shift count
             st          ac, .es_cnt
-            ld          ac, .vtype       ; count must be integer too
-            movr.rz     ac, ac
+            tstmz       .vtype           ; count must be integer too
             jmp         .es_rint
             jmp         .es_tmm
 es_rint:    ld          ac, .es_cnt      ; clamp the count to [0, 36]
@@ -3443,8 +3447,7 @@ bo_cxor:    ld          ac, .bo_tok
             jmp         .bo_done
             ldea        ac, 1            ; op 1 = XOR
 bo_have:    st          ac, .bo_op
-            ld          ac, .vtype       ; left operand must be integer
-            movr.rz     ac, ac
+            tstmz       .vtype           ; left operand must be integer
             jmp         .bo_li
             jmp         .bo_tmm
 bo_li:      ld          x4, .ep_tok      ; consume the operator
@@ -3481,8 +3484,7 @@ ba_lp:      ld          x4, .ep_tok
             sub         ac, .v_and
             movr.rn     ac, ac           ; AND ?
             jmp         .ba_done
-            ld          ac, .vtype       ; left operand must be integer
-            movr.rz     ac, ac
+            tstmz       .vtype           ; left operand must be integer
             jmp         .ba_li
             jmp         .ba_tmm
 ba_li:      ld          x4, .ep_tok      ; consume AND
@@ -3994,8 +3996,7 @@ sd_rpar:    ld          x4, .ep_tok      ; expect ')'
             ld          ac, .sd_ub0      ; s0 = ub0 + 1
             addi        ac, ac, 1
             st          ac, .sd_s0
-            ld          ac, .sd_2d
-            movr.rz     ac, ac           ; skip jmp when 2-D
+            tstmz       .sd_2d           ; skip jmp when 2-D
             jmp         .sd_s1d
             ld          ac, .sd_ub1      ; 2-D: bound1 must be >= 0
             movrzn.rn   ac, ac, 1, 35
@@ -4121,8 +4122,7 @@ re_stmt:    xorr        ac, ac
             st          ac, .jumped
             ld          x0, .cur_tok
             calls       .par_exec
-            ld          ac, .jumped
-            movr.rz     ac, ac           ; skip jmp when jumped
+            tstmz       .jumped          ; skip jmp when jumped
             jmp         .re_adv
             jmp         .re_lp           ; jumped: cur_line/cur_tok already set
 re_adv:     ld          ac, .ep_tok      ; next statement starts past this one
@@ -4221,13 +4221,11 @@ st_goto:    save        x4
             st          ac, .goto_ln
             ld          x0, .goto_ln
             calls       .ln_find
-            ld          ac, .ln_match
-            movr.rz     ac, ac           ; skip jmp when found
+            tstmz       .ln_match        ; skip jmp when found
             jmp         .sg_err
             ld          ac, .ln_ptr
             st          ac, .cur_line
-            ld          ac, .runflag
-            movr.rz     ac, ac           ; skip jmp when running
+            tstmz       .runflag         ; skip jmp when running
             jmp         .sg_direct
             ld          ac, .ln_ptr      ; running: resume at target's first token
             addi        ac, ac, 2
@@ -4295,9 +4293,7 @@ on_nosel:   ld          x4, .ep_tok      ; advance past the INT token (2 words)
             jmp         .on_done
             addi        x4, x4, 1        ; consume ','
             st          x4, .ep_tok
-            ld          ac, .on_cnt
-            incr        ac, ac
-            st          ac, .on_cnt
+            inctnz      .on_cnt
             jmp         .on_lp
 on_done:    ld          ac, .on_sel      ; ep_tok now past the whole list
             movr.rn     ac, ac           ; skip jmp when no line selected
@@ -4305,11 +4301,9 @@ on_done:    ld          ac, .on_sel      ; ep_tok now past the whole list
             rets                          ; out of range: fall through
 on_jump:    ld          x0, .on_sel
             calls       .ln_find
-            ld          ac, .ln_match
-            movr.rz     ac, ac
+            tstmz       .ln_match
             jmp         .on_uln
-            ld          ac, .on_mode
-            movr.rz     ac, ac           ; skip jmp when GOSUB (mode != 0)
+            tstmz       .on_mode         ; skip jmp when GOSUB (mode != 0)
             jmp         .on_goto
             ld          ac, .gosub_sp    ; GOSUB: push (cur_line, resume tok)
             addr        ac, ac
@@ -4320,13 +4314,10 @@ on_jump:    ld          x0, .on_sel
             st          ac, (x5)
             ld          ac, .ep_tok
             st          ac, 1(x5)
-            ld          ac, .gosub_sp
-            incr        ac, ac
-            st          ac, .gosub_sp
+            inctnz      .gosub_sp
 on_goto:    ld          ac, .ln_ptr
             st          ac, .cur_line
-            ld          ac, .runflag
-            movr.rz     ac, ac           ; skip jmp when running
+            tstmz       .runflag         ; skip jmp when running
             jmp         .on_direct
             ld          ac, .ln_ptr
             addi        ac, ac, 2
@@ -4407,8 +4398,7 @@ ds_none:    xorr        ac, ac
 ; rd_value — fetch the next DATA value.  Returns it in ac with vtype set.
 ; Raises ?OUT OF DATA when the data is exhausted.
 rd_value:   save        x4, x5
-            ld          ac, .data_init
-            movr.rn     ac, ac           ; skip jmp when not initialised
+            tstmnz      .data_init       ; skip jmp when not initialised
             jmp         .rv_chk
             ldea        ac, 1            ; first READ: seek from program start
             st          ac, .data_init
@@ -4642,8 +4632,7 @@ save_cont:  save        x4
 
 ; st_cont — CONT: resume a STOPped/ENDed program at its saved position.
 st_cont:    save        x4
-            ld          ac, .cont_ok
-            movr.rz     ac, ac           ; have a resume point ?
+            tstmz       .cont_ok         ; have a resume point ?
             jmp         .ct_err
             ld          ac, .cont_line
             st          ac, .cur_line
@@ -4669,8 +4658,7 @@ st_gosub:   save        x4, x5, x6
             st          ac, .gs_rtok
             ld          x0, .goto_ln
             calls       .ln_find
-            ld          ac, .ln_match
-            movr.rz     ac, ac           ; skip jmp when found
+            tstmz       .ln_match        ; skip jmp when found
             jmp         .gs_err
             ld          ac, .gosub_sp    ; frame = gosub_st + sp*2
             addr        ac, ac
@@ -4681,13 +4669,10 @@ st_gosub:   save        x4, x5, x6
             st          ac, (x6)
             ld          ac, .gs_rtok
             st          ac, 1(x6)
-            ld          ac, .gosub_sp
-            incr        ac, ac
-            st          ac, .gosub_sp
+            inctnz      .gosub_sp
             ld          ac, .ln_ptr
             st          ac, .cur_line
-            ld          ac, .runflag
-            movr.rz     ac, ac           ; skip jmp when running
+            tstmz       .runflag         ; skip jmp when running
             jmp         .gs_direct
             ld          ac, .ln_ptr      ; running: resume at target's first token
             addi        ac, ac, 2
@@ -4781,8 +4766,7 @@ st_for:     save        x4, x5
             calls       .ex_expr         ; start
             ld          x4, .sf_va
             st          ac, (x4)
-            ld          ac, .vtype       ; start must be integer
-            movr.rz     ac, ac
+            tstmz       .vtype           ; start must be integer
             jmp         .sf_s1
             jmp         .sf_terr
 sf_s1:      ld          x4, .ep_tok      ; expect TO
@@ -4794,8 +4778,7 @@ sf_s1:      ld          x4, .ep_tok      ; expect TO
             st          x4, .ep_tok
             calls       .ex_expr         ; limit
             st          ac, .sf_lim
-            ld          ac, .vtype       ; limit must be integer
-            movr.rz     ac, ac
+            tstmz       .vtype           ; limit must be integer
             jmp         .sf_s2
             jmp         .sf_terr
 sf_s2:      ld          x4, .ep_tok      ; optional STEP
@@ -4807,8 +4790,7 @@ sf_s2:      ld          x4, .ep_tok      ; optional STEP
             st          x4, .ep_tok
             calls       .ex_expr
             st          ac, .sf_step
-            ld          ac, .vtype       ; step must be integer
-            movr.rz     ac, ac
+            tstmz       .vtype           ; step must be integer
             jmp         .sf_push
             jmp         .sf_terr
 sf_nos:     ldea        ac, 1
@@ -4832,9 +4814,7 @@ sf_push:    ld          ac, .ep_tok      ; resume token = first token after FOR
             st          ac, 3(x5)
             ld          ac, .sf_rtok
             st          ac, 4(x5)
-            ld          ac, .for_sp
-            incr        ac, ac
-            st          ac, .for_sp
+            inctnz      .for_sp
             rets
 sf_err:     ldea        x0, .msg_synt
             jmp         .err_show
@@ -5038,8 +5018,7 @@ pn_ipos:    movr        x5, ac
 pn_flt:     movr        x5, x0           ; integer part -> x0
             calls       .parse_flt       ; ac = double ptr; tk_src advanced
             st          ac, .pn_fp
-            ld          ac, .pn_neg
-            movr.rz     ac, ac
+            tstmz       .pn_neg
             jmp         .pn_fpos
             ld          x0, .pn_fp
             calls       .fp_neg
@@ -5119,8 +5098,7 @@ si_var:     ld          x4, .ep_tok      ; target variable
             ld          x4, .ep_tok
             addr        ac, x4
             st          x4, .ep_tok
-            ld          ac, .si_str      ; string target ?
-            movr.rz     ac, ac
+            tstmz       .si_str          ; string target ?
             jmp         .si_num
             ldea        x0, .linebuf     ; string: store the whole line
             ld          x1, .linelen
@@ -5196,8 +5174,7 @@ gv_scal:    ld          x0, .ep_tok
             st          x4, .ep_tok
 gv_read:    callr       .io_getc         ; ac = character code
             st          ac, .gv_ch
-            ld          ac, .gv_etype    ; string target ?
-            movr.rz     ac, ac
+            tstmz       .gv_etype        ; string target ?
             jmp         .gv_int
             ld          x0, .gv_ch       ; string: one-character string
             calls       .str_chr
@@ -5289,8 +5266,7 @@ dti_nneg:   ld          x4, .dti_e
             movsrz      ac, ac, ac, 28
             or          ac, .dti_f
             st          ac, .dti_f
-            ld          ac, .dti_e           ; shift right by (35 - E)
-            ngtr        ac, ac
+            ldneg       ac, .dti_e       ; shift right by (35 - E)
             addi        ac, ac, 35
             st          ac, .dti_cnt
             ld          ac, .dti_f
@@ -5306,8 +5282,7 @@ dti_sgnf:   st          ac, .dti_f
             ld          ac, .dti_sgn
             movrzn.rz   ac, ac, 1, 35        ; skip next when negative
             jmp         .dti_done
-            ld          ac, .dti_f           ; negate magnitude
-            ngtr        ac, ac
+            ldneg       ac, .dti_f       ; negate magnitude
             rets
 dti_done:   ld          ac, .dti_f
             rets
@@ -5396,10 +5371,7 @@ fsq_it:     ldgn        f1, (x0)         ; f1 = x
             dvlng       f1, f0, f1       ; f1 = x / y
             adlng       f0, f1, f0       ; f0 = y + x/y
             mlgnr       f0, .fhalf       ; f0 = (y + x/y) / 2
-            ld          ac, .fsq_cnt
-            addi        ac, ac, -1
-            st          ac, .fsq_cnt
-            movr.rn     ac, ac           ; skip jmp when count == 0
+            dectnz      .fsq_cnt         ; skip jmp when count == 0
             jmp         .fsq_it
             jmp         .fp_store        ; store f0 -> temp double, rets
 fsq_zero:   ldea        ac, .fzero
@@ -5460,10 +5432,7 @@ fxp_cont:   adlng       f2, f1, f2       ; sum  += term
             ldg         f0, .fxp_kd      ; k += 1
             adgnr       f0, .fone
             stgnr       f0, .fxp_kd
-            ld          ac, .fxp_k
-            addi        ac, ac, -1
-            st          ac, .fxp_k
-            movr.rn     ac, ac           ; skip jmp when count == 0
+            dectnz      .fxp_k           ; skip jmp when count == 0
             jmp         .fxp_lp
 fxp_done:   stexp       f2, .fxp_e       ; multiply by 2^n: exponent += n
             ld          ac, .fxp_e
@@ -5542,14 +5511,10 @@ flg_cont:   mvlng       f1, f3           ; f3 = term
             ldg         f0, .flg_kd      ; k += 2
             adgnr       f0, .ftwo
             stgnr       f0, .flg_kd
-            ld          ac, .flg_k
-            addi        ac, ac, -1
-            st          ac, .flg_k
-            movr.rn     ac, ac           ; skip jmp when count == 0
+            dectnz      .flg_k           ; skip jmp when count == 0
             jmp         .flg_lp
 flg_done:   adlng       f2, f2, f2       ; 2 * artanh(|u|)
-            ld          ac, .flg_sgn     ; reapply sign of u
-            movr.rn     ac, ac           ; skip nglng when u >= 0
+            tstmnz      .flg_sgn         ; skip nglng when u >= 0
             nglng       f2, f2           ; u < 0 -> negate
             stgnr       f2, .flg_lm      ; ln(m)
             ld          x0, .flg_e       ; Ed = (double) E
@@ -5610,10 +5575,7 @@ fst_cont:   dvgnr       f1, .fst_dn      ; term /= dn ; dn += 1
             adgnr       f0, .fone
             stgnr       f0, .fst_dn
             adlng       f2, f1, f2       ; sum += term
-            ld          ac, .fst_k
-            addi        ac, ac, -1
-            st          ac, .fst_k
-            movr.rn     ac, ac
+            dectnz      .fst_k
             jmp         .fst_lp
 fst_done:   mvlng       f2, f0           ; f0 = sum
             jmp         .fp_store
@@ -5777,23 +5739,18 @@ fat_cont:   mvlng       f1, f3
             ldg         f0, .fat_dn      ; dn += 2
             adgnr       f0, .ftwo
             stgnr       f0, .fat_dn
-            ld          ac, .fat_k
-            addi        ac, ac, -1
-            st          ac, .fat_k
-            movr.rn     ac, ac
+            dectnz      .fat_k
             jmp         .fat_lp
 fat_sdone:  ld          ac, .fat_red     ; add pi/6 when the reduction was used
             movr.rn     ac, ac           ; skip the add when red == 0
             adgnr       f2, .pi6
-            ld          ac, .fat_inv     ; pi/2 - result when inverted
-            movr.rn     ac, ac           ; skip jmp when inv == 0
+            tstmnz      .fat_inv         ; skip jmp when inv == 0
             jmp         .fat_doinv
             jmp         .fat_noinv2
 fat_doinv:  ldg         f0, .halfpi
             sblng       f0, f2, f2
 fat_noinv2: stgnr       f2, .fat_res     ; reapply the sign of x
-            ld          ac, .fat_sgn
-            movr.rn     ac, ac           ; skip jmp when x >= 0
+            tstmnz      .fat_sgn         ; skip jmp when x >= 0
             jmp         .fat_neg
             ldgn        f0, .fat_res
             jmp         .fat_store
@@ -5900,10 +5857,7 @@ fpp_dl:     ldea        x0, .fpp_av
             sbgnr       f0, (x5)
             mlgnr       f0, .ften
             stgnr       f0, .fpp_av
-            ld          ac, .fpp_n
-            addi        ac, ac, -1
-            st          ac, .fpp_n
-            movr.rn     ac, ac               ; skip jmp when count == 0
+            dectnz      .fpp_n           ; skip jmp when count == 0
             jmp         .fpp_dl
             ldea        x6, .fpp_buf         ; round 7 digits using the 8th (buf[7])
             ld          ac, 7(x6)
@@ -6000,8 +5954,7 @@ fpp_fxneg:  ldea        ac, 48               ; D < 0: "0." then -D-1 zeros
             callr       .io_putc
             ldea        ac, 46
             callr       .io_putc
-            ld          ac, .fpp_d
-            ngtr        ac, ac
+            ldneg       ac, .fpp_d
             addi        ac, ac, -1
             st          ac, .fpp_z
 fpp_fxnz:   ld          ac, .fpp_z
@@ -6050,8 +6003,7 @@ fpp_exe:    ldea        ac, 69               ; 'E'
             jmp         .fpp_exep
             ldea        ac, 45               ; '-'
             callr       .io_putc
-            ld          ac, .fpp_d
-            ngtr        ac, ac
+            ldneg       ac, .fpp_d
             st          ac, .fpp_d
             jmp         .fpp_exed
 fpp_exep:   ldea        ac, 43               ; '+'
