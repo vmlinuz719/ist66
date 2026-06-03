@@ -2662,8 +2662,15 @@ fc_chr:     movr        x6, x0           ; CHR$(n)
             rets
 fc_str:     ld          ac, .vtype       ; STR$(n)
             subin.rn    ac, ac, 2        ; float arg (vtype == 2) ?  skip when so
-            jmp         .fc_str_i
+            jmp         .fc_str_n
             jmp         .fc_str_f
+fc_str_n:   ld          ac, .vtype       ; string arg ?  return it unchanged
+            subin.rn    ac, ac, 1
+            jmp         .fc_str_i
+            movr        x6, ac           ; string: result = the string pointer
+            ldea        x4, 1
+            st          x4, .vtype
+            rets
 fc_str_i:   movr        x6, x0           ; integer -> decimal string
             calls       .str_fromint
             ldea        x4, 1
@@ -4735,6 +4742,35 @@ poke_a:     bss         1
 
 
 ; ==========================================================================
+; st_digits — DIGITS <n>: set float-print significant digits, clamped [1,17].
+; ==========================================================================
+st_digits:  save        x4
+            calls       .ex_expr         ; n
+            st          ac, .sd_v
+            ld          ac, .vtype       ; must be an integer
+            movr.rz     ac, ac
+            jmp         .sd_ok
+            jmp         .sd_terr
+sd_ok:      ld          ac, .sd_v        ; clamp low: n < 1 -> 1
+            ldea        x4, 1
+            cmpge       ac, x4           ; skip jmp when n < 1
+            jmp         .sd_hi
+            ldea        ac, 1
+            jmp         .sd_set
+sd_hi:      ld          ac, .sd_v        ; clamp high: n > 17 -> 17
+            ldea        x4, 17
+            cmple       ac, x4           ; skip jmp when n > 17
+            jmp         .sd_set
+            ldea        ac, 17
+sd_set:     st          ac, .fpp_prec
+            rets
+sd_terr:    ldea        x0, .msg_tmm
+            jmp         .err_show
+
+sd_v:       bss         1
+
+
+; ==========================================================================
 ; st_for — FOR var = start TO limit [STEP step]
 ; ==========================================================================
 st_for:     save        x4, x5
@@ -5841,8 +5877,9 @@ fpp_lmul:   ldgn        f0, .fpp_av
             addi        ac, ac, -1
             st          ac, .fpp_d
             jmp         .fpp_l1
-fpp_digs:   ldea        x4, .fpp_buf         ; extract 8 digits (last one rounds)
-            ldea        ac, 8
+fpp_digs:   ldea        x4, .fpp_buf         ; extract prec+1 digits (last one rounds)
+            ld          ac, .fpp_prec
+            incr        ac, ac
             st          ac, .fpp_n
 fpp_dl:     ldea        x0, .fpp_av
             calls       .dbl_to_int          ; digit = floor(v)  (0..9)
@@ -5859,13 +5896,17 @@ fpp_dl:     ldea        x0, .fpp_av
             stgnr       f0, .fpp_av
             dectnz      .fpp_n           ; skip jmp when count == 0
             jmp         .fpp_dl
-            ldea        x6, .fpp_buf         ; round 7 digits using the 8th (buf[7])
-            ld          ac, 7(x6)
-            addi        ac, ac, -53          ; buf[7] - '5'
+            ldea        x6, .fpp_buf         ; round prec digits using buf[prec] (guard)
+            ld          ac, .fpp_prec
+            addr        ac, x6
+            ld          ac, (x6)
+            addi        ac, ac, -53          ; guard digit - '5'
             movrzn.rz   ac, ac, 1, 35        ; skip jmp when negative (round down)
             jmp         .fpp_round
             jmp         .fpp_trim
-fpp_round:  ldea        x5, 6                ; carry up from digit 6
+fpp_round:  ld          ac, .fpp_prec        ; carry up from last kept digit (prec-1)
+            addi        ac, ac, -1
+            movr        ac, x5
 fpp_rlp:    ldea        x6, .fpp_buf
             addr        x5, x6
             ld          ac, (x6)
@@ -5886,7 +5927,9 @@ fpp_rlp:    ldea        x6, .fpp_buf
             jmp         .fpp_trim
 fpp_rdec:   addi        x5, x5, -1
             jmp         .fpp_rlp
-fpp_trim:   ldea        x5, 6                ; trim: find last significant digit
+fpp_trim:   ld          ac, .fpp_prec        ; trim from last kept digit (prec-1)
+            addi        ac, ac, -1
+            movr        ac, x5
 fpp_tz:     movr.rz     x5, x5               ; keep at least one digit
             jmp         .fpp_tzd
             ldea        x6, .fpp_buf
@@ -6023,7 +6066,8 @@ fpp_dig:    bss         1
 fpp_last:   bss         1
 fpp_ic:     bss         1
 fpp_z:      bss         1
-fpp_buf:    bss         8
+fpp_prec:   dw          7                    ; STR$/PRINT significant digits (DIGITS n)
+fpp_buf:    bss         20                   ; >= max prec (17) + 1 guard digit
 
 ; Floating-point constants and messages
 fpu_on:     dw          4
@@ -6105,6 +6149,7 @@ st_tab:     dw          #280000000, st_list      ; LIST
             dw          #390000000, st_else      ; ELSE (skips when reached)
             dw          #3A0000000, st_cont      ; CONT
             dw          #3B0000000, st_get       ; GET
+            dw          #3C0000000, st_digits    ; DIGITS
             dw          0, 0
 
 
@@ -6204,6 +6249,7 @@ s_gosub:    dsn         "GOSUB"
 s_return:   dsn         "RETURN"
 s_stop:     dsn         "STOP"
 s_poke:     dsn         "POKE"
+s_digits:   dsn         "DIGITS"
 s_peek:     dsn         "PEEK"
 s_for:      dsn         "FOR"
 s_next:     dsn         "NEXT"
@@ -6280,6 +6326,7 @@ kw_tab:     dw          s_rem,    #200000000
             dw          s_return, #2B0000000
             dw          s_stop,   #2C0000000
             dw          s_poke,   #2D0000000
+            dw          s_digits, #3C0000000
             dw          s_for,    #2E0000000
             dw          s_next,   #2F0000000
             dw          s_to,     #300000000
@@ -6369,6 +6416,7 @@ rev_tab:    dw          #100000000, o_plus
             dw          #2B0000000, s_return
             dw          #2C0000000, s_stop
             dw          #2D0000000, s_poke
+            dw          #3C0000000, s_digits
             dw          #2E0000000, s_for
             dw          #2F0000000, s_next
             dw          #300000000, s_to

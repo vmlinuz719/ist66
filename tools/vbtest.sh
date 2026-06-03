@@ -30,6 +30,9 @@ run "strings"        '10 A$="HELLO"' '20 B$="WORLD"' '30 PRINT A$+" "+B$' '40 PR
 run "string-fns"     '10 A$="VIBASIC"' '20 PRINT LEFT$(A$,2)' '30 PRINT RIGHT$(A$,3)' '40 PRINT MID$(A$,2,3)' 'RUN'
 run "string-num"     'PRINT STR$(42)' 'PRINT VAL("3.14")' 'PRINT CHR$(65)' 'PRINT ASC("A")'
 run "str-float"      'PRINT STR$(-3.5)' 'PRINT "["+STR$(3.14159)+"]"' 'PRINT STR$(0.001)' 'PRINT LEN(STR$(2.5))'
+run "str-string"     'PRINT STR$("HI")' 'PRINT "<"+STR$("ABC")+">"' 'PRINT LEN(STR$("WORLD"))'
+run "digits"         'PRINT 3.14159265' 'DIGITS 3' 'PRINT 3.14159265' 'DIGITS 10' 'PRINT 1.0/3.0' 'PRINT 9.99999' 'DIGITS 0' 'PRINT 1.0/3.0' 'DIGITS 99' 'PRINT 1.0/3.0' 'DIGITS 2.5'
+run "digits-list"    '10 DIGITS 5' '20 PRINT 1.0/7.0' 'LIST' 'RUN'
 # Control flow
 run "for-next"       "10 FOR I=1 TO 5" "20 PRINT I" "30 NEXT I" "RUN"
 run "for-step"       "10 S=0" "20 FOR I=2 TO 10 STEP 2" "30 S=S+I" "40 NEXT I" "50 PRINT S" "RUN"
