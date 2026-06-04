@@ -684,6 +684,58 @@ c36b7_l:    incldb      x2, x0, 7               ; get data
             rets
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; MKPTAB - set up a page table
+        ;
+        ;   X0:     Offset of segment descriptor to init
+        ;               Note: will also init its friend x0 ^ 2
+        ;   X1:     Protection key
+        ;
+        ;   Page table will be mapped writable, not virtual yet
+
+mkptab:     save        x4, x5                  ; TODO: fill this in
+
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+
+            andi        x0, x4, #1FC            ; get descr. of segment pair
+            xorrts      x2, x2, 19              ; addressability of taskseg
+            bisr        x2, x4                  ; x4: address of first descr.
+            
+            tstmnz      1(x4)                   ; check if already exists
+            jmp         .mkptab_e
+            
+            movr        x1, x5, 28              ; shift key for descriptor
+            
+            ldea        x0, pagetabs(x2)
+            calls       .getreal                ; physical address of new pages
+            
+            st          (x4)                    ; add page tables to descr. tab
+            addi        ac, ac, 512
+            st          2(x4)
+            or          x5, .new_pt
+            st          x5, 1(x4)
+            st          x5, 3(x4)
+            
+            movsz       x4, x4, x0, 17          ; clear page tables
+            invlsg      (x0)
+            ldea        x1, 512
+            xorr        x2, x2
+            calls       .memset
+            movsz       x4, x4, x0, 17
+            xorrts      x1, x1, 19
+            addr        x1, x0
+            invlsg      (x0)
+            ldea        x1, 512
+            xorr        x2, x2
+            calls       .memset
+            
+mkptab_e:   popcr       psw1
+            rets
+            
+new_pt:     dw          01400400000
+pt_bit_v:   dw          00100000000
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
 
 enumdone:   xorrts      ac, ac, 1
