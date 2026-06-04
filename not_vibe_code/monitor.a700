@@ -862,13 +862,9 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, pagetabs(x7)
             calls       .getreal
             
-            st          4(x7)                   ; start at #80000
-            addi        ac, ac, 512             ; rest of page table
-            st          6(x7)
-            ld          .vseg1a                 ; 1024 words, writable
-            st          5(x7)
-            ld          .vseg2
-            st          7(x7)
+            ldea        x0, 4
+            ldea        x1, 1
+            calls       .mkptab
             
             xorrts      x6, x6, 20              ; invalidate #80000-C0000
             invlsg      (x6)
