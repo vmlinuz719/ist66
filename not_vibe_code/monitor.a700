@@ -690,7 +690,7 @@ c36b7_l:    incldb      x2, x0, 7               ; get data
         ;               Note: will also init its friend x0 ^ 2
         ;   X1:     Protection key
         ;
-        ;   Page table will be mapped writable, not virtual yet
+        ;   Page table will be mapped writable, virtual
 
 mkptab:     save        x4, x5                  ; TODO: fill this in
 
@@ -721,6 +721,13 @@ mkptab:     save        x4, x5                  ; TODO: fill this in
             ldea        x1, 512
             xorr        x2, x2
             calls       .memset
+            
+            ld          (x4)                    ; and set virtual bit
+            or          .pt_bit_v
+            st          (x4)
+            movsz       x4, x4, x0, 17
+            invlsg      (x0)
+            
             movsz       x4, x4, x0, 17
             xorrts      x1, x1, 19
             addr        x1, x0
@@ -728,6 +735,14 @@ mkptab:     save        x4, x5                  ; TODO: fill this in
             ldea        x1, 512
             xorr        x2, x2
             calls       .memset
+            
+            ld          2(x4)
+            or          .pt_bit_v
+            st          2(x4)
+            movsz       x4, x4, x0, 17
+            xorrts      x1, x1, 19
+            addr        x1, x0
+            invlsg      (x0)
             
 mkptab_e:   popcr       psw1
             rets
