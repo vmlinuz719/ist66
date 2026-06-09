@@ -692,6 +692,7 @@ c36b7_l:    incldb      x2, x0, 7               ; get data
         ;
         ;   Does nothing if page table already present.
         ;   Page table will be mapped writable, virtual
+        ;   Returns 0 on failure, 1 on success
 
 mkptab:     save        x4, x5                  ; TODO: fill this in
 
@@ -703,12 +704,14 @@ mkptab:     save        x4, x5                  ; TODO: fill this in
             bisr        x2, x4                  ; x4: address of first descr.
             
             tstmnz      1(x4)                   ; check if already exists
-            jmp         .mkptab_e
+            jmp         .mkptab_s
             
             movr        x1, x5, 28              ; shift key for descriptor
             
             ldea        x0, pagetabs(x2)
             calls       .getreal                ; physical address of new pages
+            movr.rz     ac, ac
+            jmp         mkptab_e
             
             st          (x4)                    ; add page tables to descr. tab
             addi        ac, ac, 512
@@ -745,6 +748,8 @@ mkptab:     save        x4, x5                  ; TODO: fill this in
             addr        x1, x0
             invlsg      (x0)
             
+mkptab_s:   xorrts      ac, ac, 1
+
 mkptab_e:   popcr       psw1
             rets
             
@@ -757,7 +762,8 @@ pt_bit_v:   dw          00100000000
         ;   X0:     Virtual page address
         ;   X1:     Map entry
         ;
-        ;   TODO: error handling; increment counter; unmap if X1 = 0 (delptab)
+        ;   TODO: increment counter; unmap if X1 = 0 (delptab)
+        ;   Returns 0 on failure, 1 on success
 
 mappte:     save        x4, x5                  ; TODO: fill this in
 
@@ -771,6 +777,8 @@ mappte:     save        x4, x5                  ; TODO: fill this in
             addr        x0, x0
             xorrts      x1, x1, 1               ; default key 1?
             calls       .mkptab
+            movr.rz     ac, ac
+            jmp         .mappte_f
             
             movrz       x4, x0, 19, 26          ; get segment map index
             andi        x0, x0, #1FE
@@ -791,11 +799,11 @@ mappte:     save        x4, x5                  ; TODO: fill this in
             st          x5, (x1)
             invlpg      (x4)
 
-mappte_e:   xorr.sk     ac, ac
-mappte_f:   xorms       ac, ac, 36
-            ld          .pt_bit_v               ; set virtual
-            or          1(x0)
-            st          1(x0)
+mappte_e:   xorrts.sk   ac, ac, 1
+mappte_f:   xorr        ac, ac
+            ld          xy, .pt_bit_v           ; set virtual
+            or          xy, 1(x0)
+            st          xy, 1(x0)
             invlsg      (x4)
             popcr       psw1
             rets
