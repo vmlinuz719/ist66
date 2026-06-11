@@ -694,7 +694,7 @@ c36b7_l:    incldb      x2, x0, 7               ; get data
         ;   Page table will be mapped writable, virtual
         ;   Returns 0 on failure, 1 on success
 
-mkptab:     save        x4, x5                  ; TODO: fill this in
+mkptab:     save        x4, x5
 
             pushcr      psw1                    ; prevent preemption
             ldctl       psw1, .zero
@@ -726,12 +726,6 @@ mkptab:     save        x4, x5                  ; TODO: fill this in
             xorr        x2, x2
             calls       .memset
             
-            ld          1(x4)                   ; and set virtual bit
-            or          .pt_bit_v
-            st          1(x4)
-            movsz       x4, x4, x0, 17
-            invlsg      (x0)
-            
             movsz       x4, x4, x0, 17
             xorrts      x1, x1, 19
             addr        x1, x0
@@ -740,9 +734,15 @@ mkptab:     save        x4, x5                  ; TODO: fill this in
             xorr        x2, x2
             calls       .memset
             
+            ld          1(x4)                   ; and set virtual bit
+            or          .pt_bit_v
+            st          1(x4)
             ld          3(x4)
             or          .pt_bit_v
             st          3(x4)
+            
+mkptab_x:   movsz       x4, x4, x0, 17          ; invalidate both
+            invlsg      (x0)
             movsz       x4, x4, x0, 17
             xorrts      x1, x1, 19
             addr        x1, x0
@@ -757,15 +757,100 @@ new_pt:     dw          01400400000
 pt_bit_v:   dw          00100000000
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; DELPTAB - delete a page table (make sure it's empty)
+        ;
+        ;   X0:     Offset of segment descriptor to delete
+        ;               Note: will also delete its friend x0 ^ 2
+        ;
+        ;   Does nothing if page table not present.
+        ;   Returns 1
+
+delptab:    save        x4
+
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+
+            andi        x0, x4, #1FC            ; get descr. of segment pair
+            xorrts      x2, x2, 19              ; addressability of taskseg
+            bisr        x2, x4                  ; x4: address of first descr.
+            
+            tstmz       1(x4)                   ; check if already gone
+            jmp         .mkptab_s
+            
+            ld          x0, (x4)
+            ldea        x1, pagetabs(x2)
+            calls       .freereal
+            
+            ld          x0, 2(x4)
+            ldea        x1, pagetabs(x2)
+            calls       .freereal
+            
+            xorr        ac, ac
+            st          1(x4)
+            st          3(x4)
+
+            jmp         .mkptab_x
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; GETPTE - get a page table entry
+        ;
+        ;   X0:     Virtual page address
+        ;
+        ;   Returns 0 on failure, entry on success
+
+getpte:     save        x4, lr
+
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+
+            movmrz      x0, x4, 9               ; page address
+            
+            ldea        lr, .getpte_r           ; subroutine following
+            
+getpte_q:   movrz       x4, x0, 19, 26          ; get segment map index
+            andi        x0, x0, #1FE
+            xorrts      ac, ac, 19              ; addressability of taskseg
+            bisr        ac, x0                  ; x0: address of descriptor
+            
+            retr
+
+getpte_r:   tstmz       1(x0)                   ; bail if no page table
+            jmp         .getpte_e
+            
+            ldea        lr, .getpte_f           ; subroutine following
+            
+getpte_s:   ldcom       .pt_bit_v               ; clear virtual
+            and         1(x0)
+            st          1(x0)
+            invlsg      (x4)
+            
+            movmrz      x4, x1, 18
+            movrz       x4, ac, 27, 27
+            bisr        ac, x1                  ; address of page entry
+            ld          (x1)
+            
+            retr
+            
+getpte_f:   ld          xy, .pt_bit_v           ; set virtual
+            or          xy, 1(x0)
+            st          xy, 1(x0)
+            invlsg      (x4)
+            popcr       psw1
+            rets
+
+getpte_e:   xorr        ac, ac
+            popcr       psw1
+            rets
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; MAPPTE - map a page table entry
         ;
         ;   X0:     Virtual page address
         ;   X1:     Map entry
         ;
-        ;   TODO: increment counter; unmap if X1 = 0 (delptab)
         ;   Returns 0 on failure, 1 on success
 
-mappte:     save        x4, x5                  ; TODO: fill this in
+mappte:     save        x4, x5, lr
 
             pushcr      psw1                    ; prevent preemption
             ldctl       psw1, .zero
@@ -780,33 +865,22 @@ mappte:     save        x4, x5                  ; TODO: fill this in
             movr.rz     ac, ac
             jmp         .mappte_f
             
-            movrz       x4, x0, 19, 26          ; get segment map index
-            andi        x0, x0, #1FE
-            xorrts      x1, x1, 19              ; addressability of taskseg
-            bisr        x1, x0                  ; x0: address of descriptor
+            callr       .getpte_q               ; address of descriptor
             
-            ldcom       .pt_bit_v               ; clear virtual
-            and         1(x0)
-            st          1(x0)
-            invlsg      (x4)
+            bisi        x0, x3, 3               ; address of count
             
-            movmrz      x4, x1, 18
-            movrz       x4, x2, 27, 27
-            bisr        x2, x1                  ; address of page entry
+            callr       .getpte_s
             
-            tstmnz      (x1)
+            movr.rn     ac, ac
             jmp         .mappte_f
+            
             st          x5, (x1)
+            inctnz      (x3)
             invlpg      (x4)
 
 mappte_e:   xorrts.sk   ac, ac, 1
 mappte_f:   xorr        ac, ac
-            ld          xy, .pt_bit_v           ; set virtual
-            or          xy, 1(x0)
-            st          xy, 1(x0)
-            invlsg      (x4)
-            popcr       psw1
-            rets
+            jmp         .getpte_f
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
