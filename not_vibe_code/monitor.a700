@@ -847,8 +847,10 @@ getpte_e:   xorr        ac, ac
         ;
         ;   X0:     Virtual page address
         ;   X1:     Map entry
+        ;   X2:     Permit overwrite
         ;
-        ;   Returns 0 on failure, 1 on success
+        ;   No overwrite: Returns 0 on failure, 1 on success
+        ;   Overwrite: Returns -1 on failure, old mapping on success
 
 mappte:     save        x4, x5, lr
 
@@ -871,6 +873,9 @@ mappte:     save        x4, x5, lr
             
             callr       .getpte_s
             
+            movr.rn     x2, x2
+            jmp         .mappte_ov
+            
             movr.rn     ac, ac
             jmp         .mappte_f
             
@@ -878,8 +883,18 @@ mappte:     save        x4, x5, lr
             inctnz      (x3)
             invlpg      (x4)
 
-mappte_e:   xorrts.sk   ac, ac, 1
+mappte_e:   xorrts      ac, ac, 1
+            jmp         .getpte_f
+            
 mappte_f:   xorr        ac, ac
+            movr.rn     x2, x2
+            comr        ac, ac
+            jmp         .getpte_f
+
+mappte_ov:  st          x5, (x1)
+            invlpg      (x4)
+            movr.rz     ac, ac
+            inctnz      (x3)
             jmp         .getpte_f
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -925,6 +940,13 @@ delpte:     save        x4, x5, x6, lr
 
 delpte_s:   movr        x6, ac
             jmp         .getpte_f
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; GETMAIN_M - unmap a page table entry
+        ;
+        ;   X0:     Virtual page address
+        ;
+        ;   Returns 0 on failure, old mapping on success
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
@@ -1056,11 +1078,13 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             
             movr        x6, x0
             bisi        x5, x1, #180
+            xorr        x2, x2
             calls       .mappte
             
             addi        x6, x0, 512
             bisi        x5, x1, #180
             addi        x1, x1, 512
+            xorr        x2, x2
             calls       .mappte
             
             ldea        x0, .done
