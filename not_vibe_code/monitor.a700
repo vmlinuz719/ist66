@@ -883,6 +883,50 @@ mappte_f:   xorr        ac, ac
             jmp         .getpte_f
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; DELPTE - unmap a page table entry
+        ;
+        ;   X0:     Virtual page address
+        ;
+        ;   Returns 0 on failure, old mapping on success
+
+delpte:     save        x4, x5, x6, lr
+
+            pushcr      psw1                    ; prevent preemption
+            ldctl       psw1, .zero
+
+            movmrz      x0, x4, 9               ; page address
+            xorr        x5, x5                  ; descriptor
+            
+            callr       .getpte_q               ; address of descriptor
+            
+            tstmz       1(x0)                   ; bail if no page table
+            jmp         .getpte_e
+            
+            bisi        x0, x3, 3               ; address of count
+            
+            callr       .getpte_s
+            
+            movr.rz     ac, ac
+            jmp         .mappte_f
+            
+            movr        ac, x6
+            
+            st          x5, (x1)
+            dectnz      (x3)
+            invlpg      (x4)
+            
+            ld          (x3)
+            movmzn.rn   ac, ac, 25
+            jmp         .delpte_s
+            
+            movrz       x4, x0, 18, 27          ; get segment map index
+            addr        x0, x0
+            calls       .delptab
+
+delpte_s:   movr        x6, ac
+            jmp         .getpte_f
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
 
 enumdone:   xorrts      ac, ac, 1
@@ -1037,6 +1081,19 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             sub         ac, .banner_crc
             movr.rn     ac, ac
             jmp         .lic_fail
+            
+            addi        x6, x0, 512
+            bisi        x5, x1, #180
+            addi        x1, x1, 512
+            calls       .delpte
+            
+            movr        x6, x0
+            bisi        x5, x1, #180
+            calls       .delpte
+            
+            movmrz      ac, x0, 9
+            ldea        x1, pages(x7)
+            calls       .freereal
 
             hlt
             
