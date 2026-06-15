@@ -71,21 +71,21 @@ tty_acsv:   bss         1
 
 crlf:       dsn         13, 10
 msg_banner: dsn         "MP-700 VERSION 1 RELEASE 0", 13, 10,
-                        "(C) 2026 vmlinuz719. ", 
+                        "(C) 2027 vmlinuz719. ", 
                         "All rights reserved. Do not redistribute!",
                         13, 10, 13, 10
                         
-msg_initrm: dsn         "Init RMDETECT... "
-msg_initmp: dsn         "Init REALPOOL"
-msg_initsd: dsn         "Init SEGMENTS..."
-msg_initeh: dsn         "Init EXCEPTHD..."
-msg_initum: dsn         "Init USERMODE (test)..."
+msg_initrm: dsn         "RMDETECT ... "
+msg_initmp: dsn         "REALPOOL "
+msg_initsd: dsn         "VIRTUAL  ..."
+msg_initeh: dsn         "EXCEPT   ..."
+msg_initum: dsn         "LICENSE  ..."
 dot:        dsn         "."
 bang:       dsn         "!"
-done:       dsn         " Done.", 13, 10
+done:       dsn         " OK", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
 msg_licens: dsn         13, 10,
-                        "        ***  LICENSE VIOLATION DETECTED  ***", 13, 10,
+                        "        ***    SEVERE ERROR DETECTED     ***", 13, 10,
                         "        ***  STARTUP WILL NOT CONTINUE!  ***", 13, 10
 
 ok:         dw          0666
@@ -1059,7 +1059,7 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             calls       .writeld
         
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Initialize usermode (test)
+        ; Initialize usermode (test) and check license
         
             ldea        x0, .msg_initum
             calls       .writeld
@@ -1079,9 +1079,6 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             addi        x1, x1, 512
             xorr        x2, x2
             calls       .mappte
-            
-            ldea        x0, .done
-            calls       .writeld
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Piracy check...
@@ -1111,11 +1108,15 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             movmrz      ac, x0, 9
             ldea        x1, pages(x7)
             calls       .freereal
+            
+            ldea        x0, .done
+            calls       .writeld
 
             hlt
             
 lic_fail:   ldea        x0, .msg_licens
             calls       .writeld
+            ldctl       psw1, .zero
             hlt
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -1,5 +1,5 @@
 /*
- * Begin AI-generated code
+ * Begin HEAVILY rewritten, originally AI-generated code
  */
 
 #include <stdint.h>
