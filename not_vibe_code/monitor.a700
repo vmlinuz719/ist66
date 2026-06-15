@@ -71,7 +71,7 @@ tty_acsv:   bss         1
 
 crlf:       dsn         13, 10
 msg_banner: dsn         "MP-700 VERSION 1 RELEASE 0", 13, 10,
-                        "(C) 2027 vmlinuz719. ", 
+                        "(C) 2026 vmlinuz719. ", 
                         "All rights reserved. Do not redistribute!",
                         13, 10, 13, 10
                         
@@ -81,7 +81,7 @@ msg_initsd: dsn         "VIRTUAL  ..."
 msg_initeh: dsn         "EXCEPT   ..."
 msg_initum: dsn         "LICENSE  ..."
 dot:        dsn         "."
-bang:       dsn         "!"
+bang:       dsn         "-"
 done:       dsn         " OK", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
 msg_licens: dsn         13, 10,
@@ -1059,7 +1059,7 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             calls       .writeld
         
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; Initialize usermode (test) and check license
+        ; Initialize usermode (test)
         
             ldea        x0, .msg_initum
             calls       .writeld
@@ -1090,25 +1090,22 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             xorrts      x1, x1, 20
             ldea        x0, .msg_banner
             calls       .crc36b7
-            movr        ac, x5                  ; save (R8) for testing
             
+            movr        ac, xy
             sub         ac, .banner_crc
             movr.rn     ac, ac
             jmp         .lic_fail
             
             addi        x6, x0, 512
-            bisi        x5, x1, #180
-            addi        x1, x1, 512
             calls       .delpte
             
             movr        x6, x0
-            bisi        x5, x1, #180
             calls       .delpte
             
             movmrz      ac, x0, 9
             ldea        x1, pages(x7)
             calls       .freereal
-            
+
             ldea        x0, .done
             calls       .writeld
 
@@ -1116,6 +1113,9 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             
 lic_fail:   ldea        x0, .msg_licens
             calls       .writeld
+            wio         xy, 0, #010
+            ldea        ac, 1
+            wio         ac, 1, #010
             ldctl       psw1, .zero
             hlt
 

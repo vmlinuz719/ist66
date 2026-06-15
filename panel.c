@@ -780,6 +780,33 @@ void panel_do_event(void *ctx, SDL_Event *event) {
     }
 }
 
+uint64_t panel_io(
+    void *vctx,
+    uint64_t data,
+    int ctl,
+    int transfer
+) {
+    panel_ctx_t *ctx = (panel_ctx_t *) vctx;
+    
+    if (transfer == 1) { // write data
+        ctx->data_reg = data & MASK_36;
+    }
+    
+    else if (transfer == 3) { // write address
+        ctx->addr_reg = data & MASK_ADDR;
+    }
+    
+    else if (transfer == 0) { // read data
+        return ctx->data_reg;
+    }
+
+    else if (transfer == 2) { // read address
+        return ctx->addr_reg;
+    }
+    
+    return 0;
+}
+
 void panel_do_destroy(void *ctx) {
     panel_ctx_t *panel = (panel_ctx_t *) ctx;
     TTF_CloseFont(panel->font);
@@ -825,7 +852,7 @@ void init_panel(ist66_cu_t *cpu, int id) {
     
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_panel;
-    cpu->io[id] = NULL;
+    cpu->io[id] = panel_io;
 
     ctx->running = 1;
     ctx->cpu = cpu;

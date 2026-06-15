@@ -2470,7 +2470,7 @@ int main(int argc, char *argv[]) {
     
     init_cpu(&cpu, 262144, 512);
 
-    init_panel(&cpu, 0);
+    init_panel(&cpu, 16);
     init_bishop(&cpu, 32);
 
 
