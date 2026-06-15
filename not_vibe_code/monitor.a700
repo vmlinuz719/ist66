@@ -942,13 +942,6 @@ delpte_s:   movr        x6, ac
             jmp         .getpte_f
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ; GETMAIN_M - unmap a page table entry
-        ;
-        ;   X0:     Virtual page address
-        ;
-        ;   Returns 0 on failure, old mapping on success
-
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; ENUMDONE - break out of memory count loop
 
 enumdone:   xorrts      ac, ac, 1
