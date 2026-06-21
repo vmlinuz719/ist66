@@ -16,7 +16,13 @@ void *render_loop(void *vctx) {
     render_loop_ctx_t *ctx = (render_loop_ctx_t *) vctx;
     
     if (SDL_Init(SDL_INIT_EVERYTHING)) return NULL;
-    
+
+    /* We only use keysym hotkeys, never typed text. Leaving text input
+     * active makes IMEs (e.g. IBus/fcitx under KDE) intercept keypresses
+     * and pop up a character-composition menu instead of delivering plain
+     * SDL_KEYDOWN events. */
+    SDL_StopTextInput();
+
     int i = 0;
     while (i < ctx->num_windows) {
         if (ctx->window_ctx[i].do_init(ctx->window_ctx[i].ctx))
