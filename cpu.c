@@ -32,6 +32,8 @@ seg_cache_t *seg_lookup(acr7k_cu_t *cpu, int selector) {
         
         if (descriptor_addr >= cpu->mem_size - 1) return NULL;
         
+        cpu->mem_accesses += 2;
+
         uint64_t tag = cpu->memory[descriptor_addr + 1] & MASK_36;
         if (!(tag & (1 << 27))) return NULL; // still not present
         
@@ -57,6 +59,8 @@ tlb_entry_t *tlb_lookup(acr7k_cu_t *cpu, int selector, seg_cache_t *pg_table) {
         
         if (descriptor_addr >= cpu->mem_size) return NULL;
         
+        cpu->mem_accesses++;
+
         uint8_t rights = (cpu->memory[descriptor_addr] & 0x1E0) >> 5;
         if (!(rights & TLB_PRESENT)) return NULL; // still not present
         
