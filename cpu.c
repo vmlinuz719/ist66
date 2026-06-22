@@ -14,6 +14,7 @@
 #include "pch.h"
 #include "lpt.h"
 #include "tty.h"
+#include "msc.h"
 #include "panel.h"
 #include "bishop.h"
 
@@ -2517,8 +2518,9 @@ int main(int argc, char *argv[]) {
 
     init_ppt_ex(&cpu, 012, 9, "monitor.ppt");
     init_lpt(&cpu, 013, 8, stdout);
-    // init_pch(&cpu, 014, 6);
     init_tty(&cpu, 060, 10, 8080);
+    
+    init_msch(&cpu, 014, 6);
     
     char cmd[512];
     int running = 1;

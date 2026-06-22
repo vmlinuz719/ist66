@@ -8,6 +8,25 @@
 
 #include "cpu.h"
 
+static inline int msleep(long msec) {
+    struct timespec ts;
+    int res;
+
+    if (msec < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    ts.tv_sec = msec / 1000;
+    ts.tv_nsec = (msec % 1000) * 1000000;
+
+    do {
+        res = nanosleep(&ts, &ts);
+    } while (res && errno == EINTR);
+
+    return res;
+}
+
 typedef struct {
     pthread_t thread;
     
@@ -33,10 +52,10 @@ typedef struct {
 
 void *subch(void *vctx) {
     msch_arg_t *arg = (msch_arg_t *) vctx;
-    int subch = arg->subchannel;
+    int sc_id = arg->subchannel;
     
     acr7k_msch_t *channel = arg->msch;
-    acr7k_subch_t *subchannel = &(arg->msch->subchannel[subch]);
+    acr7k_subch_t *subchannel = &(arg->msch->subchannel[sc_id]);
     
     subchannel->running = 1;
     
@@ -50,6 +69,28 @@ void *subch(void *vctx) {
         int command = subchannel->command;
         (void) command;
         pthread_mutex_unlock(&channel->status_lock);
+        
+        if (command == -1) {
+            subchannel->running = 0;
+        }
+        
+        else {
+            fprintf(
+                stderr, "Channel %03X.%01X got command\n",
+                channel->id, sc_id
+            );
+            
+            msleep(1000);
+            
+            fprintf(
+                stderr, "Channel %03X.%01X done\n",
+                channel->id, sc_id
+            );
+            
+            pthread_mutex_lock(&channel->status_lock);
+            subchannel->command = 0;
+            pthread_mutex_unlock(&channel->status_lock);
+        }
     }
     
     /*
@@ -95,4 +136,45 @@ void *subch(void *vctx) {
     */
     
     return NULL;
+}
+
+void destroy_msch(acr7k_cu_t *cpu, int id) {
+    acr7k_msch_t *ctx = (acr7k_msch_t *) cpu->ioctx[id];
+    
+    for (int i = 0; i < 16; i++) {
+        if (ctx->subchannel[i].running) {
+            pthread_cancel(ctx->subchannel[i].thread);
+        }
+        pthread_cond_destroy(&ctx->subchannel[i].cmd_cond);
+    }
+    
+    pthread_mutex_destroy(&ctx->status_lock);
+    free(ctx);
+    
+    fprintf(stderr, "MSC: %04o deinitialized\n", id);
+}
+
+void init_msch(acr7k_cu_t *cpu, int id, int irq) {
+    acr7k_msch_t *ctx = calloc(sizeof(acr7k_msch_t), 1);
+    cpu->ioctx[id] = ctx;
+    cpu->io_destroy[id] = destroy_msch;
+    // cpu->io[id] = msch_io;
+    
+    ctx->cpu = cpu;
+    ctx->id = id;
+    ctx->irq = irq;
+    
+    pthread_mutex_init(&ctx->status_lock, NULL);
+    
+    msch_arg_t msch_arg[16];
+    
+    for (int i = 0; i < 16; i++) {
+        msch_arg[i].msch = ctx;
+        msch_arg[i].subchannel = i;
+        
+        pthread_cond_init(&ctx->subchannel[i].cmd_cond, NULL);
+        pthread_create(&ctx->subchannel[i].thread, NULL, subch, &msch_arg[i]);
+    }
+    
+    fprintf(stderr, "MSC: %04o IRQ %02o\n", id, irq);
 }
