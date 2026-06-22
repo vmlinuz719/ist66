@@ -3,6 +3,6 @@
 
 #include "cpu.h"
 
-void init_tty(ist66_cu_t *cpu, int id, int irq, int port);
+void init_tty(acr7k_cu_t *cpu, int id, int irq, int port);
 
 #endif

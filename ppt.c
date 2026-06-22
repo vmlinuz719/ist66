@@ -10,7 +10,7 @@
 #include "ppt.h"
 
 typedef struct {
-    ist66_cu_t *cpu;
+    acr7k_cu_t *cpu;
     int id, irq;
     
     FILE *file;
@@ -21,7 +21,7 @@ typedef struct {
     pthread_mutex_t lock;
     pthread_cond_t cmd_cond;
     int running, command, done;
-} ist66_ppt_t;
+} acr7k_ppt_t;
 
 static inline int msleep(long msec) {
     struct timespec ts;
@@ -43,8 +43,8 @@ static inline int msleep(long msec) {
 }
 
 void *ppt(void *vctx) {
-    ist66_ppt_t *ctx = (ist66_ppt_t *) vctx;
-    ist66_cu_t *cpu = ctx->cpu;
+    acr7k_ppt_t *ctx = (acr7k_ppt_t *) vctx;
+    acr7k_cu_t *cpu = ctx->cpu;
     
     ctx->running = 1;
     while (ctx->running) {
@@ -95,8 +95,8 @@ uint64_t ppt_io(
     int ctl,
     int transfer
 ) {
-    ist66_ppt_t *ctx = (ist66_ppt_t *) vctx;
-    ist66_cu_t *cpu = ctx->cpu;
+    acr7k_ppt_t *ctx = (acr7k_ppt_t *) vctx;
+    acr7k_cu_t *cpu = ctx->cpu;
     
     if (transfer != 14) {
         switch (ctl) {
@@ -134,8 +134,8 @@ uint64_t ppt_io(
     else return 0;
 }
 
-void destroy_ppt(ist66_cu_t *cpu, int id) {
-    ist66_ppt_t *ctx = (ist66_ppt_t *) cpu->ioctx[id];
+void destroy_ppt(acr7k_cu_t *cpu, int id) {
+    acr7k_ppt_t *ctx = (acr7k_ppt_t *) cpu->ioctx[id];
     
     if (ctx->running) {
         pthread_cancel(ctx->thread);
@@ -149,8 +149,8 @@ void destroy_ppt(ist66_cu_t *cpu, int id) {
     fprintf(stderr, "PPT: %04o deinitialized\n", id);
 }
 
-void init_ppt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
-    ist66_ppt_t *ctx = calloc(sizeof(ist66_ppt_t), 1);
+void init_ppt_any(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
+    acr7k_ppt_t *ctx = calloc(sizeof(acr7k_ppt_t), 1);
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_ppt;
     cpu->io[id] = ppt_io;
@@ -166,12 +166,12 @@ void init_ppt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
     pthread_create(&ctx->thread, NULL, ppt, ctx);
 }
 
-void init_ppt(ist66_cu_t *cpu, int id, int irq) {
+void init_ppt(acr7k_cu_t *cpu, int id, int irq) {
     init_ppt_any(cpu, id, irq, stdin);
     fprintf(stderr, "PPT: %04o IRQ %02o, file STDIN\n", id, irq);
 }
 
-void init_ppt_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
+void init_ppt_ex(acr7k_cu_t *cpu, int id, int irq, char *fname) {
     FILE *fd = fopen(fname, "rb");
     if (fd == NULL) {
         fprintf(stderr, "PPT: %04o file error\n", id);

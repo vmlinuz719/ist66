@@ -273,7 +273,7 @@ typedef struct {
     pthread_t thread;
     int updated;
     pthread_mutex_t update_lock;
-    ist66_cu_t *cpu;
+    acr7k_cu_t *cpu;
 
     SDL_Window *window;
     SDL_Renderer *render;
@@ -521,7 +521,7 @@ int panel_do_init(void *ctx) {
     panel_ctx_t *panel = (panel_ctx_t *) ctx;
 
     panel->window = SDL_CreateWindow(
-        "RDC-700 Programmer's Panel",
+        "ACR 7000 Programmer's Panel",
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
         SCREEN_WIDTH, SCREEN_HEIGHT,
         SDL_WINDOW_SHOWN
@@ -816,7 +816,7 @@ void panel_do_destroy(void *ctx) {
 
 /* --- Init / destroy --- */
 
-void destroy_panel(ist66_cu_t *cpu, int id) {
+void destroy_panel(acr7k_cu_t *cpu, int id) {
     panel_ctx_t *panel = (panel_ctx_t *) cpu->ioctx[id];
     panel->running = 0;
     // pthread_join(panel->thread, NULL);
@@ -831,7 +831,7 @@ void destroy_panel(ist66_cu_t *cpu, int id) {
     free(panel);
 }
 
-void init_panel(ist66_cu_t *cpu, int id) {
+void init_panel(acr7k_cu_t *cpu, int id) {
     panel_ctx_t *ctx = calloc(sizeof(panel_ctx_t), 1);
     
     window_ctx_t panel_window = {

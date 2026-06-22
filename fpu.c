@@ -3,7 +3,7 @@
 #include "fpu.h"
 
 /*
- * RDC-700 floating point format
+ * ACR 7000 floating point format
  *
  * Single-precision: 1-bit sign, 8-bit excess-127 exponent, 27-bit significand
  * Double-precision: 1-bit sign, 8-bit excess-127 exponent, 64-bit significand
@@ -20,7 +20,7 @@
  *  Any Range Nonzero Numeric value
  */
 
-int f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst) {
+int f80_round_to_f36(acr7k_float_t *src, acr7k_float_t *dst) {
     uint16_t exp = src->sign_exp & 0x7FFF;
     if (exp < (1 + 16383 - 127)) {
         dst->sign_exp = 0;
@@ -50,7 +50,7 @@ int f80_round_to_f36(rdc700_float_t *src, rdc700_float_t *dst) {
     return 0;
 }
 
-int f80_round_to_f72(rdc700_float_t *src, rdc700_float_t *dst) {
+int f80_round_to_f72(acr7k_float_t *src, acr7k_float_t *dst) {
     uint16_t exp = src->sign_exp & 0x7FFF;
     if (exp < (1 + 16383 - 127)) {
         dst->sign_exp = 0;
@@ -80,7 +80,7 @@ int f80_round_to_f72(rdc700_float_t *src, rdc700_float_t *dst) {
     return 0;
 }
 
-int is_nan(rdc700_float_t *n) {
+int is_nan(acr7k_float_t *n) {
     return (
         (
             (n->sign_exp & (1 << 15)) &&
@@ -90,19 +90,19 @@ int is_nan(rdc700_float_t *n) {
     );
 }
 
-int is_inf(rdc700_float_t *n) {
+int is_inf(acr7k_float_t *n) {
     return (
         (n->sign_exp & 0x7FFF) == 0x7FFF
     );
 }
 
-int is_zero(rdc700_float_t *n) {
+int is_zero(acr7k_float_t *n) {
     return (
         !is_nan(n) && !is_inf(n) && (n->signif == 0)
     );
 }
 
-int get_f36(rdc700_float_t *src, uint64_t *dst) {
+int get_f36(acr7k_float_t *src, uint64_t *dst) {
     if (is_nan(src)) {
         *dst = 0x800000000;
         return 0;
@@ -128,7 +128,7 @@ int get_f36(rdc700_float_t *src, uint64_t *dst) {
     return 0;
 }
 
-void set_f36(uint64_t *src, rdc700_float_t *dst) {
+void set_f36(uint64_t *src, acr7k_float_t *dst) {
     if (*src == 0) {
         dst->sign_exp = 0;
         dst->signif = 0;
@@ -156,7 +156,7 @@ void set_f36(uint64_t *src, rdc700_float_t *dst) {
     dst->signif = *src << 37;
 }
 
-int get_f72(rdc700_float_t *src, uint64_t *dst, uint64_t *dst_l) {
+int get_f72(acr7k_float_t *src, uint64_t *dst, uint64_t *dst_l) {
     if (is_nan(src)) {
         *dst = 0x800000000;
         *dst_l = 0;
@@ -187,7 +187,7 @@ int get_f72(rdc700_float_t *src, uint64_t *dst, uint64_t *dst_l) {
     return 0;
 }
 
-void set_f72(uint64_t *src, uint64_t *src_l, rdc700_float_t *dst) {
+void set_f72(uint64_t *src, uint64_t *src_l, acr7k_float_t *dst) {
     if (*src == 0 && *src_l == 0) {
         dst->sign_exp = 0;
         dst->signif = 0;
@@ -222,7 +222,7 @@ void set_f72(uint64_t *src, uint64_t *src_l, rdc700_float_t *dst) {
  * 80-bit floating-point normalize
  */
 
-void rdc700_fnorm(rdc700_float_t *src, rdc700_float_t *dst) {
+void acr7k_fnorm(acr7k_float_t *src, acr7k_float_t *dst) {
     if (is_inf(src)) {
         dst->sign_exp = src->sign_exp;
         dst->signif = src->signif;
@@ -251,7 +251,7 @@ void rdc700_fnorm(rdc700_float_t *src, rdc700_float_t *dst) {
  * 80-bit floating-point negate
  */
 
-void rdc700_fneg(rdc700_float_t *src, rdc700_float_t *dst) {
+void acr7k_fneg(acr7k_float_t *src, acr7k_float_t *dst) {
     if (is_nan(src)) {
         dst->sign_exp = 0x8000;
         dst->signif = 0;
@@ -268,9 +268,9 @@ void rdc700_fneg(rdc700_float_t *src, rdc700_float_t *dst) {
  * 80-bit floating-point conormalize: adjust lesser exponent
  */
 
-int rdc700_fconorm(
-    rdc700_float_t *src, rdc700_float_t *tgt,
-    rdc700_float_t *dst_g, rdc700_float_t *dst_l
+int acr7k_fconorm(
+    acr7k_float_t *src, acr7k_float_t *tgt,
+    acr7k_float_t *dst_g, acr7k_float_t *dst_l
 ) {
     if (
         is_inf(src) ||
@@ -309,7 +309,7 @@ int rdc700_fconorm(
         return 0;
     }
 
-    rdc700_float_t lesser;
+    acr7k_float_t lesser;
 
     if ((src->sign_exp & 0x7FFF) > (tgt->sign_exp & 0x7FFF)) {
         dst_g->sign_exp = src->sign_exp;
@@ -359,10 +359,10 @@ int rdc700_fconorm(
  * 80-bit floating-point add
  */
 
-int rdc700_fadd(
-    rdc700_float_t *src,
-    rdc700_float_t *tgt,
-    rdc700_float_t *dst
+int acr7k_fadd(
+    acr7k_float_t *src,
+    acr7k_float_t *tgt,
+    acr7k_float_t *dst
 ) {
     if (is_nan(src) || is_nan(tgt)) {
         dst->sign_exp = 0x8000;
@@ -404,16 +404,16 @@ int rdc700_fadd(
         return 0;
     }
 
-    rdc700_float_t a, b;
-    int insignificant = rdc700_fconorm(src, tgt, &a, &b);
+    acr7k_float_t a, b;
+    int insignificant = acr7k_fconorm(src, tgt, &a, &b);
     if (insignificant) {
         dst->sign_exp = a.sign_exp;
         dst->signif = a.signif;
         return F_INSG;
     }
 
-    rdc700_float_t *greater = (a.signif > b.signif) ? &a : &b;
-    rdc700_float_t *lesser = (a.signif > b.signif) ? &b : &a;
+    acr7k_float_t *greater = (a.signif > b.signif) ? &a : &b;
+    acr7k_float_t *lesser = (a.signif > b.signif) ? &b : &a;
     int carry = 0;
     if ((src->sign_exp & 0x8000) == (tgt->sign_exp & 0x8000)) {
         dst->signif = greater->signif + lesser->signif;
@@ -445,10 +445,10 @@ int rdc700_fadd(
  *   number * number      => number
  */
 
-int rdc700_fmul(
-    rdc700_float_t *src,
-    rdc700_float_t *tgt,
-    rdc700_float_t *dst
+int acr7k_fmul(
+    acr7k_float_t *src,
+    acr7k_float_t *tgt,
+    acr7k_float_t *dst
 ) {
     uint16_t new_sign_exp = (
         (src->sign_exp & (1 << 15)) ^ (tgt->sign_exp & (1 << 15))
@@ -518,10 +518,10 @@ int rdc700_fmul(
  * 80-bit floating-point divide
  */
 
-int rdc700_fdiv(
-    rdc700_float_t *src,
-    rdc700_float_t *tgt,
-    rdc700_float_t *dst
+int acr7k_fdiv(
+    acr7k_float_t *src,
+    acr7k_float_t *tgt,
+    acr7k_float_t *dst
 ) {
     uint16_t new_sign_exp = (
         (src->sign_exp & (1 << 15)) ^ (tgt->sign_exp & (1 << 15))
@@ -600,7 +600,7 @@ int rdc700_fdiv(
     else return 0;
 }
 
-void print_rdc_float(rdc700_float_t *f) {
+void print_rdc_float(acr7k_float_t *f) {
     int is_neg = f->sign_exp >> 15;
 
     if (is_inf(f)) {
@@ -650,7 +650,7 @@ void print_rdc_float(rdc700_float_t *f) {
 
 /*
 int main(int argc, char *argv[]) {
-    rdc700_float_t src, tgt, result_a, result_b, result_c;
+    acr7k_float_t src, tgt, result_a, result_b, result_c;
     uint64_t to_float = 0x4C8000000;
 
     uint64_t numerator;
@@ -659,36 +659,36 @@ int main(int argc, char *argv[]) {
     
     numerator = 132 | to_float;
     set_f36(&numerator, &src);
-    rdc700_fnorm(&src, &src);
+    acr7k_fnorm(&src, &src);
     denominator = 100 | to_float;
     set_f36(&denominator, &tgt);
-    rdc700_fnorm(&tgt, &tgt);
-    rdc700_fdiv(&src, &tgt, &result_a);
-    rdc700_fnorm(&result_a, &result_a);
+    acr7k_fnorm(&tgt, &tgt);
+    acr7k_fdiv(&src, &tgt, &result_a);
+    acr7k_fnorm(&result_a, &result_a);
     // f80_round_to_f72(&result_a, &result_a);
 
     numerator = 7 | to_float;
     set_f36(&numerator, &src);
-    rdc700_fnorm(&src, &src);
+    acr7k_fnorm(&src, &src);
     denominator = 10 | to_float;
     set_f36(&denominator, &tgt);
-    rdc700_fnorm(&tgt, &tgt);
-    rdc700_fdiv(&src, &tgt, &result_b);
-    rdc700_fnorm(&result_b, &result_b);
+    acr7k_fnorm(&tgt, &tgt);
+    acr7k_fdiv(&src, &tgt, &result_b);
+    acr7k_fnorm(&result_b, &result_b);
     // f80_round_to_f72(&result_b, &result_b);
 
-    rdc700_fadd(&result_a, &result_b, &result_c);
+    acr7k_fadd(&result_a, &result_b, &result_c);
     printf("%d %lX\n", ((int) (result_c.sign_exp & 0x7FFF)) - 16383, result_c.signif);
 
     printf("==== Should be ====\n");
 
     numerator = 202 | to_float;
     set_f36(&numerator, &src);
-    rdc700_fnorm(&src, &src);
+    acr7k_fnorm(&src, &src);
     denominator = 100 | to_float;
     set_f36(&denominator, &tgt);
-    rdc700_fnorm(&tgt, &tgt);
-    rdc700_fdiv(&src, &tgt, &result_a);
+    acr7k_fnorm(&tgt, &tgt);
+    acr7k_fdiv(&src, &tgt, &result_a);
     printf("%d %064lb\n", ((int) (result_a.sign_exp & 0x7FFF)) - 16383, result_a.signif);
 
     return 0;

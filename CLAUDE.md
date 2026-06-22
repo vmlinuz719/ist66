@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`ist66` is an emulator for a fictional 36-bit-word minicomputer (the "RDC700" family),
+`acr7000` is an emulator for a fictional 36-bit-word minicomputer (the "ACR 7000" family),
 written in C. Words are 36 bits stored in `uint64_t`; the machine and all tooling are
 **octal-oriented** — addresses, opcodes, and memory dumps are printed and parsed in octal
 throughout. The emulated machine has a front panel, paper-tape and line-printer peripherals,
@@ -13,7 +13,7 @@ a TTY served over telnet, and two SDL-backed graphical displays.
 ## Build, test, run
 
 ```sh
-make            # build the ./ist66 emulator
+make            # build the ./acr7000 emulator
 make test       # build + run CUnit suites (tests/test_fpu, tests/test_cpu)
 make clean
 ```
@@ -24,14 +24,14 @@ make clean
   `./tests/test_fpu` or `./tests/test_cpu`.
 - Tape-format converters build separately: `cd tools && make` produces `nbt2tap` and `tap2nbt`.
 
-Running `./ist66` opens SDL windows and drops you into an interactive **monitor** prompt
+Running `./acr7000` opens SDL windows and drops you into an interactive **monitor** prompt
 (the loop at the bottom of `cpu.c`'s `main`). Monitor commands operate on a current octal
 pointer: `/<addr>` sets it, `?` prints it, `.<count>` dumps memory, `=<vals...>` deposits
 octal words. `main` hardcodes the initial device set and preloads a relocatable loader.
 
 ## Architecture
 
-**CPU core — `cpu.c` (large) + `include/cpu.h`.** `struct ist66_cu` holds all machine state:
+**CPU core — `cpu.c` (large) + `include/cpu.h`.** `struct acr7k_cu` holds all machine state:
 16 accumulators `a[]`, 8 control registers `c[]` (indexed by `C_PSW`, `C_CW`, `C_FCW`, …),
 16 floats `f[]`, memory, the TLB/segment caches, and the device tables. The CPU runs on its
 own pthread (`start_cpu`/`stop_cpu`); `cpu.h` defines the interrupt/exception model as inline
@@ -42,7 +42,7 @@ through `seg_cache[]` + `tlb[]` for virtual-memory translation and raise faults 
 **ALU and FPU are separate, independently testable units.** `alu.c`/`include/alu.h` implement
 the integer `compute()` plus inline 36-bit multiply; the masks and sign-extension macros
 (`MASK_36`, `EXT*`, `CARRY`, `SKIP`) live in the header. `fpu.c`/`include/fpu.h` implement the
-`rdc700_float_t` format (an 80-bit-ish internal representation packed into 36- or 72-bit
+`acr7k_float_t` format (an 80-bit-ish internal representation packed into 36- or 72-bit
 storage words) with add/mul/div/normalize. Both have CUnit coverage in `tests/`.
 
 **I/O model — function-pointer device table.** Each device is registered into the parallel

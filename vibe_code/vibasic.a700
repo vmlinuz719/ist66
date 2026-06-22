@@ -1,6 +1,6 @@
 ; vibasic.a700
 ; ==========================================================================
-; VIBASIC — a single-user line-number BASIC for the RDC-700.
+; VIBASIC — a single-user line-number BASIC for the ACR 7000.
 ; Boots from RIM paper tape; runs in supervisor mode.
 ;
 ; INCREMENT 1 — Foundation (this file):

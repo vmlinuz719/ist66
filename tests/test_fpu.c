@@ -3,24 +3,24 @@
 #include "fpu.h"
 
 /*
- * Helper: create an RDC-700 f36 value from an integer.
+ * Helper: create an ACR 7000 f36 value from an integer.
  * Uses the same to_float exponent bias as the commented-out test in fpu.c.
  * to_float = 0x4C8000000 encodes exponent field 0x99 (153), which in
  * excess-127 means 2^26, so the integer n is represented as n * 2^26
  * in the 27-bit significand — i.e. the leading bit of the significand
  * is at bit 26 for values < 2^1.
  */
-static void make_f36_int(uint64_t n, rdc700_float_t *out) {
+static void make_f36_int(uint64_t n, acr7k_float_t *out) {
     uint64_t to_float = 0x4C8000000;
     uint64_t word = n | to_float;
     set_f36(&word, out);
-    rdc700_fnorm(out, out);
+    acr7k_fnorm(out, out);
 }
 
 /* ---- Classification tests ---- */
 
 static void test_is_zero(void) {
-    rdc700_float_t z = { .sign_exp = 0, .signif = 0 };
+    acr7k_float_t z = { .sign_exp = 0, .signif = 0 };
     CU_ASSERT_TRUE(is_zero(&z));
     CU_ASSERT_FALSE(is_nan(&z));
     CU_ASSERT_FALSE(is_inf(&z));
@@ -28,7 +28,7 @@ static void test_is_zero(void) {
 
 static void test_is_nan_true_nan(void) {
     /* True NaN: sign=1, exp=0 */
-    rdc700_float_t n = { .sign_exp = 0x8000, .signif = 0 };
+    acr7k_float_t n = { .sign_exp = 0x8000, .signif = 0 };
     CU_ASSERT_TRUE(is_nan(&n));
     CU_ASSERT_FALSE(is_zero(&n));
     CU_ASSERT_FALSE(is_inf(&n));
@@ -36,26 +36,26 @@ static void test_is_nan_true_nan(void) {
 
 static void test_is_nan_pseudo_nan(void) {
     /* Pseudo NaN: sign_exp=0 but signif nonzero */
-    rdc700_float_t n = { .sign_exp = 0, .signif = 42 };
+    acr7k_float_t n = { .sign_exp = 0, .signif = 42 };
     CU_ASSERT_TRUE(is_nan(&n));
 }
 
 static void test_is_inf(void) {
     /* Positive infinity: exp = 0x7FFF */
-    rdc700_float_t pinf = { .sign_exp = 0x7FFF, .signif = 0 };
+    acr7k_float_t pinf = { .sign_exp = 0x7FFF, .signif = 0 };
     CU_ASSERT_TRUE(is_inf(&pinf));
     CU_ASSERT_FALSE(is_nan(&pinf));
     CU_ASSERT_FALSE(is_zero(&pinf));
 
     /* Negative infinity */
-    rdc700_float_t ninf = { .sign_exp = 0xFFFF, .signif = 0 };
+    acr7k_float_t ninf = { .sign_exp = 0xFFFF, .signif = 0 };
     CU_ASSERT_TRUE(is_inf(&ninf));
 }
 
 /* ---- Format conversion round-trips ---- */
 
 static void test_f36_round_trip(void) {
-    rdc700_float_t f;
+    acr7k_float_t f;
     uint64_t word_out;
 
     make_f36_int(132, &f);
@@ -64,9 +64,9 @@ static void test_f36_round_trip(void) {
     CU_ASSERT_EQUAL(rc, 0);
 
     /* Convert back and verify */
-    rdc700_float_t f2;
+    acr7k_float_t f2;
     set_f36(&word_out, &f2);
-    rdc700_fnorm(&f2, &f2);
+    acr7k_fnorm(&f2, &f2);
 
     CU_ASSERT_EQUAL(f.sign_exp, f2.sign_exp);
     /* Allow small rounding difference in low bits */
@@ -74,7 +74,7 @@ static void test_f36_round_trip(void) {
 }
 
 static void test_f72_round_trip(void) {
-    rdc700_float_t f;
+    acr7k_float_t f;
     uint64_t hi, lo;
 
     make_f36_int(202, &f);
@@ -82,9 +82,9 @@ static void test_f72_round_trip(void) {
     int rc = get_f72(&f, &hi, &lo);
     CU_ASSERT_EQUAL(rc, 0);
 
-    rdc700_float_t f2;
+    acr7k_float_t f2;
     set_f72(&hi, &lo, &f2);
-    rdc700_fnorm(&f2, &f2);
+    acr7k_fnorm(&f2, &f2);
 
     CU_ASSERT_EQUAL(f.sign_exp, f2.sign_exp);
     CU_ASSERT_EQUAL(f.signif, f2.signif);
@@ -92,7 +92,7 @@ static void test_f72_round_trip(void) {
 
 static void test_f36_zero_round_trip(void) {
     uint64_t zero = 0;
-    rdc700_float_t f;
+    acr7k_float_t f;
     set_f36(&zero, &f);
     CU_ASSERT_TRUE(is_zero(&f));
 
@@ -104,78 +104,78 @@ static void test_f36_zero_round_trip(void) {
 /* ---- Normalization ---- */
 
 static void test_fnorm_already_normalized(void) {
-    rdc700_float_t f = { .sign_exp = 16383 + 5, .signif = 1UL << 63 };
-    rdc700_float_t dst;
-    rdc700_fnorm(&f, &dst);
+    acr7k_float_t f = { .sign_exp = 16383 + 5, .signif = 1UL << 63 };
+    acr7k_float_t dst;
+    acr7k_fnorm(&f, &dst);
     CU_ASSERT_EQUAL(dst.sign_exp, f.sign_exp);
     CU_ASSERT_EQUAL(dst.signif, f.signif);
 }
 
 static void test_fnorm_denormalized(void) {
     /* Significand with leading one at bit 61 instead of 63 — needs 2 shifts */
-    rdc700_float_t f = { .sign_exp = 16383 + 10, .signif = 1UL << 61 };
-    rdc700_float_t dst;
-    rdc700_fnorm(&f, &dst);
+    acr7k_float_t f = { .sign_exp = 16383 + 10, .signif = 1UL << 61 };
+    acr7k_float_t dst;
+    acr7k_fnorm(&f, &dst);
     CU_ASSERT_EQUAL(dst.signif, 1UL << 63);
     CU_ASSERT_EQUAL(dst.sign_exp & 0x7FFF, 16383 + 10 - 2);
 }
 
 static void test_fnorm_zero(void) {
-    rdc700_float_t f = { .sign_exp = 16383 + 5, .signif = 0 };
-    rdc700_float_t dst;
-    rdc700_fnorm(&f, &dst);
+    acr7k_float_t f = { .sign_exp = 16383 + 5, .signif = 0 };
+    acr7k_float_t dst;
+    acr7k_fnorm(&f, &dst);
     CU_ASSERT_TRUE(is_zero(&dst));
 }
 
 static void test_fnorm_nan(void) {
-    rdc700_float_t f = { .sign_exp = 0x8000, .signif = 0 };
-    rdc700_float_t dst;
-    rdc700_fnorm(&f, &dst);
+    acr7k_float_t f = { .sign_exp = 0x8000, .signif = 0 };
+    acr7k_float_t dst;
+    acr7k_fnorm(&f, &dst);
     CU_ASSERT_TRUE(is_nan(&dst));
 }
 
 static void test_fnorm_inf(void) {
-    rdc700_float_t f = { .sign_exp = 0x7FFF, .signif = 0 };
-    rdc700_float_t dst;
-    rdc700_fnorm(&f, &dst);
+    acr7k_float_t f = { .sign_exp = 0x7FFF, .signif = 0 };
+    acr7k_float_t dst;
+    acr7k_fnorm(&f, &dst);
     CU_ASSERT_TRUE(is_inf(&dst));
 }
 
 /* ---- Negation ---- */
 
 static void test_fneg_positive(void) {
-    rdc700_float_t f;
+    acr7k_float_t f;
     make_f36_int(42, &f);
     CU_ASSERT_EQUAL(f.sign_exp & 0x8000, 0); /* positive */
 
-    rdc700_float_t neg;
-    rdc700_fneg(&f, &neg);
+    acr7k_float_t neg;
+    acr7k_fneg(&f, &neg);
     CU_ASSERT_NOT_EQUAL(neg.sign_exp & 0x8000, 0); /* now negative */
     CU_ASSERT_EQUAL(neg.signif, f.signif);
 }
 
 static void test_fneg_double_negation(void) {
-    rdc700_float_t f;
+    acr7k_float_t f;
     make_f36_int(42, &f);
 
-    rdc700_float_t neg, pos;
-    rdc700_fneg(&f, &neg);
-    rdc700_fneg(&neg, &pos);
+    acr7k_float_t neg, pos;
+    acr7k_fneg(&f, &neg);
+    acr7k_fneg(&neg, &pos);
     CU_ASSERT_EQUAL(pos.sign_exp, f.sign_exp);
     CU_ASSERT_EQUAL(pos.signif, f.signif);
 }
 
 static void test_fneg_zero(void) {
-    rdc700_float_t z = { .sign_exp = 0, .signif = 0 };
-    rdc700_float_t dst;
-    rdc700_fneg(&z, &dst);
+    acr7k_float_t z = { .sign_exp = 0, .signif = 0 };
+    acr7k_float_t dst;
+    acr7k_fneg(&z, &dst);
     CU_ASSERT_TRUE(is_zero(&dst));
 }
 
 static void test_fneg_nan(void) {
-    rdc700_float_t n = { .sign_exp = 0x8000, .signif = 0 };
-    rdc700_float_t dst;
-    rdc700_fneg(&n, &dst);
+    acr7k_float_t n = { .sign_exp = 0x8000, .signif = 0 };
+    acr7k_float_t dst;
+    acr7k_fneg(&n, &dst);
     CU_ASSERT_TRUE(is_nan(&dst));
 }
 
@@ -183,30 +183,30 @@ static void test_fneg_nan(void) {
 
 static void test_round_to_f36_overflow(void) {
     /* Exponent too large for f36 range */
-    rdc700_float_t src = { .sign_exp = 16383 + 200, .signif = 1UL << 63 };
-    rdc700_float_t dst;
+    acr7k_float_t src = { .sign_exp = 16383 + 200, .signif = 1UL << 63 };
+    acr7k_float_t dst;
     int rc = f80_round_to_f36(&src, &dst);
     CU_ASSERT_EQUAL(rc, F_OVRF);
 }
 
 static void test_round_to_f36_underflow(void) {
     /* Exponent too small for f36 range */
-    rdc700_float_t src = { .sign_exp = 1, .signif = 1UL << 63 };
-    rdc700_float_t dst;
+    acr7k_float_t src = { .sign_exp = 1, .signif = 1UL << 63 };
+    acr7k_float_t dst;
     int rc = f80_round_to_f36(&src, &dst);
     CU_ASSERT_EQUAL(rc, F_UNDF);
 }
 
 static void test_round_to_f72_overflow(void) {
-    rdc700_float_t src = { .sign_exp = 16383 + 200, .signif = 1UL << 63 };
-    rdc700_float_t dst;
+    acr7k_float_t src = { .sign_exp = 16383 + 200, .signif = 1UL << 63 };
+    acr7k_float_t dst;
     int rc = f80_round_to_f72(&src, &dst);
     CU_ASSERT_EQUAL(rc, F_OVRF);
 }
 
 static void test_round_to_f72_underflow(void) {
-    rdc700_float_t src = { .sign_exp = 1, .signif = 1UL << 63 };
-    rdc700_float_t dst;
+    acr7k_float_t src = { .sign_exp = 1, .signif = 1UL << 63 };
+    acr7k_float_t dst;
     int rc = f80_round_to_f72(&src, &dst);
     CU_ASSERT_EQUAL(rc, F_UNDF);
 }
@@ -214,10 +214,10 @@ static void test_round_to_f72_underflow(void) {
 /* ---- Co-normalization ---- */
 
 static void test_fconorm_equal_exponents(void) {
-    rdc700_float_t a = { .sign_exp = 16383 + 5, .signif = 1UL << 63 };
-    rdc700_float_t b = { .sign_exp = 16383 + 5, .signif = 1UL << 62 };
-    rdc700_float_t g, l;
-    int rc = rdc700_fconorm(&a, &b, &g, &l);
+    acr7k_float_t a = { .sign_exp = 16383 + 5, .signif = 1UL << 63 };
+    acr7k_float_t b = { .sign_exp = 16383 + 5, .signif = 1UL << 62 };
+    acr7k_float_t g, l;
+    int rc = acr7k_fconorm(&a, &b, &g, &l);
     CU_ASSERT_EQUAL(rc, 0);
     /* When exponents are equal, values pass through unchanged */
     CU_ASSERT_EQUAL(g.sign_exp, a.sign_exp);
@@ -227,10 +227,10 @@ static void test_fconorm_equal_exponents(void) {
 }
 
 static void test_fconorm_different_exponents(void) {
-    rdc700_float_t a = { .sign_exp = 16383 + 10, .signif = 1UL << 63 };
-    rdc700_float_t b = { .sign_exp = 16383 + 8, .signif = 1UL << 63 };
-    rdc700_float_t g, l;
-    int rc = rdc700_fconorm(&a, &b, &g, &l);
+    acr7k_float_t a = { .sign_exp = 16383 + 10, .signif = 1UL << 63 };
+    acr7k_float_t b = { .sign_exp = 16383 + 8, .signif = 1UL << 63 };
+    acr7k_float_t g, l;
+    int rc = acr7k_fconorm(&a, &b, &g, &l);
     CU_ASSERT_EQUAL(rc, 0);
     /* Greater should have the larger exponent */
     CU_ASSERT_EQUAL(g.sign_exp & 0x7FFF, 16383 + 10);
@@ -240,10 +240,10 @@ static void test_fconorm_different_exponents(void) {
 }
 
 static void test_fconorm_insignificant(void) {
-    rdc700_float_t a = { .sign_exp = 16383 + 100, .signif = 1UL << 63 };
-    rdc700_float_t b = { .sign_exp = 16383 + 1, .signif = 1UL << 63 };
-    rdc700_float_t g, l;
-    int rc = rdc700_fconorm(&a, &b, &g, &l);
+    acr7k_float_t a = { .sign_exp = 16383 + 100, .signif = 1UL << 63 };
+    acr7k_float_t b = { .sign_exp = 16383 + 1, .signif = 1UL << 63 };
+    acr7k_float_t g, l;
+    int rc = acr7k_fconorm(&a, &b, &g, &l);
     CU_ASSERT_EQUAL(rc, F_INSG);
 }
 
@@ -254,28 +254,28 @@ static void test_fconorm_insignificant(void) {
  * This replicates the commented-out main() in fpu.c.
  */
 static void test_div_and_add(void) {
-    rdc700_float_t src, tgt, result_a, result_b, result_c;
+    acr7k_float_t src, tgt, result_a, result_b, result_c;
 
     /* 132 / 100 */
     make_f36_int(132, &src);
     make_f36_int(100, &tgt);
-    rdc700_fdiv(&src, &tgt, &result_a);
-    rdc700_fnorm(&result_a, &result_a);
+    acr7k_fdiv(&src, &tgt, &result_a);
+    acr7k_fnorm(&result_a, &result_a);
 
     /* 7 / 10 */
     make_f36_int(7, &src);
     make_f36_int(10, &tgt);
-    rdc700_fdiv(&src, &tgt, &result_b);
-    rdc700_fnorm(&result_b, &result_b);
+    acr7k_fdiv(&src, &tgt, &result_b);
+    acr7k_fnorm(&result_b, &result_b);
 
     /* 132/100 + 7/10 */
-    rdc700_fadd(&result_a, &result_b, &result_c);
+    acr7k_fadd(&result_a, &result_b, &result_c);
 
     /* Expected: 202/100 */
     make_f36_int(202, &src);
     make_f36_int(100, &tgt);
-    rdc700_float_t expected;
-    rdc700_fdiv(&src, &tgt, &expected);
+    acr7k_float_t expected;
+    acr7k_fdiv(&src, &tgt, &expected);
 
     /* Compare exponent */
     int exp_got = ((int)(result_c.sign_exp & 0x7FFF)) - 16383;
@@ -289,39 +289,39 @@ static void test_div_and_add(void) {
 }
 
 static void test_fadd_zero_identity(void) {
-    rdc700_float_t a;
+    acr7k_float_t a;
     make_f36_int(42, &a);
-    rdc700_float_t z = { .sign_exp = 0, .signif = 0 };
-    rdc700_float_t dst;
+    acr7k_float_t z = { .sign_exp = 0, .signif = 0 };
+    acr7k_float_t dst;
 
-    rdc700_fadd(&a, &z, &dst);
+    acr7k_fadd(&a, &z, &dst);
     CU_ASSERT_EQUAL(dst.sign_exp, a.sign_exp);
     CU_ASSERT_EQUAL(dst.signif, a.signif);
 
-    rdc700_fadd(&z, &a, &dst);
+    acr7k_fadd(&z, &a, &dst);
     CU_ASSERT_EQUAL(dst.sign_exp, a.sign_exp);
     CU_ASSERT_EQUAL(dst.signif, a.signif);
 }
 
 static void test_fadd_nan_propagates(void) {
-    rdc700_float_t n = { .sign_exp = 0x8000, .signif = 0 };
-    rdc700_float_t a;
+    acr7k_float_t n = { .sign_exp = 0x8000, .signif = 0 };
+    acr7k_float_t a;
     make_f36_int(5, &a);
-    rdc700_float_t dst;
+    acr7k_float_t dst;
 
-    int rc = rdc700_fadd(&n, &a, &dst);
+    int rc = acr7k_fadd(&n, &a, &dst);
     CU_ASSERT_EQUAL(rc, F_ILGL);
     CU_ASSERT_TRUE(is_nan(&dst));
 }
 
 static void test_fmul_basic(void) {
-    rdc700_float_t a, b, dst;
+    acr7k_float_t a, b, dst;
     make_f36_int(6, &a);
     make_f36_int(7, &b);
-    rdc700_fmul(&a, &b, &dst);
+    acr7k_fmul(&a, &b, &dst);
 
     /* Expected: 42 */
-    rdc700_float_t expected;
+    acr7k_float_t expected;
     make_f36_int(42, &expected);
 
     int exp_got = ((int)(dst.sign_exp & 0x7FFF)) - 16383;
@@ -334,33 +334,33 @@ static void test_fmul_basic(void) {
 }
 
 static void test_fmul_by_zero(void) {
-    rdc700_float_t a;
+    acr7k_float_t a;
     make_f36_int(42, &a);
-    rdc700_float_t z = { .sign_exp = 0, .signif = 0 };
-    rdc700_float_t dst;
+    acr7k_float_t z = { .sign_exp = 0, .signif = 0 };
+    acr7k_float_t dst;
 
-    int rc = rdc700_fmul(&a, &z, &dst);
+    int rc = acr7k_fmul(&a, &z, &dst);
     CU_ASSERT_EQUAL(rc, 0);
     CU_ASSERT_TRUE(is_zero(&dst));
 }
 
 static void test_fmul_zero_times_inf(void) {
-    rdc700_float_t z = { .sign_exp = 0, .signif = 0 };
-    rdc700_float_t inf = { .sign_exp = 0x7FFF, .signif = 0 };
-    rdc700_float_t dst;
+    acr7k_float_t z = { .sign_exp = 0, .signif = 0 };
+    acr7k_float_t inf = { .sign_exp = 0x7FFF, .signif = 0 };
+    acr7k_float_t dst;
 
-    int rc = rdc700_fmul(&z, &inf, &dst);
+    int rc = acr7k_fmul(&z, &inf, &dst);
     CU_ASSERT_EQUAL(rc, F_ILGL);
     CU_ASSERT_TRUE(is_nan(&dst));
 }
 
 static void test_fdiv_basic(void) {
-    rdc700_float_t a, b, dst;
+    acr7k_float_t a, b, dst;
     make_f36_int(84, &a);
     make_f36_int(2, &b);
-    rdc700_fdiv(&a, &b, &dst);
+    acr7k_fdiv(&a, &b, &dst);
 
-    rdc700_float_t expected;
+    acr7k_float_t expected;
     make_f36_int(42, &expected);
 
     int exp_got = ((int)(dst.sign_exp & 0x7FFF)) - 16383;
@@ -373,23 +373,23 @@ static void test_fdiv_basic(void) {
 }
 
 static void test_fdiv_by_zero(void) {
-    rdc700_float_t a;
+    acr7k_float_t a;
     make_f36_int(42, &a);
-    rdc700_float_t z = { .sign_exp = 0, .signif = 0 };
-    rdc700_float_t dst;
+    acr7k_float_t z = { .sign_exp = 0, .signif = 0 };
+    acr7k_float_t dst;
 
-    int rc = rdc700_fdiv(&a, &z, &dst);
+    int rc = acr7k_fdiv(&a, &z, &dst);
     CU_ASSERT_EQUAL(rc, F_ILGL);
     CU_ASSERT_TRUE(is_inf(&dst));
 }
 
 static void test_fdiv_nan_propagates(void) {
-    rdc700_float_t n = { .sign_exp = 0x8000, .signif = 0 };
-    rdc700_float_t a;
+    acr7k_float_t n = { .sign_exp = 0x8000, .signif = 0 };
+    acr7k_float_t a;
     make_f36_int(5, &a);
-    rdc700_float_t dst;
+    acr7k_float_t dst;
 
-    int rc = rdc700_fdiv(&n, &a, &dst);
+    int rc = acr7k_fdiv(&n, &a, &dst);
     CU_ASSERT_EQUAL(rc, F_ILGL);
     CU_ASSERT_TRUE(is_nan(&dst));
 }

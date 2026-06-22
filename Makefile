@@ -11,7 +11,7 @@ SRCS = alu.c fpu.c cpu.c lpt.c pch.c ppt.c tty.c panel.c bishop.c render.c
 OBJS = $(SRCS:.c=.o)
 
 # Output executable
-TARGET = ist66
+TARGET = acr7000
 
 # Default target
 all: $(TARGET)

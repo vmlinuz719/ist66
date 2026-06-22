@@ -10,7 +10,7 @@
 #include "pch.h"
 
 typedef struct {
-    ist66_cu_t *cpu;
+    acr7k_cu_t *cpu;
     int id, irq;
     
     FILE *file;
@@ -21,7 +21,7 @@ typedef struct {
     pthread_mutex_t lock;
     pthread_cond_t cmd_cond;
     int running, command, done;
-} ist66_pch_t;
+} acr7k_pch_t;
 
 static inline int msleep(long msec) {
     struct timespec ts;
@@ -43,8 +43,8 @@ static inline int msleep(long msec) {
 }
 
 void *pch(void *vctx) {
-    ist66_pch_t *ctx = (ist66_pch_t *) vctx;
-    ist66_cu_t *cpu = ctx->cpu;
+    acr7k_pch_t *ctx = (acr7k_pch_t *) vctx;
+    acr7k_cu_t *cpu = ctx->cpu;
     
     ctx->running = 1;
     while (ctx->running) {
@@ -84,8 +84,8 @@ uint64_t pch_io(
     int ctl,
     int transfer
 ) {
-    ist66_pch_t *ctx = (ist66_pch_t *) vctx;
-    ist66_cu_t *cpu = ctx->cpu;
+    acr7k_pch_t *ctx = (acr7k_pch_t *) vctx;
+    acr7k_cu_t *cpu = ctx->cpu;
     
     if (transfer == 1) {
         ctx->buf = (uint8_t) data;
@@ -123,8 +123,8 @@ uint64_t pch_io(
     else return 0;
 }
 
-void destroy_pch(ist66_cu_t *cpu, int id) {
-    ist66_pch_t *ctx = (ist66_pch_t *) cpu->ioctx[id];
+void destroy_pch(acr7k_cu_t *cpu, int id) {
+    acr7k_pch_t *ctx = (acr7k_pch_t *) cpu->ioctx[id];
     
     if (ctx->running) {
         pthread_cancel(ctx->thread);
@@ -138,8 +138,8 @@ void destroy_pch(ist66_cu_t *cpu, int id) {
     fprintf(stderr, "PCH: %04o deinitialized\n", id);
 }
 
-void init_pch_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
-    ist66_pch_t *ctx = calloc(sizeof(ist66_pch_t), 1);
+void init_pch_any(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
+    acr7k_pch_t *ctx = calloc(sizeof(acr7k_pch_t), 1);
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_pch;
     cpu->io[id] = pch_io;
@@ -155,12 +155,12 @@ void init_pch_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
     pthread_create(&ctx->thread, NULL, pch, ctx);
 }
 
-void init_pch(ist66_cu_t *cpu, int id, int irq) {
+void init_pch(acr7k_cu_t *cpu, int id, int irq) {
     init_pch_any(cpu, id, irq, stdout);
     fprintf(stderr, "PCH: %04o IRQ %02o, file STDOUT\n", id, irq);
 }
 
-void init_pch_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
+void init_pch_ex(acr7k_cu_t *cpu, int id, int irq, char *fname) {
     FILE *fd = fopen(fname, "wb");
     if (fd == NULL) {
         fprintf(stderr, "PCH: %04o file error\n", id);

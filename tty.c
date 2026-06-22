@@ -35,7 +35,7 @@ enum telnet_telnet_state {
 };
 
 typedef struct {
-    ist66_cu_t *cpu;
+    acr7k_cu_t *cpu;
     int id, irq;
     
     int sock_listener, sock_console;
@@ -51,12 +51,12 @@ typedef struct {
     uint16_t control;
     
     int listening, running, writing, command, done;
-} ist66_tty_t;
+} acr7k_tty_t;
 
 void push_char(void *vctx, uint8_t ch) {
     static char bell = '\a';
 
-    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    acr7k_tty_t *ctx = (acr7k_tty_t *) vctx;
     
     pthread_mutex_lock(&ctx->status_lock);
     
@@ -106,7 +106,7 @@ void push_char(void *vctx, uint8_t ch) {
 }
 
 int pop_char(void *vctx) {
-    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    acr7k_tty_t *ctx = (acr7k_tty_t *) vctx;
     
     pthread_mutex_lock(&ctx->status_lock);
 
@@ -125,7 +125,7 @@ int pop_char(void *vctx) {
 }
 
 void *tty_reader(void *vctx) {
-    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    acr7k_tty_t *ctx = (acr7k_tty_t *) vctx;
     
     uint8_t buf[256];
     int telnet_state = TN_NORMAL;
@@ -179,7 +179,7 @@ void *tty_reader(void *vctx) {
 }
 
 void *tty_writer(void *vctx) {
-    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    acr7k_tty_t *ctx = (acr7k_tty_t *) vctx;
     ctx->writing = 1;
     
     while (ctx->running) {
@@ -204,7 +204,7 @@ void *tty_writer(void *vctx) {
 }
 
 void *tty_listener(void *vctx) {
-    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
+    acr7k_tty_t *ctx = (acr7k_tty_t *) vctx;
     
     listen(ctx->sock_listener, 1);
     
@@ -255,8 +255,8 @@ uint64_t tty_io(
     int ctl,
     int transfer
 ) {
-    ist66_tty_t *ctx = (ist66_tty_t *) vctx;
-    ist66_cu_t *cpu = ctx->cpu;
+    acr7k_tty_t *ctx = (acr7k_tty_t *) vctx;
+    acr7k_cu_t *cpu = ctx->cpu;
     
     if (transfer == 1) {
         ctx->send = (uint8_t) data;
@@ -311,8 +311,8 @@ uint64_t tty_io(
     else return 0;
 }
 
-void destroy_tty(ist66_cu_t *cpu, int id) {
-    ist66_tty_t *ctx = (ist66_tty_t *) cpu->ioctx[id];
+void destroy_tty(acr7k_cu_t *cpu, int id) {
+    acr7k_tty_t *ctx = (acr7k_tty_t *) cpu->ioctx[id];
     
     if (ctx->running) {
         pthread_cancel(ctx->reader);
@@ -337,7 +337,7 @@ void destroy_tty(ist66_cu_t *cpu, int id) {
     fprintf(stderr, "TTY: %04o deinitialized\n", id);
 }
 
-void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
+void init_tty(acr7k_cu_t *cpu, int id, int irq, int port) {
     int opt = 1;
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (server_sock == -1) {
@@ -365,7 +365,7 @@ void init_tty(ist66_cu_t *cpu, int id, int irq, int port) {
         return;
     }
     
-    ist66_tty_t *ctx = calloc(sizeof(ist66_tty_t), 1);
+    acr7k_tty_t *ctx = calloc(sizeof(acr7k_tty_t), 1);
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_tty;
     cpu->io[id] = tty_io;
