@@ -238,6 +238,7 @@ uint64_t read_vmem(acr7k_cu_t *cpu, uint8_t key, uint32_t vaddress) {
  * @return Contents of memory, MEM_FAULT or KEY_FAULT
  */
 uint64_t read_mem(acr7k_cu_t *cpu, uint8_t key, uint32_t address) {
+    cpu->mem_accesses++;
     if (cpu->c[C_SDR] != 0) return read_vmem(cpu, key, address);
     
     address &= MASK_ADDR;
@@ -338,6 +339,7 @@ uint64_t write_mem(
     uint32_t address,
     uint64_t data
 ) {
+    cpu->mem_accesses++;
     if (cpu->c[C_SDR] != 0) return write_vmem(cpu, key, address, data);
     
     address &= MASK_ADDR;
@@ -2314,18 +2316,53 @@ void exec_all(acr7k_cu_t *cpu, uint64_t inst) {
     }
 }
  
+/*
+ * Pace the CPU thread to at most cpu->throttle read_mem/write_mem calls per
+ * millisecond. We track how many accesses happened since the window anchor
+ * (throttle_t0/throttle_n0) and how long that took; if we are running ahead of
+ * the allowed rate we sleep off the surplus. Sub-quarter-millisecond surpluses
+ * are left to accumulate so we sleep in usefully large (and accurate) chunks
+ * rather than fighting the kernel's timer granularity on every instruction.
+ */
+static void cpu_throttle(acr7k_cu_t *cpu) {
+    if (!cpu->throttle) return;
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    int64_t elapsed_ns =
+        (int64_t) (now.tv_sec - cpu->throttle_t0.tv_sec) * 1000000000LL
+        + (now.tv_nsec - cpu->throttle_t0.tv_nsec);
+
+    uint64_t did = cpu->mem_accesses - cpu->throttle_n0;
+
+    // Time these accesses are permitted to take at <throttle> accesses/ms,
+    // i.e. <throttle> accesses per 1e6 ns.
+    int64_t allowed_ns = (int64_t) (did * 1000000ULL / (uint64_t) cpu->throttle);
+
+    int64_t surplus_ns = allowed_ns - elapsed_ns;
+    if (surplus_ns > 250000) {
+        struct timespec ts;
+        ts.tv_sec = surplus_ns / 1000000000LL;
+        ts.tv_nsec = surplus_ns % 1000000000LL;
+        nanosleep(&ts, NULL);
+    }
+
+    // Re-anchor the window periodically (and after long idles) so accumulated
+    // credit or debt can't run away.
+    if (elapsed_ns > 100000000LL) {
+        clock_gettime(CLOCK_MONOTONIC, &cpu->throttle_t0);
+        cpu->throttle_n0 = cpu->mem_accesses;
+    }
+}
+
 void *run(void *vctx) {
     acr7k_cu_t *cpu = (acr7k_cu_t *) vctx;
-    
+
     fprintf(stderr, "CPU: starting\n");
-    
+
     do {
-        if (cpu->throttle) {
-            struct timespec millisecond;
-            millisecond.tv_nsec = 33333333;
-            millisecond.tv_sec = 0;
-            nanosleep(&millisecond, NULL);
-        }
+        cpu_throttle(cpu);
         
         int done_edit = 0;
         if (cpu->do_edit) {
@@ -2628,7 +2665,19 @@ int main(int argc, char *argv[]) {
             }
             
             else if (cmd[i] == 'T') {
-                cpu.throttle ^= 1;
+                char *end;
+                long val = strtol(cmd + i + 1, &end, 10);
+                if (end == cmd + i + 1) {
+                    cpu.throttle = 0;
+                    printf("Throttle disabled\n");
+                } else if (val <= 0) {
+                    printf("? Bad throttle\n");
+                } else {
+                    cpu.throttle = (int) val;
+                    cpu.throttle_n0 = cpu.mem_accesses;
+                    clock_gettime(CLOCK_MONOTONIC, &cpu.throttle_t0);
+                    printf("Throttle set to %d accesses/ms\n", cpu.throttle);
+                }
             }
             
             else if (cmd[i] == 'P') {

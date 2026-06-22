@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "fpu.h"
 #include "sdlctx.h"
@@ -85,7 +86,15 @@ struct acr7k_cu {
     int pending[16];
     int min_pending;
     uint16_t mask;
-    int running, throttle, exit;
+    int running, exit;
+
+    // Throttle: cap read_mem/write_mem calls per millisecond. 0 disables it.
+    // mem_accesses counts those calls; throttle_t0/throttle_n0 anchor the
+    // current rate-measurement window (see cpu_throttle in cpu.c).
+    int throttle;
+    uint64_t mem_accesses;
+    uint64_t throttle_n0;
+    struct timespec throttle_t0;
     
     render_loop_ctx_t render_ctx;
 };
