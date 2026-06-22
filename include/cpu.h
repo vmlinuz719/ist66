@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "fpu.h"
 #include "sdlctx.h"
@@ -25,17 +26,17 @@
 #define SEG_FAULT_WRITE (1 << 29)
 #define SEG_FAULT_PAGE (1 << 30)
 
-typedef struct ist66_cu ist66_cu_t;
+typedef struct acr7k_cu acr7k_cu_t;
 
-typedef uint64_t (*ist66_io_t) (
+typedef uint64_t (*acr7k_io_t) (
     void * /* ctx */,
     uint64_t /* accumulator */,
     int /* ctl */,
     int /* transfer */
 );
 
-typedef void (*ist66_io_dtor_t) (
-    ist66_cu_t * /* cpu */,
+typedef void (*acr7k_io_dtor_t) (
+    acr7k_cu_t * /* cpu */,
     int /* id */
 );
 
@@ -57,13 +58,13 @@ typedef struct {
     uint8_t rights;     // present, writable, global, nocache
 } tlb_entry_t;      // indexed by low 5 bits of page selector
 
-struct ist66_cu {
-    struct ist66_cu *host;
+struct acr7k_cu {
+    struct acr7k_cu *host;
     
     uint64_t a[16]; // accumulators
     uint64_t c[8];  // control registers - 0: PSW, 1: CW
     uint64_t inst;
-    rdc700_float_t f[16];
+    acr7k_float_t f[16];
     seg_cache_t seg_cache[32];
     tlb_entry_t tlb[32];
     uint64_t stop_code, cycles;
@@ -74,8 +75,8 @@ struct ist66_cu {
     uint64_t *memory;
     uint32_t mem_size;
     
-    ist66_io_dtor_t *io_destroy;
-    ist66_io_t *io;
+    acr7k_io_dtor_t *io_destroy;
+    acr7k_io_t *io;
     void **ioctx;
     int max_io;
     
@@ -85,12 +86,20 @@ struct ist66_cu {
     int pending[16];
     int min_pending;
     uint16_t mask;
-    int running, throttle, exit;
+    int running, exit;
+
+    // Throttle: cap read_mem/write_mem calls per millisecond. 0 disables it.
+    // mem_accesses counts those calls; throttle_t0/throttle_n0 anchor the
+    // current rate-measurement window (see cpu_throttle in cpu.c).
+    int throttle;
+    uint64_t mem_accesses;
+    uint64_t throttle_n0;
+    struct timespec throttle_t0;
     
     render_loop_ctx_t render_ctx;
 };
 
-static inline void halt(ist66_cu_t *cpu) {
+static inline void halt(acr7k_cu_t *cpu) {
     pthread_mutex_lock(&(cpu->lock));
     uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
     if (cpu->min_pending >= current_irql) {
@@ -99,7 +108,7 @@ static inline void halt(ist66_cu_t *cpu) {
     pthread_mutex_unlock(&(cpu->lock));
 }
 
-static inline void do_intr(ist66_cu_t *cpu, int irq) {
+static inline void do_intr(acr7k_cu_t *cpu, int irq) {
     uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
     cpu->memory[32 + 2 * current_irql] = cpu->c[C_PSW];
     cpu->memory[33 + 2 * current_irql] = cpu->c[C_CW];
@@ -125,30 +134,30 @@ static inline void do_intr(ist66_cu_t *cpu, int irq) {
 #define X_MCHK      14  // machine check
 #define X_PWRF      15  // power failure
 
-static inline void do_except(ist66_cu_t *cpu, int exc) {
+static inline void do_except(acr7k_cu_t *cpu, int exc) {
     do_intr(cpu, 0);
     cpu->c[C_CW] |= (((uint64_t) exc) & 0xF) << 24;
 }
 
-static inline void leave_intr(ist66_cu_t *cpu) {
+static inline void leave_intr(acr7k_cu_t *cpu) {
     uint64_t old_irql = (cpu->c[C_CW] >> 28) & 0xF;
     cpu->c[C_PSW] = cpu->memory[32 + 2 * old_irql];
     cpu->c[C_CW] = cpu->memory[33 + 2 * old_irql];
 }
 
-static inline uint32_t get_pc(ist66_cu_t *cpu) {
+static inline uint32_t get_pc(acr7k_cu_t *cpu) {
     return cpu->c[C_PSW] & MASK_ADDR;
 }
 
-static inline void set_pc(ist66_cu_t *cpu, uint32_t new) {
+static inline void set_pc(acr7k_cu_t *cpu, uint32_t new) {
     cpu->c[C_PSW] = (cpu->c[C_PSW] & ~MASK_ADDR) | (new & MASK_ADDR);
 }
 
-static inline int get_cf(ist66_cu_t *cpu) {
+static inline int get_cf(acr7k_cu_t *cpu) {
     return !!(cpu->c[C_PSW] & (MASK_ADDR + 1));
 }
 
-static inline void set_cf(ist66_cu_t *cpu, int state) {
+static inline void set_cf(acr7k_cu_t *cpu, int state) {
     if (state) {
         cpu->c[C_PSW] |= (MASK_ADDR + 1);
     } else {
@@ -156,31 +165,31 @@ static inline void set_cf(ist66_cu_t *cpu, int state) {
     }
 }
 
-void intr_assert(ist66_cu_t *cpu, int irq);
+void intr_assert(acr7k_cu_t *cpu, int irq);
 
-void intr_release(ist66_cu_t *cpu, int irq);
+void intr_release(acr7k_cu_t *cpu, int irq);
 
-void intr_set_mask(ist66_cu_t *cpu, uint16_t mask);
+void intr_set_mask(acr7k_cu_t *cpu, uint16_t mask);
 
-uint64_t read_mem(ist66_cu_t *cpu, uint8_t key, uint32_t address);
+uint64_t read_mem(acr7k_cu_t *cpu, uint8_t key, uint32_t address);
 
 uint64_t write_mem(
-    ist66_cu_t *cpu,
+    acr7k_cu_t *cpu,
     uint8_t key,
     uint32_t address,
     uint64_t data
 );
 
 void init_iocpu(
-    ist66_cu_t *cpu,
+    acr7k_cu_t *cpu,
     int id,
     int irq,
     uint64_t mem_size,
     int max_io
 );
 
-void start_cpu(ist66_cu_t *cpu, int do_step);
+void start_cpu(acr7k_cu_t *cpu, int do_step);
 
-void stop_cpu(ist66_cu_t *cpu);
+void stop_cpu(acr7k_cu_t *cpu);
 
 #endif

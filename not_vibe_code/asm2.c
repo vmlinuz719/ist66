@@ -434,7 +434,7 @@ int assembler_get_or_thunk(
 #define ADDR_POST_INCREMENT (14L << 18)
 #define ADDR_PRE_DECREMENT  (15L << 18)
 
-#define RDC_NUM_GENERAL 16
+#define ACR_NUM_GENERAL 16
 
 char *r_general[] = {
     "ac", 
@@ -455,7 +455,7 @@ char *r_general[] = {
     "r15"
 };
 
-#define RDC_NUM_CONTROL 8
+#define ACR_NUM_CONTROL 8
 
 char *r_control[] = {
     "psw0",
@@ -468,7 +468,7 @@ char *r_control[] = {
     "cr8"
 };
 
-#define RDC_NUM_FLOAT 4
+#define ACR_NUM_FLOAT 4
 
 char *r_float[] = {
     "f0",
@@ -593,7 +593,7 @@ int parse_address_field(assembler_ctx_t *ctx, char *field, uint64_t *out) {
     if (*field == '(') {
         if (!allow_parens) return -1;
 
-        int64_t reg = get_reg(r_general, RDC_NUM_GENERAL, field + 1, &field);
+        int64_t reg = get_reg(r_general, ACR_NUM_GENERAL, field + 1, &field);
         if (reg < 3 || reg > 13) return -1;
         if (*field != ')') return -1;
         *out |= reg << 18;
@@ -675,7 +675,7 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
                 ) return -1;
                 
                 int64_t reg = get_reg
-                    (r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+                    (r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
                 if (reg < 0) {
                     return -1;
                 }
@@ -824,11 +824,11 @@ int assemble_am_base
 }
 
 int assemble_am(assembler_ctx_t *ctx, uint64_t opcode) {
-    return assemble_am_base(ctx, opcode, r_general, RDC_NUM_GENERAL);
+    return assemble_am_base(ctx, opcode, r_general, ACR_NUM_GENERAL);
 }
 
 int assemble_ctl(assembler_ctx_t *ctx, uint64_t opcode) {
-    return assemble_am_base(ctx, opcode, r_control, RDC_NUM_CONTROL);
+    return assemble_am_base(ctx, opcode, r_control, ACR_NUM_CONTROL);
 }
 
 int assemble_fm(assembler_ctx_t *ctx, uint64_t opcode) {
@@ -845,11 +845,11 @@ int assemble_fm(assembler_ctx_t *ctx, uint64_t opcode) {
 
     if (ctx->buf[index] != 0) return -1;
 
-    return assemble_am_base(ctx, opcode, r_float, RDC_NUM_FLOAT);
+    return assemble_am_base(ctx, opcode, r_float, ACR_NUM_FLOAT);
 }
 
 int assemble_fm_no_opts(assembler_ctx_t *ctx, uint64_t opcode) {
-    return assemble_am_base(ctx, opcode, r_float, RDC_NUM_FLOAT);
+    return assemble_am_base(ctx, opcode, r_float, ACR_NUM_FLOAT);
 }
 
 int assemble_bx(assembler_ctx_t *ctx, uint64_t opcode) {
@@ -857,13 +857,13 @@ int assemble_bx(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t tgt = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t src = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (src == -1) return -1;
     value |= src << 18;
 
@@ -901,7 +901,7 @@ int assemble_io_var(assembler_ctx_t *ctx, uint64_t opcode) {
     if (opcode != 2) {
         read_symbol(ctx);
         if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-        int64_t src_dst = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+        int64_t src_dst = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
         if (src_dst == -1) return -1;
         value |= src_dst << 23;
 
@@ -956,13 +956,13 @@ int assemble_cmp(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t src = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (src == -1) return -1;
     value |= src << 27;
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_END) return -1;
-    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t tgt = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
     
@@ -975,7 +975,7 @@ int assemble_pushpop(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != SYMBOL) return -1;
-    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t tgt = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
     
@@ -988,7 +988,7 @@ int assemble_pushpop_c(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != SYMBOL) return -1;
-    int64_t tgt = get_reg(r_control, RDC_NUM_CONTROL, ctx->buf, NULL);
+    int64_t tgt = get_reg(r_control, ACR_NUM_CONTROL, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
     
@@ -1047,14 +1047,14 @@ int assemble_aa_r(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t src = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (src == -1) return -1;
     value |= src << 27;
 
     read_symbol(ctx);
     enum event_type evt = get_symbol_type(ctx);
     if (evt != LIST_ITEM && evt != LIST_END) return -1;
-    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t tgt = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
     if (evt == LIST_END) {
@@ -1132,14 +1132,14 @@ int assemble_fr(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t src = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    int64_t src = get_reg(r_float, ACR_NUM_FLOAT, ctx->buf, NULL);
     if (src == -1) return -1;
     value |= src << 20;
 
     read_symbol(ctx);
     enum event_type evt = get_symbol_type(ctx);
     if (evt != LIST_ITEM && evt != LIST_END) return -1;
-    int64_t tgt = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    int64_t tgt = get_reg(r_float, ACR_NUM_FLOAT, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
     if (evt == LIST_END) {
@@ -1150,7 +1150,7 @@ int assemble_fr(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_END) return -1;
-    int64_t dst = get_reg(r_float, RDC_NUM_FLOAT, ctx->buf, NULL);
+    int64_t dst = get_reg(r_float, ACR_NUM_FLOAT, ctx->buf, NULL);
     if (dst == -1) return -1;
     value |= dst << 18;
 
@@ -1195,20 +1195,20 @@ int assemble_aa_s(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t src = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (src == -1) return -1;
     value |= src << 27;
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t tgt = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
 
     read_symbol(ctx);
     enum event_type evt = get_symbol_type(ctx);
     if (evt != LIST_ITEM && evt != LIST_END) return -1;
-    int64_t dst = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t dst = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (dst == -1) return -1;
     value |= dst << 6;
     if (evt == LIST_END) {
@@ -1258,13 +1258,13 @@ int assemble_aa_i(assembler_ctx_t *ctx, uint64_t opcode) {
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t src = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t src = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (src == -1) return -1;
     value |= src << 27;
 
     read_symbol(ctx);
     if (get_symbol_type(ctx) != LIST_ITEM) return -1;
-    int64_t tgt = get_reg(r_general, RDC_NUM_GENERAL, ctx->buf, NULL);
+    int64_t tgt = get_reg(r_general, ACR_NUM_GENERAL, ctx->buf, NULL);
     if (tgt == -1) return -1;
     value |= tgt << 23;
 

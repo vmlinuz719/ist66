@@ -3,6 +3,6 @@
 
 #include "cpu.h"
 
-void init_panel(ist66_cu_t *cpu, int id);
+void init_panel(acr7k_cu_t *cpu, int id);
 
 #endif

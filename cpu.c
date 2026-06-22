@@ -17,7 +17,7 @@
 #include "panel.h"
 #include "bishop.h"
 
-seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
+seg_cache_t *seg_lookup(acr7k_cu_t *cpu, int selector) {
     uint8_t cache_row = selector & 0x1F;
     uint16_t cache_key = selector >> 5;
     
@@ -32,6 +32,8 @@ seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
         
         if (descriptor_addr >= cpu->mem_size - 1) return NULL;
         
+        cpu->mem_accesses += 2;
+
         uint64_t tag = cpu->memory[descriptor_addr + 1] & MASK_36;
         if (!(tag & (1 << 27))) return NULL; // still not present
         
@@ -44,7 +46,7 @@ seg_cache_t *seg_lookup(ist66_cu_t *cpu, int selector) {
     return &(cpu->seg_cache[cache_row]);
 }
 
-tlb_entry_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pg_table) {
+tlb_entry_t *tlb_lookup(acr7k_cu_t *cpu, int selector, seg_cache_t *pg_table) {
     uint8_t cache_row = selector & 0x1F;
     uint16_t cache_key = selector >> 5;
     uint16_t page_select = selector & 0x1FF;
@@ -57,6 +59,8 @@ tlb_entry_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pg_table) {
         
         if (descriptor_addr >= cpu->mem_size) return NULL;
         
+        cpu->mem_accesses++;
+
         uint8_t rights = (cpu->memory[descriptor_addr] & 0x1E0) >> 5;
         if (!(rights & TLB_PRESENT)) return NULL; // still not present
         
@@ -69,11 +73,11 @@ tlb_entry_t *tlb_lookup(ist66_cu_t *cpu, int selector, seg_cache_t *pg_table) {
     return &(cpu->tlb[cache_row]);
 }
 
-void tlb_invalidate(ist66_cu_t *cpu, int selector) {
+void tlb_invalidate(acr7k_cu_t *cpu, int selector) {
     cpu->tlb[selector & 0x1F].rights = 0;
 }
 
-void tlb_invalidate_all(ist66_cu_t *cpu) {
+void tlb_invalidate_all(acr7k_cu_t *cpu) {
     for (int i = 0; i < 32; i++) {
         if (!(cpu->tlb[i].rights & TLB_GLOBAL)) {
             cpu->tlb[i].rights = 0;
@@ -81,12 +85,12 @@ void tlb_invalidate_all(ist66_cu_t *cpu) {
     }
 }
 
-void seg_invalidate(ist66_cu_t *cpu, int selector) {
+void seg_invalidate(acr7k_cu_t *cpu, int selector) {
     cpu->seg_cache[selector & 0x1F].tag = 0;
     // tlb_invalidate_all(cpu);
 }
 
-void seg_invalidate_all(ist66_cu_t *cpu) {
+void seg_invalidate_all(acr7k_cu_t *cpu) {
     for (int i = 0; i < 32; i++) {
         if (!(cpu->seg_cache[i].tag & (1 << 25))) {
             cpu->seg_cache[i].tag = 0;
@@ -110,7 +114,7 @@ void seg_invalidate_all(ist66_cu_t *cpu) {
  * @param cpu Emulated CPU context
  * @param irq IRQ priority level (1-14, smaller number = higher priority)
  */
-void intr_assert(ist66_cu_t *cpu, int irq) {
+void intr_assert(acr7k_cu_t *cpu, int irq) {
     pthread_mutex_lock(&(cpu->lock));
     cpu->pending[irq]++;
     if (irq < cpu->min_pending && ((cpu->mask >> irq) & 1)) {
@@ -130,7 +134,7 @@ void intr_assert(ist66_cu_t *cpu, int irq) {
  * @param cpu Emulated CPU context
  * @param irq IRQ priority level (1-14, smaller number = higher priority)
  */
-void intr_release(ist66_cu_t *cpu, int irq) {
+void intr_release(acr7k_cu_t *cpu, int irq) {
     pthread_mutex_lock(&(cpu->lock));
     if (cpu->pending[irq] > 0) {
         cpu->pending[irq]--;
@@ -157,7 +161,7 @@ void intr_release(ist66_cu_t *cpu, int irq) {
  * @param cpu Emulated CPU context
  * @param mask New IRQ mask
  */
-void intr_set_mask(ist66_cu_t *cpu, uint16_t mask) {
+void intr_set_mask(acr7k_cu_t *cpu, uint16_t mask) {
     pthread_mutex_lock(&(cpu->lock));
     cpu->mask = mask;
     int new_min_pending = 1;
@@ -170,7 +174,7 @@ void intr_set_mask(ist66_cu_t *cpu, uint16_t mask) {
     pthread_mutex_unlock(&(cpu->lock));
 }
 
-uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
+uint64_t read_vmem(acr7k_cu_t *cpu, uint8_t key, uint32_t vaddress) {
     vaddress &= MASK_ADDR;
     
     seg_cache_t *seg = seg_lookup(cpu, vaddress >> 18);
@@ -237,7 +241,8 @@ uint64_t read_vmem(ist66_cu_t *cpu, uint8_t key, uint32_t vaddress) {
  * @param address Memory address
  * @return Contents of memory, MEM_FAULT or KEY_FAULT
  */
-uint64_t read_mem(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
+uint64_t read_mem(acr7k_cu_t *cpu, uint8_t key, uint32_t address) {
+    cpu->mem_accesses++;
     if (cpu->c[C_SDR] != 0) return read_vmem(cpu, key, address);
     
     address &= MASK_ADDR;
@@ -258,7 +263,7 @@ uint64_t read_mem(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
 }
 
 uint64_t write_vmem(
-    ist66_cu_t *cpu,
+    acr7k_cu_t *cpu,
     uint8_t key,
     uint32_t vaddress,
     uint64_t data
@@ -333,11 +338,12 @@ uint64_t write_vmem(
  * @return Zero, MEM_FAULT or KEY_FAULT
  */
 uint64_t write_mem(
-    ist66_cu_t *cpu,
+    acr7k_cu_t *cpu,
     uint8_t key,
     uint32_t address,
     uint64_t data
 ) {
+    cpu->mem_accesses++;
     if (cpu->c[C_SDR] != 0) return write_vmem(cpu, key, address, data);
     
     address &= MASK_ADDR;
@@ -373,7 +379,7 @@ uint64_t write_mem(
  * @param address Memory address
  * @return Zero or MEM_FAULT
  */
-uint64_t set_key(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
+uint64_t set_key(acr7k_cu_t *cpu, uint8_t key, uint32_t address) {
     if (address >= cpu->mem_size) {
         return MEM_FAULT;
     }
@@ -420,7 +426,7 @@ uint64_t set_key(ist66_cu_t *cpu, uint8_t key, uint32_t address) {
  * @param inst Instruction
  * @return Address, MEM_FAULT or KEY_FAULT
  */
-uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
+uint64_t comp_mr(acr7k_cu_t *cpu, uint64_t inst) {
     int indirect = (inst >> 22) & 1;
     uint64_t index = (inst >> 18) & 0xF;
     uint64_t disp_u = inst & 0x3FFFF;
@@ -497,7 +503,7 @@ uint64_t comp_mr(ist66_cu_t *cpu, uint64_t inst) {
     else return ea_l;
 }
 
-void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
+void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
     if (ea == MEM_FAULT) {
@@ -705,7 +711,7 @@ void exec_mr(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-void exec_md(ist66_cu_t *cpu, uint64_t inst) {
+void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
     if (ea == MEM_FAULT) {
@@ -922,7 +928,7 @@ void exec_md(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-void exec_am(ist66_cu_t *cpu, uint64_t inst) {
+void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     uint64_t ac = (inst >> 23) & 0xF;
     
@@ -1210,7 +1216,7 @@ void exec_am(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
+void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
     if ((cpu->c[C_FCW] & 4) == 0) {
         do_except(cpu, X_NFPU);
         return;
@@ -1244,7 +1250,7 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
 
             set_f36(&data, &cpu->f[ac]);
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
 
             set_pc(cpu, get_pc(cpu) + 1);
@@ -1253,12 +1259,12 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
         case 0401: { // STF
             int status = 0;
             uint64_t result;
-            rdc700_float_t temp = {
+            acr7k_float_t temp = {
                 .sign_exp = cpu->f[ac].sign_exp,
                 .signif = cpu->f[ac].signif
             };
             if (normalize) {
-                rdc700_fnorm(&temp, &temp);
+                acr7k_fnorm(&temp, &temp);
             }
             if (round) {
                 status |= f80_round_to_f36(&temp, &temp);
@@ -1290,12 +1296,12 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
 
-            rdc700_float_t temp;
+            acr7k_float_t temp;
             set_f36(&data, &temp);
-            int status = rdc700_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
+            int status = acr7k_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
             if (round) {
                 status |= f80_round_to_f36(&cpu->f[ac], &cpu->f[ac]);
@@ -1316,13 +1322,13 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
 
-            rdc700_float_t temp;
+            acr7k_float_t temp;
             set_f36(&data, &temp);
-            rdc700_fneg(&temp, &temp);
-            int status = rdc700_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
+            acr7k_fneg(&temp, &temp);
+            int status = acr7k_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
             if (round) {
                 status |= f80_round_to_f36(&cpu->f[ac], &cpu->f[ac]);
@@ -1343,12 +1349,12 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
 
-            rdc700_float_t temp;
+            acr7k_float_t temp;
             set_f36(&data, &temp);
-            int status = rdc700_fmul(&cpu->f[ac], &temp, &cpu->f[ac]);
+            int status = acr7k_fmul(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
             if (round) {
                 status |= f80_round_to_f36(&cpu->f[ac], &cpu->f[ac]);
@@ -1369,14 +1375,14 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             }
             data &= MASK_36;
 
-            rdc700_float_t temp;
+            acr7k_float_t temp;
             set_f36(&data, &temp);
-            // rdc700_fnorm(&temp, &temp);
+            // acr7k_fnorm(&temp, &temp);
             
-            int status = rdc700_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
+            int status = acr7k_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
             
             if (round) {
@@ -1410,7 +1416,7 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
 
             set_f72(&data, &data_l, &cpu->f[ac]);
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
 
             set_pc(cpu, get_pc(cpu) + 1);
@@ -1419,12 +1425,12 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
         case 0407: { // STG
             int status = 0;
             uint64_t result, result_l;
-            rdc700_float_t temp = {
+            acr7k_float_t temp = {
                 .sign_exp = cpu->f[ac].sign_exp,
                 .signif = cpu->f[ac].signif
             };
             if (normalize) {
-                rdc700_fnorm(&temp, &temp);
+                acr7k_fnorm(&temp, &temp);
             }
             if (round) {
                 status |= f80_round_to_f72(&temp, &temp);
@@ -1475,12 +1481,12 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             }
             data_l &= MASK_36;
 
-            rdc700_float_t temp;
+            acr7k_float_t temp;
             set_f72(&data, &data_l, &temp);
-            int status = rdc700_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
+            int status = acr7k_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
             if (round) {
                 status |= f80_round_to_f72(&cpu->f[ac], &cpu->f[ac]);
@@ -1511,13 +1517,13 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             }
             data_l &= MASK_36;
 
-            rdc700_float_t temp;
+            acr7k_float_t temp;
             set_f72(&data, &data_l, &temp);
-            rdc700_fneg(&temp, &temp);
-            int status = rdc700_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
+            acr7k_fneg(&temp, &temp);
+            int status = acr7k_fadd(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
             if (round) {
                 status |= f80_round_to_f72(&cpu->f[ac], &cpu->f[ac]);
@@ -1548,12 +1554,12 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             }
             data_l &= MASK_36;
 
-            rdc700_float_t temp;
+            acr7k_float_t temp;
             set_f72(&data, &data_l, &temp);
-            int status = rdc700_fmul(&cpu->f[ac], &temp, &cpu->f[ac]);
+            int status = acr7k_fmul(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
             
             if (round) {
@@ -1585,14 +1591,14 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
             }
             data_l &= MASK_36;
 
-            rdc700_float_t temp;
+            acr7k_float_t temp;
             set_f72(&data, &data_l, &temp);
-            // rdc700_fnorm(&temp, &temp);
+            // acr7k_fnorm(&temp, &temp);
             
-            int status = rdc700_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
+            int status = acr7k_fdiv(&cpu->f[ac], &temp, &cpu->f[ac]);
 
             if (normalize) {
-                rdc700_fnorm(&cpu->f[ac], &cpu->f[ac]);
+                acr7k_fnorm(&cpu->f[ac], &cpu->f[ac]);
             }
             if (round) {
                 status |= f80_round_to_f72(&cpu->f[ac], &cpu->f[ac]);
@@ -1737,7 +1743,7 @@ void exec_fm(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
+void exec_fr(acr7k_cu_t *cpu, uint64_t inst) {
     if ((cpu->c[C_FCW] & 4) == 0) {
         do_except(cpu, X_NFPU);
         return;
@@ -1751,7 +1757,7 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
     int round = !!(inst & (1 << 25));
     int round_size = !!(inst & (1 << 14));
 
-    rdc700_float_t temp;
+    acr7k_float_t temp;
     int status = 0;
 
     switch ((inst >> 27) & 0x1FF) {
@@ -1763,26 +1769,26 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
         case 0441: { // NL
             temp.sign_exp = cpu->f[src].sign_exp;
             temp.signif = cpu->f[src].signif;
-            rdc700_fneg(&temp, &temp);
+            acr7k_fneg(&temp, &temp);
         } break;
         
         case 0442: { // AL
-            status = rdc700_fadd(&cpu->f[src], &cpu->f[tgt], &temp);
+            status = acr7k_fadd(&cpu->f[src], &cpu->f[tgt], &temp);
         } break;
         
         case 0443: { // SL
             temp.sign_exp = cpu->f[tgt].sign_exp;
             temp.signif = cpu->f[tgt].signif;
-            rdc700_fneg(&temp, &temp);
-            status = rdc700_fadd(&cpu->f[src], &temp, &temp);
+            acr7k_fneg(&temp, &temp);
+            status = acr7k_fadd(&cpu->f[src], &temp, &temp);
         } break;
         
         case 0444: { // ML
-            status = rdc700_fmul(&cpu->f[src], &cpu->f[tgt], &temp);
+            status = acr7k_fmul(&cpu->f[src], &cpu->f[tgt], &temp);
         } break;
         
         case 0445: { // DL
-            status = rdc700_fdiv(&cpu->f[src], &cpu->f[tgt], &temp);
+            status = acr7k_fdiv(&cpu->f[src], &cpu->f[tgt], &temp);
         } break;
 
         default: {
@@ -1793,7 +1799,7 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
     }
     
     if (normalize) {
-        rdc700_fnorm(&temp, &temp);
+        acr7k_fnorm(&temp, &temp);
     }
     if (round) {
         if (round_size) {
@@ -1828,7 +1834,7 @@ void exec_fr(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
+void exec_bx(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t ac = (inst >> 23) & 0xF;
     uint64_t ix = (inst >> 18) & 0xF;
     uint64_t bs = inst & 0x3F;
@@ -1966,7 +1972,7 @@ void exec_bx(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-void exec_local_trap(ist66_cu_t *cpu, uint64_t inst) {
+void exec_local_trap(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t opcode = ((inst >> 27) & 0x1FF);
     if (opcode >= 0300) { // SLT, set key to 0 and save full PSW
         if (!((cpu->c[C_SLT] >> 27) & 1)) {
@@ -1987,7 +1993,7 @@ void exec_local_trap(ist66_cu_t *cpu, uint64_t inst) {
     cpu->a[14] = inst;
 }
 
-void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
+void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
     if (!key) {
         uint64_t ea = comp_mr(cpu, inst);
@@ -2155,7 +2161,7 @@ void exec_smi(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
 
-void exec_io1(ist66_cu_t *cpu, uint64_t inst) {
+void exec_io1(acr7k_cu_t *cpu, uint64_t inst) {
     
     uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
     if (!key) {
@@ -2254,7 +2260,7 @@ uint64_t exec_aa(
     return result;
 }
 
-void exec_all(ist66_cu_t *cpu, uint64_t inst) {
+void exec_all(acr7k_cu_t *cpu, uint64_t inst) {
     cpu->inst = inst;
     
     if (inst >> 33 == 0x7) { // ALU operation
@@ -2314,18 +2320,53 @@ void exec_all(ist66_cu_t *cpu, uint64_t inst) {
     }
 }
  
+/*
+ * Pace the CPU thread to at most cpu->throttle read_mem/write_mem calls per
+ * millisecond. We track how many accesses happened since the window anchor
+ * (throttle_t0/throttle_n0) and how long that took; if we are running ahead of
+ * the allowed rate we sleep off the surplus. Sub-quarter-millisecond surpluses
+ * are left to accumulate so we sleep in usefully large (and accurate) chunks
+ * rather than fighting the kernel's timer granularity on every instruction.
+ */
+static void cpu_throttle(acr7k_cu_t *cpu) {
+    if (!cpu->throttle) return;
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    int64_t elapsed_ns =
+        (int64_t) (now.tv_sec - cpu->throttle_t0.tv_sec) * 1000000000LL
+        + (now.tv_nsec - cpu->throttle_t0.tv_nsec);
+
+    uint64_t did = cpu->mem_accesses - cpu->throttle_n0;
+
+    // Time these accesses are permitted to take at <throttle> accesses/ms,
+    // i.e. <throttle> accesses per 1e6 ns.
+    int64_t allowed_ns = (int64_t) (did * 1000000ULL / (uint64_t) cpu->throttle);
+
+    int64_t surplus_ns = allowed_ns - elapsed_ns;
+    if (surplus_ns > 250000) {
+        struct timespec ts;
+        ts.tv_sec = surplus_ns / 1000000000LL;
+        ts.tv_nsec = surplus_ns % 1000000000LL;
+        nanosleep(&ts, NULL);
+    }
+
+    // Re-anchor the window periodically (and after long idles) so accumulated
+    // credit or debt can't run away.
+    if (elapsed_ns > 100000000LL) {
+        clock_gettime(CLOCK_MONOTONIC, &cpu->throttle_t0);
+        cpu->throttle_n0 = cpu->mem_accesses;
+    }
+}
+
 void *run(void *vctx) {
-    ist66_cu_t *cpu = (ist66_cu_t *) vctx;
-    
+    acr7k_cu_t *cpu = (acr7k_cu_t *) vctx;
+
     fprintf(stderr, "CPU: starting\n");
-    
+
     do {
-        if (cpu->throttle) {
-            struct timespec millisecond;
-            millisecond.tv_nsec = 33333333;
-            millisecond.tv_sec = 0;
-            nanosleep(&millisecond, NULL);
-        }
+        cpu_throttle(cpu);
         
         int done_edit = 0;
         if (cpu->do_edit) {
@@ -2394,14 +2435,14 @@ void *run(void *vctx) {
     return NULL;
 }
 
-void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
-    memset(cpu, 0, sizeof(ist66_cu_t));
+void init_cpu(acr7k_cu_t *cpu, uint64_t mem_size, int max_io) {
+    memset(cpu, 0, sizeof(acr7k_cu_t));
     
     cpu->memory = calloc(sizeof(uint64_t), mem_size);
     cpu->mem_size = mem_size;
     
-    cpu->io_destroy = calloc(sizeof(ist66_io_dtor_t), max_io);
-    cpu->io = calloc(sizeof(ist66_io_t), max_io);
+    cpu->io_destroy = calloc(sizeof(acr7k_io_dtor_t), max_io);
+    cpu->io = calloc(sizeof(acr7k_io_t), max_io);
     cpu->ioctx = calloc(sizeof(void *), max_io);
     cpu->max_io = max_io;
     cpu->mask = 0xFFFF;
@@ -2410,10 +2451,10 @@ void init_cpu(ist66_cu_t *cpu, uint64_t mem_size, int max_io) {
     
     pthread_mutex_init(&cpu->lock, NULL);
     pthread_cond_init(&cpu->intr_cond, NULL);
-    fprintf(stderr, "CPU: RDC700 %ldW memory, %d devices\n", mem_size, max_io);
+    fprintf(stderr, "CPU: ACR 7000 %ldW memory, %d devices\n", mem_size, max_io);
 }
 
-void start_cpu(ist66_cu_t *cpu, int do_step) {
+void start_cpu(acr7k_cu_t *cpu, int do_step) {
     if (cpu->exit) {
         cpu->running = 1;
         cpu->exit = do_step;
@@ -2427,7 +2468,7 @@ void start_cpu(ist66_cu_t *cpu, int do_step) {
     }
 }
 
-void stop_cpu(ist66_cu_t *cpu) {
+void stop_cpu(acr7k_cu_t *cpu) {
     if (!(cpu->exit)) {
         cpu->running = 1;
         cpu->exit = 1;
@@ -2437,14 +2478,14 @@ void stop_cpu(ist66_cu_t *cpu) {
     }
 }
 
-void wait_for_cpu(ist66_cu_t *cpu) {
+void wait_for_cpu(acr7k_cu_t *cpu) {
     if (!(cpu->exit)) {
         pthread_join(cpu->thread, NULL);
         cpu->running = 0;
     }
 }
 
-void destroy_cpu(ist66_cu_t *cpu) {
+void destroy_cpu(acr7k_cu_t *cpu) {
     stop_cpu(cpu);
     
     for (int i = 0; i < cpu->max_io; i++) {
@@ -2464,7 +2505,7 @@ void destroy_cpu(ist66_cu_t *cpu) {
 }
 
 int main(int argc, char *argv[]) {
-    ist66_cu_t cpu;
+    acr7k_cu_t cpu;
     
     
     
@@ -2628,7 +2669,19 @@ int main(int argc, char *argv[]) {
             }
             
             else if (cmd[i] == 'T') {
-                cpu.throttle ^= 1;
+                char *end;
+                long val = strtol(cmd + i + 1, &end, 10);
+                if (end == cmd + i + 1) {
+                    cpu.throttle = 0;
+                    printf("Throttle disabled\n");
+                } else if (val <= 0) {
+                    printf("? Bad throttle\n");
+                } else {
+                    cpu.throttle = (int) val;
+                    cpu.throttle_n0 = cpu.mem_accesses;
+                    clock_gettime(CLOCK_MONOTONIC, &cpu.throttle_t0);
+                    printf("Throttle set to %d accesses/ms\n", cpu.throttle);
+                }
             }
             
             else if (cmd[i] == 'P') {

@@ -10,7 +10,7 @@
 #include "lpt.h"
 
 typedef struct {
-    ist66_cu_t *cpu;
+    acr7k_cu_t *cpu;
     int id, irq;
     
     FILE *file;
@@ -24,7 +24,7 @@ typedef struct {
     pthread_mutex_t lock;
     pthread_cond_t cmd_cond;
     int running, command, done;
-} ist66_lpt_t;
+} acr7k_lpt_t;
 
 static inline int msleep(long msec) {
     struct timespec ts;
@@ -46,8 +46,8 @@ static inline int msleep(long msec) {
 }
 
 void *lpt(void *vctx) {
-    ist66_lpt_t *ctx = (ist66_lpt_t *) vctx;
-    ist66_cu_t *cpu = ctx->cpu;
+    acr7k_lpt_t *ctx = (acr7k_lpt_t *) vctx;
+    acr7k_cu_t *cpu = ctx->cpu;
     
     ctx->running = 1;
     while (ctx->running) {
@@ -104,8 +104,8 @@ uint64_t lpt_io(
     int ctl,
     int transfer
 ) {
-    ist66_lpt_t *ctx = (ist66_lpt_t *) vctx;
-    ist66_cu_t *cpu = ctx->cpu;
+    acr7k_lpt_t *ctx = (acr7k_lpt_t *) vctx;
+    acr7k_cu_t *cpu = ctx->cpu;
     
     if (transfer == 1) {
         ctx->buf = (uint8_t) data;
@@ -147,8 +147,8 @@ uint64_t lpt_io(
     else return 0;
 }
 
-void destroy_lpt(ist66_cu_t *cpu, int id) {
-    ist66_lpt_t *ctx = (ist66_lpt_t *) cpu->ioctx[id];
+void destroy_lpt(acr7k_cu_t *cpu, int id) {
+    acr7k_lpt_t *ctx = (acr7k_lpt_t *) cpu->ioctx[id];
     
     if (ctx->running) {
         pthread_cancel(ctx->thread);
@@ -162,8 +162,8 @@ void destroy_lpt(ist66_cu_t *cpu, int id) {
     fprintf(stderr, "LPT: %04o deinitialized\n", id);
 }
 
-void init_lpt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
-    ist66_lpt_t *ctx = calloc(sizeof(ist66_lpt_t), 1);
+void init_lpt_any(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
+    acr7k_lpt_t *ctx = calloc(sizeof(acr7k_lpt_t), 1);
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_lpt;
     cpu->io[id] = lpt_io;
@@ -179,12 +179,12 @@ void init_lpt_any(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
     pthread_create(&ctx->thread, NULL, lpt, ctx);
 }
 
-void init_lpt(ist66_cu_t *cpu, int id, int irq, FILE *fd) {
+void init_lpt(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
     init_lpt_any(cpu, id, irq, fd);
     fprintf(stderr, "LPT: %04o IRQ %02o\n", id, irq);
 }
 
-void init_lpt_ex(ist66_cu_t *cpu, int id, int irq, char *fname) {
+void init_lpt_ex(acr7k_cu_t *cpu, int id, int irq, char *fname) {
     FILE *fd = fopen(fname, "wb");
     if (fd == NULL) {
         fprintf(stderr, "LPT: %04o file error\n", id);

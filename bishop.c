@@ -28,7 +28,7 @@ typedef struct {
 
     int running, done;
     pthread_t thread, dma_thread;
-    ist66_cu_t *cpu;
+    acr7k_cu_t *cpu;
     
     uint64_t dma_addr;
     uint64_t pattern;
@@ -254,7 +254,7 @@ uint64_t bishop_io(
     int transfer
 ) {
     bishop_ctx_t *ctx = (bishop_ctx_t *) vctx;
-    // ist66_cu_t *cpu = ctx->cpu;
+    // acr7k_cu_t *cpu = ctx->cpu;
     
     switch (transfer) {
         case 1: ctx->dma_addr = data & MASK_36; break;
@@ -425,7 +425,7 @@ void bishop_do_destroy(void *ctx) {
     SDL_DestroyWindow(bishop->window);
 }
 
-void destroy_bishop(ist66_cu_t *cpu, int id) {
+void destroy_bishop(acr7k_cu_t *cpu, int id) {
     bishop_ctx_t *bishop = cpu->ioctx[id];
     bishop->running = 0;
     // pthread_join(bishop->thread, NULL);
@@ -440,7 +440,7 @@ void destroy_bishop(ist66_cu_t *cpu, int id) {
     fprintf(stderr, "TV2: %04o deinitialized\n", id);
 }
 
-void init_bishop(ist66_cu_t *cpu, int id) {
+void init_bishop(acr7k_cu_t *cpu, int id) {
     bishop_ctx_t *ctx = calloc(sizeof(bishop_ctx_t), 1);
     
     window_ctx_t bishop_window = {

@@ -3,6 +3,6 @@
 
 #include "cpu.h"
 
-void init_bishop(ist66_cu_t *cpu, int id);
+void init_bishop(acr7k_cu_t *cpu, int id);
 
 #endif
