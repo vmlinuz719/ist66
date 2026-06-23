@@ -1108,6 +1108,25 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
 
             ldea        x0, .done
             calls       .writeld
+            
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; Test some channels
+            
+            ldea        ac, 12
+            wio         ac, 0, #01c
+            wios        ac, 1, #01c
+            
+            ldea        ac, 5
+            wio         ac, 0, #02c
+            wios        ac, 1, #02c
+            
+            ldea        ac, 11
+            wio         ac, 0, #01c
+            wios        ac, 1, #01c
+            
+            ldea        ac, 7
+            wio         ac, 0, #02c
+            wios        ac, 1, #02c
 
             hlt
             

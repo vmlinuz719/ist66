@@ -2520,7 +2520,8 @@ int main(int argc, char *argv[]) {
     init_lpt(&cpu, 013, 8, stdout);
     init_tty(&cpu, 060, 10, 8080);
     
-    init_msch(&cpu, 014, 6);
+    init_msch(&cpu, 034, 6);
+    init_msch(&cpu, 054, 6);
     
     char cmd[512];
     int running = 1;

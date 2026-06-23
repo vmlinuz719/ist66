@@ -31,6 +31,7 @@ typedef struct {
     pthread_t thread;
     
     int running;
+    uint64_t caw;
     
     // use status_lock
     pthread_cond_t cmd_cond;
@@ -40,6 +41,8 @@ typedef struct {
 typedef struct {
     acr7k_cu_t *cpu;
     int id, irq;
+    
+    int subch_select;
     
     pthread_mutex_t status_lock;
     acr7k_subch_t subchannel[16];
@@ -76,14 +79,14 @@ void *subch(void *vctx) {
         
         else {
             fprintf(
-                stderr, "Channel %03X.%01X got command\n",
+                stderr, "MSC: %03X.%01X busy\n",
                 channel->id, sc_id
             );
             
             msleep(1000);
             
             fprintf(
-                stderr, "Channel %03X.%01X done\n",
+                stderr, "MSC: %03X.%01X done\n",
                 channel->id, sc_id
             );
             
@@ -93,49 +96,71 @@ void *subch(void *vctx) {
         }
     }
     
-    /*
-    while (ctx->running) {
-        pthread_mutex_lock(&ctx->lock);
-        while (!ctx->command) {
-            pthread_cond_wait(&ctx->cmd_cond, &ctx->lock);
-            
-        }
-        
-        int command = ctx->command;
-        pthread_mutex_unlock(&ctx->lock);
-        
-        if (command == -1) {
-            ctx->running = 0;
-        }
-        
-        else if (command == 1) {
-            msleep(2);
-            int ch = fgetc(ctx->file);
-            if (ch == EOF) {
-                // fclose(ctx->file);
-                ctx->running = 0;
-                ctx->buf = 0;
-                fprintf(
-                    stderr,
-                    "PPT: %04o End of tape\n", ctx->id
-                );
-            } else {
-                ctx->buf = (uint8_t) ch;
-            }
-            
-            pthread_mutex_lock(&ctx->lock);
-            ctx->command = 0;
-            if (!ctx->done) {
-                ctx->done = 1;
-                intr_assert(cpu, ctx->irq);
-            }
-            pthread_mutex_unlock(&ctx->lock);
+    return NULL;
+}
+
+uint64_t msch_io(
+    void *vctx,
+    uint64_t data,
+    int ctl,
+    int transfer
+) {
+    acr7k_msch_t *ctx = (acr7k_msch_t *) vctx;
+    // acr7k_cu_t *cpu = ctx->cpu;
+    
+    if (transfer == 1) {
+        ctx->subch_select = data & 0xF;
+    }
+    
+    else if (transfer == 3) {
+        ctx->subchannel[ctx->subch_select].caw = data;
+    }
+    
+    acr7k_subch_t *subchannel = &(ctx->subchannel[ctx->subch_select]);
+    
+    if (transfer != 14) {
+        switch (ctl) {
+            case 1: {
+                pthread_mutex_lock(&ctx->status_lock);
+                subchannel->command = 1;
+                if (subchannel->done) {
+                    subchannel->done = 0;
+                    // intr_release(cpu, ctx->irq);
+                }
+                pthread_cond_signal(&subchannel->cmd_cond);
+                pthread_mutex_unlock(&ctx->status_lock);
+            } break;
+            case 2: {
+                pthread_mutex_lock(&ctx->status_lock);
+                // ctx->command = 0;
+                if (subchannel->done) {
+                    subchannel->done = 0;
+                    // intr_release(cpu, ctx->irq);
+                }
+                pthread_mutex_unlock(&ctx->status_lock);
+            } break;
         }
     }
     
-    */
+    /*
+    if (transfer == 14) {
+        int status = (ctx->done << 1) | (ctx->command & 1);
+        return (uint64_t) status;
+    }
     
-    return NULL;
+    else if (transfer == 0) {
+        return pop_char(ctx);
+    }
+
+    else if (transfer == 2) {
+        return (ctx->control << 8) | ctx->threshold;
+    }
+
+    else if (transfer == 4) {
+        return ctx->len;
+    }
+    
+    else */ return 0;
 }
 
 void destroy_msch(acr7k_cu_t *cpu, int id) {
@@ -158,7 +183,7 @@ void init_msch(acr7k_cu_t *cpu, int id, int irq) {
     acr7k_msch_t *ctx = calloc(sizeof(acr7k_msch_t), 1);
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_msch;
-    // cpu->io[id] = msch_io;
+    cpu->io[id] = msch_io;
     
     ctx->cpu = cpu;
     ctx->id = id;
