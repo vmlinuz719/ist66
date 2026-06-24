@@ -56,9 +56,10 @@ typedef struct {
 void *subch(void *vctx) {
     msch_arg_t *arg = (msch_arg_t *) vctx;
     int sc_id = arg->subchannel;
-    
     acr7k_msch_t *channel = arg->msch;
-    acr7k_subch_t *subchannel = &(arg->msch->subchannel[sc_id]);
+    free(vctx);
+
+    acr7k_subch_t *subchannel = &(channel->subchannel[sc_id]);
     
     subchannel->running = 1;
     
@@ -191,14 +192,13 @@ void init_msch(acr7k_cu_t *cpu, int id, int irq) {
     
     pthread_mutex_init(&ctx->status_lock, NULL);
     
-    msch_arg_t msch_arg[16];
-    
     for (int i = 0; i < 16; i++) {
-        msch_arg[i].msch = ctx;
-        msch_arg[i].subchannel = i;
+        msch_arg_t *msch_arg = malloc(sizeof(msch_arg_t));
+        msch_arg->msch = ctx;
+        msch_arg->subchannel = i;
         
         pthread_cond_init(&ctx->subchannel[i].cmd_cond, NULL);
-        pthread_create(&ctx->subchannel[i].thread, NULL, subch, &msch_arg[i]);
+        pthread_create(&ctx->subchannel[i].thread, NULL, subch, msch_arg);
     }
     
     fprintf(stderr, "MSC: %04o IRQ %02o\n", id, irq);
