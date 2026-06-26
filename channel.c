@@ -59,16 +59,18 @@ void set_done(acr7k_msch_t *msch, int sc) {
     
     acr7k_subch_t *subchannel = &(msch->subchannel[sc]);
     
-    subchannel->done = 1;
-    
-    int prev_done = msch->lowest_subch_done;
-    
-    if (sc < msch->lowest_subch_done) {
-        msch->lowest_subch_done = sc;
-    }
-    
-    if (prev_done == 16) {
-        intr_assert(msch->cpu, msch->irq);
+    if (!(subchannel->done)) {
+        subchannel->done = 1;
+        
+        int prev_done = msch->lowest_subch_done;
+        
+        if (sc < msch->lowest_subch_done) {
+            msch->lowest_subch_done = sc;
+        }
+        
+        if (prev_done == 16) {
+            intr_assert(msch->cpu, msch->irq);
+        }
     }
 }
 
