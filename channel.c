@@ -46,12 +46,51 @@ typedef struct {
     
     pthread_mutex_t status_lock;
     acr7k_subch_t subchannel[16];
+    int lowest_subch_done;          // 16 if no channels done
 } acr7k_msch_t;
 
 typedef struct {
     acr7k_msch_t *msch;
     int subchannel;
 } msch_arg_t;
+
+void set_done(acr7k_msch_t *msch, int sc) {
+    // must have status_lock
+    
+    acr7k_subch_t *subchannel = &(msch->subchannel[sc]);
+    
+    subchannel->done = 1;
+    
+    int prev_done = msch->lowest_subch_done;
+    
+    if (sc < msch->lowest_subch_done) {
+        msch->lowest_subch_done = sc;
+    }
+    
+    if (prev_done == 16) {
+        intr_assert(msch->cpu, msch->irq);
+    }
+}
+
+void clear_done(acr7k_msch_t *msch, int sc) {
+    // must have status_lock
+    
+    acr7k_subch_t *subchannel = &(msch->subchannel[sc]);
+    
+    if (subchannel->done) {
+        subchannel->done = 0;
+        
+        int new_lowest;
+        for (new_lowest = 0; new_lowest < 16; new_lowest++) {
+            if (msch->subchannel[new_lowest].done) break;
+        }
+        msch->lowest_subch_done = new_lowest;
+        
+        if (new_lowest == 16) {
+            intr_release(msch->cpu, msch->irq);
+        }
+    }
+}
 
 void *subch(void *vctx) {
     msch_arg_t *arg = (msch_arg_t *) vctx;
@@ -92,6 +131,7 @@ void *subch(void *vctx) {
             
             pthread_mutex_lock(&channel->status_lock);
             subchannel->command = 0;
+            set_done(channel, sc_id);
             pthread_mutex_unlock(&channel->status_lock);
         }
     }
@@ -123,20 +163,14 @@ uint64_t msch_io(
             case 1: {
                 pthread_mutex_lock(&ctx->status_lock);
                 subchannel->command = 1;
-                if (subchannel->done) {
-                    subchannel->done = 0;
-                    // intr_release(cpu, ctx->irq);
-                }
+                clear_done(ctx, ctx->subch_select);
                 pthread_cond_signal(&subchannel->cmd_cond);
                 pthread_mutex_unlock(&ctx->status_lock);
             } break;
             case 2: {
                 pthread_mutex_lock(&ctx->status_lock);
                 // ctx->command = 0;
-                if (subchannel->done) {
-                    subchannel->done = 0;
-                    // intr_release(cpu, ctx->irq);
-                }
+                clear_done(ctx, ctx->subch_select);
                 pthread_mutex_unlock(&ctx->status_lock);
             } break;
         }
@@ -188,6 +222,8 @@ void init_msch(acr7k_cu_t *cpu, int id, int irq) {
     ctx->cpu = cpu;
     ctx->id = id;
     ctx->irq = irq;
+    
+    ctx->lowest_subch_done = 16; // start with all clear
     
     pthread_mutex_init(&ctx->status_lock, NULL);
     
