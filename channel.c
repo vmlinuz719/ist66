@@ -179,7 +179,6 @@ uint64_t msch_io(
                 pthread_cond_signal(&subchannel->cmd_cond);
             } break;
             case 2: {
-                pthread_mutex_lock(&ctx->status_lock);
                 // ctx->command = 0;
                 clear_done(ctx, ctx->subch_select);
             } break;
