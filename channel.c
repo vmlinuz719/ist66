@@ -147,9 +147,13 @@ uint64_t msch_io(
     uint64_t data,
     int ctl,
     int transfer
-) {
+) { 
     acr7k_msch_t *ctx = (acr7k_msch_t *) vctx;
+    pthread_mutex_lock(&ctx->status_lock);
+    
     // acr7k_cu_t *cpu = ctx->cpu;
+    
+    uint64_t intr_poll_result = 0xFFFFFFFFF, result = 0;
     
     if (transfer == 1) {
         ctx->subch_select = data & 0xF;
@@ -159,24 +163,31 @@ uint64_t msch_io(
         ctx->subchannel[ctx->subch_select].caw = data;
     }
     
+    else if (transfer == 8) { // interrupt pop
+        if (ctx->lowest_subch_done != 16) {
+            ctx->subch_select = intr_poll_result = ctx->lowest_subch_done;
+        }
+    }
+    
     acr7k_subch_t *subchannel = &(ctx->subchannel[ctx->subch_select]);
     
     if (transfer != 14) {
         switch (ctl) {
             case 1: {
-                pthread_mutex_lock(&ctx->status_lock);
                 subchannel->command = 1;
                 clear_done(ctx, ctx->subch_select);
                 pthread_cond_signal(&subchannel->cmd_cond);
-                pthread_mutex_unlock(&ctx->status_lock);
             } break;
             case 2: {
                 pthread_mutex_lock(&ctx->status_lock);
                 // ctx->command = 0;
                 clear_done(ctx, ctx->subch_select);
-                pthread_mutex_unlock(&ctx->status_lock);
             } break;
         }
+    }
+    
+    if (transfer == 8) {
+        result = intr_poll_result;
     }
     
     /*
@@ -197,7 +208,9 @@ uint64_t msch_io(
         return ctx->len;
     }
     
-    else */ return 0;
+    else */ 
+    pthread_mutex_unlock(&ctx->status_lock);
+    return result;
 }
 
 void destroy_msch(acr7k_cu_t *cpu, int id) {
