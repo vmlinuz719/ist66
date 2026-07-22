@@ -70,7 +70,7 @@ tty_stat:   bss         1
 tty_acsv:   bss         1
 
 crlf:       dsn         13, 10
-msg_banner: dsn         "MP-700 VERSION 1 RELEASE 0", 13, 10,
+msg_banner: dsn         "MP/7K VERSION 1 RELEASE 0", 13, 10,
                         "(C) 2026 vmlinuz719. ", 
                         "All rights reserved. Do not redistribute!",
                         13, 10, 13, 10
@@ -85,7 +85,7 @@ bang:       dsn         "-"
 done:       dsn         " OK", 13, 10
 msg_rmdone: dsn         "W REAL MEMORY OK", 13, 10
 msg_licens: dsn         13, 10,
-                        "        ***    SEVERE ERROR DETECTED     ***", 13, 10,
+                        "        ***    IRREGULARITY DETECTED     ***", 13, 10,
                         "        ***  STARTUP WILL NOT CONTINUE!  ***", 13, 10
 
 ok:         dw          0666
@@ -102,7 +102,7 @@ vseg2:      dw          03500000000
 tcslen:     dw          0377000000000
 
 crc_poly:   dw          #8000000fc
-banner_crc: dw          0355510514236
+banner_crc: dw          0701003361336
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Exception handler stub
