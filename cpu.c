@@ -1,3 +1,41 @@
+/*
+ * cpu.c - ACR 7000 central processor: instruction execution, memory
+ * protection and translation, priority interrupts, and the interactive
+ * monitor (main).
+ *
+ * Machine model:
+ *  - 36-bit words, word addressed; 27-bit physical/virtual addresses.
+ *  - 16 general accumulators a[0..15], named by the assembler as AC(0),
+ *    MQ(1), XY(2), X0-X7(3-10), AP(11), LR(12), SP(13), R14, R15.
+ *    AC/MQ/XY have fixed roles in multiply/divide (exec_md), LR is the
+ *    subroutine linkage register (callr/retr), SP is the stack pointer
+ *    (stacks grow downward), R14/R15 are clobbered by local traps.
+ *  - 8 control registers c[0..7] (asm2 names in parens):
+ *      0 C_PSW (psw0): bits 0-26 PC, bit 27 carry flag, bits 28-35
+ *        storage protection key (0 = supervisor).
+ *      1 C_CW  (psw1): bits 0-17 direct page base (x512 words), bits
+ *        24-27 exception code, bits 28-31 previous IRQL, bits 32-35
+ *        current IRQL (interrupt priority ceiling).
+ *      2 C_FCW (fpc):  bit 2 FPU enable, bits 0-1 FP register bank.
+ *      3 C_PLT (plt):  problem local trap table, bit 27 enable, low 27
+ *        bits table base.
+ *      4 C_SLT (slt):  supervisor local trap table, same layout.
+ *      5 C_SDR (sdr):  segment descriptor table, high 9 bits highest
+ *        valid selector, low 27 bits table base. Nonzero enables
+ *        virtual memory (see read_vmem).
+ *      6 C_SF  (sflt): segment fault status (see read_vmem).
+ *  - 16 floating point registers f[0..15], visible four at a time
+ *    (F0-F3) through the bank selected by FCW bits 0-1.
+ *
+ * Instructions are decoded in exec_all; the major opcode is the top nine
+ * bits (first three octal digits) of the word. See exec_all for the
+ * dispatch map and the exec_* functions for the individual formats.
+ *
+ * Mnemonics in the comments below are those of the current assembler,
+ * not_vibe_code/asm2.c (tools/assembler.py and its mnemonics are
+ * deprecated).
+ */
+
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,6 +56,28 @@
 #include "panel.h"
 #include "bishop.h"
 
+/**
+ * @brief Look up a segment descriptor through the segment cache
+ *
+ * With virtual memory enabled (nonzero C_SDR), the low 27 bits of SDR
+ * address a segment descriptor table and its high 9 bits hold the highest
+ * valid segment selector. Each descriptor is a pair of words:
+ *   word 0: base - physical base address of the segment, or of its page
+ *           table if the segment is paged
+ *   word 1: tag  - bits 28-35 storage key, bit 27 present, bit 26
+ *           writable, bit 25 sticky (entry survives seg_invalidate_all),
+ *           bit 24 paged, bits 0-17 limit (highest valid offset; only
+ *           checked for unpaged segments)
+ * Descriptors are cached in the 32-row direct-mapped seg_cache indexed by
+ * the low five selector bits; a miss walks the table in physical memory.
+ * Returns NULL for selectors beyond the SDR limit, descriptors outside
+ * physical memory, or descriptors without the present bit; the caller
+ * reports the specific fault.
+ *
+ * @param cpu Emulated CPU context
+ * @param selector 9-bit segment selector (virtual address bits 18-26)
+ * @return Cached descriptor or NULL
+ */
 seg_cache_t *seg_lookup(acr7k_cu_t *cpu, int selector) {
     uint8_t cache_row = selector & 0x1F;
     uint16_t cache_key = selector >> 5;
@@ -47,6 +107,23 @@ seg_cache_t *seg_lookup(acr7k_cu_t *cpu, int selector) {
     return &(cpu->seg_cache[cache_row]);
 }
 
+/**
+ * @brief Look up a page table entry through the TLB
+ *
+ * A paged segment (tag bit 24) uses its descriptor base as a page table
+ * with one word per 512-word page. Entry format: bits 9-35 physical page
+ * base (512-word aligned), bits 5-8 access rights - present, writable,
+ * global, nocache (the TLB_* bits in cpu.h). Entries are cached in the
+ * 32-row direct-mapped TLB indexed by the low five bits of the page
+ * number; global entries survive tlb_invalidate_all (e.g. on SDR reload).
+ * Returns NULL if the entry lies outside physical memory or the page is
+ * not present.
+ *
+ * @param cpu Emulated CPU context
+ * @param selector Virtual address bits 9-26 (segment + page number)
+ * @param pg_table Segment descriptor whose base addresses the page table
+ * @return Cached TLB entry or NULL
+ */
 tlb_entry_t *tlb_lookup(acr7k_cu_t *cpu, int selector, seg_cache_t *pg_table) {
     uint8_t cache_row = selector & 0x1F;
     uint16_t cache_key = selector >> 5;
@@ -102,7 +179,7 @@ void seg_invalidate_all(acr7k_cu_t *cpu) {
 /**
  * @brief Assert a priority interrupt signal
  *
- * IST-66 supports 14 interrupt priority levels (1-14; smaller number = higher
+ * The ACR 7000 has 14 interrupt priority levels (1-14; smaller number = higher
  * priority). Multiple devices may assert a single IRQ at a time. The emulated
  * CPU tracks the lowest (highest priority) IRQ that is asserted and unmasked.
  * Therefore, increment the count of devices asserting the chosen IRQ, update
@@ -175,6 +252,31 @@ void intr_set_mask(acr7k_cu_t *cpu, uint16_t mask) {
     pthread_mutex_unlock(&(cpu->lock));
 }
 
+/**
+ * @brief Read a word through virtual address translation
+ *
+ * A 27-bit virtual address splits into segment selector (bits 18-26),
+ * page number (bits 9-17) and word offset (bits 0-8). The segment's
+ * storage key must match the access key unless the access key is 0
+ * (supervisor) or the segment key is 0xFE/0xFF (public read / public
+ * read-write). An unpaged segment adds the full 18-bit in-segment offset
+ * to its base after checking it against the descriptor limit; a paged
+ * segment translates the page number through its page table instead
+ * (see tlb_lookup) with no limit check.
+ *
+ * On a translation failure C_SF (sflt) receives the failing virtual
+ * address plus a fault code: bits 27-28 = 0 not present, 1 key mismatch,
+ * 2 limit exceeded, 3 access rights; bit 29 set for writes; bit 30 set
+ * when the fault came from the page level rather than the segment level.
+ * The function then returns KEY_FAULT so the caller raises a protection
+ * fault exception. MEM_FAULT is returned only when the translated
+ * physical address falls outside real memory.
+ *
+ * @param cpu Emulated CPU context
+ * @param key Storage key to test (usually PSW bits 28-35)
+ * @param vaddress Virtual address
+ * @return Contents of memory, MEM_FAULT or KEY_FAULT
+ */
 uint64_t read_vmem(acr7k_cu_t *cpu, uint8_t key, uint32_t vaddress) {
     vaddress &= MASK_ADDR;
     
@@ -226,16 +328,19 @@ uint64_t read_vmem(acr7k_cu_t *cpu, uint8_t key, uint32_t vaddress) {
 /**
  * @brief Read a 36-bit word from CPU memory or return an error value
  *
- * IST-66 assigns to each 512-word page of memory an 8-bit memory protection
- * key. This key may be 0x00 (supervisor only), 0x01-0xFD (protected), 0xFE
- * (readable to all) or 0xFF (readable/writable to all). To read memory, a
- * 27-bit address is first bounds-checked against the amount of available
- * memory; if this check fails, this function returns a MEM_FAULT error value.
- * Then the protection key (usually the current key from control register 1,
- * Control Word) is checked against the target page's key. A read will succeed
- * and return a 36-bit word if either the provided key is equal to 0, the key
- * matches the one in memory or the key in memory is 0xFE or 0xFF; otherwise
- * this function returns a KEY_FAULT error value.
+ * If virtual memory is enabled (nonzero C_SDR) the access is translated
+ * by read_vmem instead; the rules below apply to real mode only.
+ *
+ * The ACR 7000 assigns to each 512-word page of memory an 8-bit storage
+ * protection key. This key may be 0x00 (supervisor only), 0x01-0xFD
+ * (protected), 0xFE (readable to all) or 0xFF (readable/writable to all).
+ * To read memory, a 27-bit address is first bounds-checked against the
+ * amount of available memory; if this check fails, this function returns a
+ * MEM_FAULT error value. Then the access key (usually the current key from
+ * PSW bits 28-35) is checked against the target page's key. A read will
+ * succeed and return a 36-bit word if either the provided key is equal to
+ * 0, the key matches the one in memory or the key in memory is 0xFE or
+ * 0xFF; otherwise this function returns a KEY_FAULT error value.
  *
  * @param cpu Emulated CPU context
  * @param key Storage key to test
@@ -263,6 +368,20 @@ uint64_t read_mem(acr7k_cu_t *cpu, uint8_t key, uint32_t address) {
     else return cpu->memory[address] & MASK_36;
 }
 
+/**
+ * @brief Write a word through virtual address translation
+ *
+ * Write counterpart of read_vmem (see there for the address split and
+ * fault reporting). Stores additionally require the segment's writable
+ * bit, and the TLB_WRITE right on the page for paged segments; segment
+ * key 0xFE (public read) does not authorize stores, only 0xFF does.
+ *
+ * @param cpu Emulated CPU context
+ * @param key Storage key to test (usually PSW bits 28-35)
+ * @param vaddress Virtual address
+ * @param data 36-bit word to write
+ * @return Zero, MEM_FAULT or KEY_FAULT
+ */
 uint64_t write_vmem(
     acr7k_cu_t *cpu,
     uint8_t key,
@@ -324,12 +443,15 @@ uint64_t write_vmem(
 /**
  * @brief Write a 36-bit word to CPU memory or return an error value
  *
- * To write memory, a 27-bit address is first bounds-checked against the amount
- * of available memory; if this check fails, this function returns a MEM_FAULT
- * error value. Then the protection key (usually the current key from control
- * register 1, Control Word) is checked against the target page's key. A write
- * will succeed and return a 36-bit word if either the provided key is equal to
- * 0, the key matches the one in memory or the key in memory is 0xFF; otherwise
+ * If virtual memory is enabled (nonzero C_SDR) the access is translated by
+ * write_vmem instead; the rules below apply to real mode only.
+ *
+ * To write memory, a 27-bit address is first bounds-checked against the
+ * amount of available memory; if this check fails, this function returns a
+ * MEM_FAULT error value. Then the access key (usually the current key from
+ * PSW bits 28-35) is checked against the target page's key. A write will
+ * succeed if either the provided key is equal to 0, the key matches the one
+ * in memory or the key in memory is 0xFF (public read/write); otherwise
  * this function returns a KEY_FAULT error value.
  *
  * @param cpu Emulated CPU context
@@ -394,34 +516,41 @@ uint64_t set_key(acr7k_cu_t *cpu, uint8_t key, uint32_t address) {
 /**
  * @brief Compute an effective address
  *
- * Most (all) IST-66 memory reference instructions use a format similar to the
- * DEC PDP-10: one indirect bit, one four-bit index selector and one 18-bit
- * signed displacement. Unlike the PDP-10 however, several of the index selector
- * values have special significance:
- *    - 0: No index register
- *    - 1: Use "direct page" 18-bit base in CR1 (Control Word)
- *    - 2: PC-relative
- *    - 3-13: Index register is AC3-AC13 (X0-X8, LR, SP)
- *    - 14: Post-increment AC13 (SP) by displacement
- *    - 15: Pre-decrement AC13 (SP) by displacement
+ * ACR 7000 memory reference instructions share a format similar to the DEC
+ * PDP-10: one indirect bit (22), one four-bit index selector (bits 18-21)
+ * and one 18-bit signed displacement (bits 0-17). Unlike the PDP-10,
+ * several index selector values have special significance (asm2 address
+ * syntax in parens):
+ *    - 0: no index, absolute address (disp)
+ *    - 1: offset from the direct page base, CW bits 0-17 x 512 (_disp)
+ *    - 2: PC-relative (.disp)
+ *    - 3-13: index register X0-X7, AP, LR or SP (disp(xn))
+ *    - 14: address is SP, then SP += disp afterwards (+disp) - the "pop"
+ *          direction; pop/popim/popcr are aliases using +1
+ *    - 15: SP -= disp first, address is the new SP (=disp) - the "push"
+ *          direction; push/pushim/pushcr are aliases using =1
+ * The SP update of modes 14/15 is staged in next_stack/do_stack and only
+ * committed once the instruction completes, so a faulting instruction can
+ * be retried.
  *
- * The computed address is thus a 36-bit word; as of now only the low 27 bits
+ * The computed address is a 36-bit word; as of now only the low 27 bits
  * are used for addressing even though all 36 bits are generated by this
  * operation.
  *
- * If an indirect address was specified, we now must perform an additional step
- * or two - the real address must be fetched from memory and if this operation
- * fails, either MEM_FAULT or KEY_FAULT is the result. If the most significant
- * bit of the fetched word is not set, then that is the final address. If it is
- * set, the next eight bits indicate a more advanced addressing mode:
- *    - Octal 0xx: Post-increment address field by signed 6-bit immediate xx
- *    - Octal 1xx: Pre-decrement address field by signed 6-bit immediate xx
- *    - 2xx, 3xx: Reserved (MEM_FAULT)
- * 
- * The result of an increment/decrement indirect address is written back to
- * memory after the successful completion of the instruction that computed it.
- * Should the instruction fail, all internal state pertaining to this operation
- * is cleared so it may be retried.
+ * If the indirect bit is set (@ in asm2), the address word must first be
+ * fetched from memory, and if that fetch fails, MEM_FAULT or KEY_FAULT is
+ * the result. If the most significant bit (35) of the fetched word is
+ * clear, its low 27 bits are the final address. If it is set, bits 33-34
+ * select an auto-modify mode using the signed 6-bit increment in bits
+ * 27-32 (so, by leading octal digits of the pointer word):
+ *    - 4ii: post-increment - use the address, then add increment ii
+ *    - 5ii: pre-decrement - subtract increment ii, then use the address
+ *    - 6xx, 7xx: reserved (MEM_FAULT)
+ *
+ * The modified pointer is written back to memory (via do_inc/inc_addr/
+ * inc_data) after the successful completion of the instruction that
+ * computed it. Should the instruction fail, all internal state pertaining
+ * to this operation is cleared so it may be retried.
  *
  * @param cpu Emulated CPU context
  * @param inst Instruction
@@ -504,6 +633,32 @@ uint64_t comp_mr(acr7k_cu_t *cpu, uint64_t inst) {
     else return ea_l;
 }
 
+/**
+ * @brief Execute a jump, memory test/skip or stack call instruction
+ *
+ * Major opcode 000; the accumulator field (bits 23-26) selects the
+ * operation:
+ *   0  jmp    - jump to EA (nop = jmp .+1, retr = jmp 0(lr))
+ *   1  callr  - jump to EA leaving the return address in LR
+ *   2  inctnz - increment memory word, skip next if the result is zero
+ *   3  dectnz - decrement memory word, skip next if the result is zero
+ *   4  tstmnz - skip next if the memory word is zero
+ *   5  tstmz  - skip next if the memory word is nonzero
+ *   14 calls  - call with save mask: the word at EA (asm2 "save"
+ *               directive; bit i = register 15-i) selects registers to
+ *               push, followed by the mask itself and the return address,
+ *               leaving SP at the return address; execution continues at
+ *               EA+1
+ *   15 rets/retsd - return from calls: SP += EA first (retsd n discards
+ *               n words of locals), pop the return address and mask, then
+ *               the saved registers; if SP itself was restored from the
+ *               frame, the popped value wins
+ * Other values raise the unimplemented instruction exception.
+ *
+ * (The tst/inc/dec skip mnemonics follow the asm2 convention of naming
+ * the condition under which the FOLLOWING instruction executes, e.g.
+ * "tstmnz x / jmp .y" jumps while the word at x is nonzero.)
+ */
 void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
@@ -516,14 +671,14 @@ void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
     }
     
     switch ((inst >> 23) & 0xF) {
-        case 0: { // JMP
+        case 0: { // jmp
             set_pc(cpu, ea);
         } break;
-        case 1: { // JSR
+        case 1: { // callr - return address in LR
             cpu->a[12] = (get_pc(cpu) + 1) & MASK_ADDR;
             set_pc(cpu, ea);
         } break;
-        case 2: { // ISZ
+        case 2: { // inctnz - increment memory, skip next if zero
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -550,7 +705,7 @@ void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
                 set_pc(cpu, get_pc(cpu) + 1);
             }
         } break;
-        case 3: { // DSZ
+        case 3: { // dectnz - decrement memory, skip next if zero
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -577,7 +732,7 @@ void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
                 set_pc(cpu, get_pc(cpu) + 1);
             }
         } break;
-        case 4: { // SZR
+        case 4: { // tstmnz - skip next if memory word is zero
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -594,7 +749,7 @@ void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
                 set_pc(cpu, get_pc(cpu) + 1);
             }
         } break;
-        case 5: { // SNZ
+        case 5: { // tstmz - skip next if memory word is nonzero
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -611,7 +766,7 @@ void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
                 set_pc(cpu, get_pc(cpu) + 1);
             }
         } break;
-        case 14: { // CALL
+        case 14: { // calls - call with register save mask at EA
             uint64_t mask = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (mask == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -660,7 +815,7 @@ void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[13] = temp_sp;
             set_pc(cpu, ea + 1);
         } break;
-        case 15: { // RET
+        case 15: { // rets/retsd - return from calls, SP += EA first
             uint64_t temp_sp = cpu->a[13] + ea;
             uint64_t last_two[2]; // return addr, mask
             
@@ -706,12 +861,28 @@ void exec_mr(acr7k_cu_t *cpu, uint64_t inst) {
             if (!restored_sp) cpu->a[13] = temp_sp;
         } break;
         default: {
-            // UMR
+            // unimplemented
             do_except(cpu, X_USER);
         }
     }
 }
 
+/**
+ * @brief Execute a fixed point multiply/divide instruction
+ *
+ * Major opcode 001; the accumulator field (bits 23-26) selects the
+ * operation. These use the fixed register roles AC (a0), MQ (a1) and XY
+ * (a2); products are 72 bits with the high half in XY and the low half
+ * in AC:
+ *   0 mul    - XY:AC = MQ * mem (signed)
+ *   1 fmadd  - XY:AC += MQ * mem (multiply-accumulate; a carry out of XY
+ *              inverts the carry flag, Nova style)
+ *   2 fmsub  - XY:AC += MQ * -mem
+ *   3 div    - MQ = AC / mem, XY = AC % mem (signed, 36-bit dividend);
+ *              a zero divisor raises X_DIVZ
+ *   4 umul, 5 ufmadd, 6 ufmsub, 7 udiv - unsigned variants
+ * Other values raise the unimplemented instruction exception.
+ */
 void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     
@@ -724,7 +895,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
     }
     
     switch ((inst >> 23) & 0xF) {
-        case 0: { // MPY
+        case 0: { // mul - XY:AC = MQ * mem, signed
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -739,7 +910,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 1: { // MPA
+        case 1: { // fmadd - XY:AC += MQ * mem, signed
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -770,7 +941,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result_h >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 2: { // MNA
+        case 2: { // fmsub - XY:AC += MQ * -mem, signed
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -801,7 +972,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result_h >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 3: { // DIV
+        case 3: { // div - MQ = AC / mem, XY = AC % mem, signed
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -824,7 +995,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 4: { // MU
+        case 4: { // umul - XY:AC = MQ * mem, unsigned
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -839,7 +1010,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
 
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 5: { // MAU
+        case 5: { // ufmadd - XY:AC += MQ * mem, unsigned
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -870,7 +1041,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result_h >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 6: { // MNAU
+        case 6: { // ufmsub - XY:AC += MQ * -mem, unsigned
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -901,7 +1072,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result_h >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 7: { // DU
+        case 7: { // udiv - MQ = AC / mem, XY = AC % mem, unsigned
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -923,12 +1094,42 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
         default: {
-            // UMR
+            // unimplemented
             do_except(cpu, X_USER);
         }
     }
 }
 
+/**
+ * @brief Execute an accumulator-memory instruction
+ *
+ * Major opcodes 041-066, any accumulator in bits 23-26, standard address
+ * field (comp_mr):
+ *   041 edit   - execute the word (mem | AC) as an instruction; it runs
+ *                in place of the next fetch (see do_edit in run)
+ *   042 edits  - as edit, but also skip the instruction following the
+ *                edits after the target has executed
+ *   043 ldea   - AC = effective address
+ *   044 addea  - AC += effective address
+ *   045 inctne - AC += 1, then skip next if AC == mem
+ *   046 dectne - AC -= 1, then skip next if AC == mem
+ *                (i.e. the following instruction runs until the count
+ *                reaches the memory word - "next if not equal")
+ *   047 ldeas  - AC = EA << 17
+ *   050 ldcom  - AC = ~mem
+ *   051 ldneg  - AC = -mem
+ *   052 ld     - AC = mem (pop = ld ac, +1)
+ *   053 st     - mem = AC (push = st ac, =1)
+ *   054 addcom - AC = ~mem + AC
+ *   055 sub    - AC = AC - mem
+ *   056 add    - AC = AC + mem
+ *   057 and    - AC &= mem
+ *   062 or     - AC |= mem
+ *   066 xor    - AC ^= mem
+ * The arithmetic forms invert the carry flag on carry/borrow out (Nova
+ * style; the carry is never added into the sum). Unassigned opcodes in
+ * the range raise the illegal instruction exception.
+ */
 void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t ea = comp_mr(cpu, inst);
     uint64_t ac = (inst >> 23) & 0xF;
@@ -942,7 +1143,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
     }
     
     switch ((inst >> 27) & 0x1FF) {
-        case 041: { // EDIT
+        case 041: { // edit - execute (mem | AC) as an instruction
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -959,7 +1160,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->do_edit = 1;
             cpu->xeq_inst = result & MASK_36;
         } break;
-        case 042: { // EDSK
+        case 042: { // edits - edit, then skip the following instruction
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -977,11 +1178,11 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->do_edsk = 1;
             cpu->xeq_inst = result & MASK_36;
         } break;
-        case 043: { // MOVEA
+        case 043: { // ldea - AC = effective address
             cpu->a[ac] = ea;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 044: { // ADDEA
+        case 044: { // addea - AC += effective address
             uint64_t result = compute(
                 ea, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
@@ -989,7 +1190,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 045: { // ISE
+        case 045: { // inctne - AC += 1, skip next if AC == mem
             uint64_t result = compute(
                 1, cpu->a[ac], get_cf(cpu), 6, 0, 0, 0, 0, 0
             );
@@ -1013,7 +1214,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
         } break;
-        case 046: { // DSE
+        case 046: { // dectne - AC -= 1, skip next if AC == mem
             uint64_t result = compute(
                 1, cpu->a[ac], get_cf(cpu), 5, 0, 0, 0, 0, 0
             );
@@ -1037,11 +1238,11 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_cf(cpu, (result >> 36) & 1);
         } break;
-        case 047: { // MOVEAS
+        case 047: { // ldeas - AC = EA << 17
             cpu->a[ac] = (ea << 17) & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 050: { // LDCOM
+        case 050: { // ldcom - AC = ~mem
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1058,7 +1259,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 051: { // LDNEG
+        case 051: { // ldneg - AC = -mem
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1075,7 +1276,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = result & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 052: { // LDA
+        case 052: { // ld - AC = mem (pop = ld ac, +1)
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1089,7 +1290,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = data & MASK_36;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 053: { // STA
+        case 053: { // st - mem = AC (push = st ac, =1)
             uint64_t w_res =
                 write_mem(cpu, cpu->c[C_PSW] >> 28, ea, cpu->a[ac]);
             if (w_res == MEM_FAULT) {
@@ -1102,7 +1303,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 054: { // ADCM
+        case 054: { // addcom - AC = ~mem + AC
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1120,7 +1321,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 055: { // SUBM
+        case 055: { // sub - AC = AC - mem
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1138,7 +1339,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 056: { // ADDM
+        case 056: { // add - AC = AC + mem
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1156,7 +1357,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 057: { // ANDM
+        case 057: { // and - AC &= mem
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1174,7 +1375,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 062: { // ORM
+        case 062: { // or - AC |= mem
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1192,7 +1393,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             set_cf(cpu, (result >> 36) & 1);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 066: { // XORM
+        case 066: { // xor - AC ^= mem
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1217,6 +1418,29 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute a floating point memory instruction
+ *
+ * Major opcodes 0400-0417. Raises X_NFPU unless FCW bit 2 (FPU enable)
+ * is set. The two-bit register field in bits 23-24 selects F0-F3 within
+ * the bank chosen by FCW bits 0-1 (4 banks x 4 = 16 registers). Bit 26
+ * ("n" mnemonic suffix) normalizes the result and bit 25 ("r" suffix)
+ * rounds it to the storage precision. Arithmetic status flags (F_OVRF /
+ * F_UNDF / F_INSG / F_ILGL, see fpu.h) are ORed into XY (a2).
+ *
+ * Single precision (one 36-bit word at EA):
+ *   0400 ldf, 0401 stf, 0402 adf, 0403 sbf, 0404 mlf, 0405 dvf
+ * Double precision (two words at EA, EA+1):
+ *   0406 ldg, 0407 stg, 0410 adg, 0411 sbg, 0412 mlg, 0413 dvg
+ * Component access (no n/r suffixes):
+ *   0414 ldexp - set the register's exponent from a signed 36-bit word
+ *                (unbiased; out of range sets F_OVRF/F_UNDF)
+ *   0415 stexp - store the (biased minus 16383) exponent
+ *   0416 ldsig - set sign and significand from a 72-bit two's complement
+ *                doubleword at EA, EA+1
+ *   0417 stsig - store sign and significand as a 72-bit two's complement
+ *                doubleword
+ */
 void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
     if ((cpu->c[C_FCW] & 4) == 0) {
         do_except(cpu, X_NFPU);
@@ -1238,7 +1462,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
     }
 
     switch ((inst >> 27) & 0x1FF) {
-        case 0400: { // LF
+        case 0400: { // ldf - load 36-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1257,7 +1481,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0401: { // STF
+        case 0401: { // stf - store 36-bit float
             int status = 0;
             uint64_t result;
             acr7k_float_t temp = {
@@ -1286,7 +1510,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0402: { // AF
+        case 0402: { // adf - add 36-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1312,7 +1536,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0403: { // SF
+        case 0403: { // sbf - subtract 36-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1339,7 +1563,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0404: { // MF
+        case 0404: { // mlf - multiply by 36-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1365,7 +1589,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0405: { // DF
+        case 0405: { // dvf - divide by 36-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1394,7 +1618,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0406: { // LG
+        case 0406: { // ldg - load 72-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1423,7 +1647,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0407: { // STG
+        case 0407: { // stg - store 72-bit float
             int status = 0;
             uint64_t result, result_l;
             acr7k_float_t temp = {
@@ -1461,7 +1685,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0410: { // AG
+        case 0410: { // adg - add 72-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1497,7 +1721,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0411: { // SG
+        case 0411: { // sbg - subtract 72-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1534,7 +1758,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0412: { // MG
+        case 0412: { // mlg - multiply by 72-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1571,7 +1795,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0413: { // DG
+        case 0413: { // dvg - divide by 72-bit float
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1609,7 +1833,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0414: { // LE
+        case 0414: { // ldexp - load exponent
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1637,7 +1861,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0415: { // STE
+        case 0415: { // stexp - store exponent
             uint64_t result = cpu->f[ac].sign_exp;
             result -= 16383;
             result &= MASK_36;
@@ -1655,7 +1879,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
 
-        case 0416: { // LS
+        case 0416: { // ldsig - load significand
             uint64_t data_h = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
             if (data_h == MEM_FAULT) {
                 do_except(cpu, X_MEMX);
@@ -1701,7 +1925,7 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
         
-        case 0417: { // STS
+        case 0417: { // stsig - store significand
             uint64_t result = 0, result_l = cpu->f[ac].signif;
             if ((cpu->f[ac].sign_exp & 0x8000)) {
                 result = (~result) & 0xFF;
@@ -1744,6 +1968,32 @@ void exec_fm(acr7k_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute a floating point register-register instruction
+ *
+ * Major opcodes 0440-0445; FPU enable is checked as in exec_fm. Three
+ * two-bit register fields select F0-F3 within the FCW bank: TGT in bits
+ * 23-24, SRC in bits 20-21, DST in bits 18-19. asm2 writes
+ * "op src, tgt[, dst]" and makes DST = TGT when only two are given:
+ *   0440 mvl - DST = SRC
+ *   0441 ngl - DST = -SRC
+ *   0442 adl - DST = SRC + TGT
+ *   0443 sbl - DST = SRC - TGT
+ *   0444 mll - DST = SRC * TGT
+ *   0445 dvl - DST = SRC / TGT
+ * Flag bits (mnemonic suffixes): 26 normalize ("n"); 25 round, to 36-bit
+ * precision ("f") or, with bit 14 also set, to 72-bit ("g"); 22 discard
+ * the result ("k") - flags and the skip test still apply. Status flags
+ * are ORed into XY (a2) as in exec_fm.
+ *
+ * Skip condition in bits 15-17, applied to the (possibly discarded)
+ * result. The ".xx" suffix names the condition under which the FOLLOWING
+ * instruction executes; the hardware skips on its complement:
+ *   1 .sk always skip          2 .lz skip unless negative
+ *   3 .zg skip unless >= 0     4 .rn skip if zero
+ *   5 .rz skip if nonzero      6 .if skip unless infinite
+ *   7 .nn skip unless NaN
+ */
 void exec_fr(acr7k_cu_t *cpu, uint64_t inst) {
     if ((cpu->c[C_FCW] & 4) == 0) {
         do_except(cpu, X_NFPU);
@@ -1762,33 +2012,33 @@ void exec_fr(acr7k_cu_t *cpu, uint64_t inst) {
     int status = 0;
 
     switch ((inst >> 27) & 0x1FF) {
-        case 0440: { // LL
+        case 0440: { // mvl - DST = SRC
             temp.sign_exp = cpu->f[src].sign_exp;
             temp.signif = cpu->f[src].signif;
         } break;
         
-        case 0441: { // NL
+        case 0441: { // ngl - DST = -SRC
             temp.sign_exp = cpu->f[src].sign_exp;
             temp.signif = cpu->f[src].signif;
             acr7k_fneg(&temp, &temp);
         } break;
         
-        case 0442: { // AL
+        case 0442: { // adl - DST = SRC + TGT
             status = acr7k_fadd(&cpu->f[src], &cpu->f[tgt], &temp);
         } break;
         
-        case 0443: { // SL
+        case 0443: { // sbl - DST = SRC - TGT
             temp.sign_exp = cpu->f[tgt].sign_exp;
             temp.signif = cpu->f[tgt].signif;
             acr7k_fneg(&temp, &temp);
             status = acr7k_fadd(&cpu->f[src], &temp, &temp);
         } break;
         
-        case 0444: { // ML
+        case 0444: { // mll - DST = SRC * TGT
             status = acr7k_fmul(&cpu->f[src], &cpu->f[tgt], &temp);
         } break;
         
-        case 0445: { // DL
+        case 0445: { // dvl - DST = SRC / TGT
             status = acr7k_fdiv(&cpu->f[src], &cpu->f[tgt], &temp);
         } break;
 
@@ -1835,6 +2085,27 @@ void exec_fr(acr7k_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute a byte instruction
+ *
+ * Major opcodes 0100-0104. Bytes are arbitrary-width bit fields of 1-36
+ * bits, PDP-10 style. Fields: data accumulator in bits 23-26, byte
+ * pointer register in bits 18-21, byte size in bits 0-5. A byte pointer
+ * packs a word address in bits 0-26 and the bit position of the byte
+ * (shift of its LSB from bit 0) in bits 27-35.
+ *   0100 ldb    - AC = byte at the pointer
+ *   0101 stb    - deposit AC into the byte at the pointer
+ *   0102 incbx  - advance the pointer; result to the AC-field register
+ *   0103 incldb - advance the pointer in place, then load the byte
+ *   0104 incstb - advance the pointer in place, then store the byte
+ * Advancing subtracts the byte size from the shift; when it runs out the
+ * shift wraps to 36-size and the word address is incremented, so
+ * consecutive bytes fill each word from the most significant end down
+ * (the asm2 ds/dsn directives pack five 7-bit characters per word at
+ * shifts 29, 22, 15, 8, 1 to match). A pointer with shift 36 points just
+ * before the first byte of its word, so a pre-incrementing loop with
+ * incldb/incstb starts there.
+ */
 void exec_bx(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t ac = (inst >> 23) & 0xF;
     uint64_t ix = (inst >> 18) & 0xF;
@@ -1844,7 +2115,7 @@ void exec_bx(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t sh = cpu->a[ix] >> 27;
     
     switch ((inst >> 27) & 0x1FF) {
-        case 0100: { // LCH
+        case 0100: { // ldb - load byte
             if (sh > 36) sh = 36;
 
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
@@ -1863,7 +2134,7 @@ void exec_bx(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = data;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 0101: { // DCH
+        case 0101: { // stb - store byte
             if (sh > 36) sh = 36;
 
             uint64_t data = read_mem(cpu, cpu->c[C_PSW] >> 28, ea);
@@ -1893,7 +2164,7 @@ void exec_bx(acr7k_cu_t *cpu, uint64_t inst) {
             
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 0102: { // ICX
+        case 0102: { // incbx - advance byte pointer
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -1902,7 +2173,7 @@ void exec_bx(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = ea | (sh << 27);
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 0103: { // ILC
+        case 0103: { // incldb - advance pointer, then load byte
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -1928,7 +2199,7 @@ void exec_bx(acr7k_cu_t *cpu, uint64_t inst) {
             cpu->a[ac] = data;
             set_pc(cpu, get_pc(cpu) + 1);
         } break;
-        case 0104: { // IDC
+        case 0104: { // incstb - advance pointer, then store byte
             sh -= bs;
             if (sh > 36) {
                 sh = (36 - bs) & 0x3F;
@@ -1973,9 +2244,24 @@ void exec_bx(acr7k_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute a local trap (one-word call gate) instruction
+ *
+ * Major opcodes 0200-0377 form 128 call gates dispatched through two
+ * 64-entry trap tables: opcodes 02xx use C_PLT (problem local trap) and
+ * 03xx use C_SLT (supervisor local trap). Bit 27 of the table register
+ * enables the group; a disabled trap raises X_USER. The low six bits of
+ * the opcode select the entry: PC = table base + entry.
+ *
+ * PLT traps save only the return PC in R15 and keep the current key.
+ * SLT traps save the entire PSW in R15 and clear the key to 0, entering
+ * supervisor state (return with retsv, which restores PSW from R15).
+ * Both leave the full instruction word in R14, so its unused low 27 bits
+ * can carry an operand such as a service call number.
+ */
 void exec_local_trap(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t opcode = ((inst >> 27) & 0x1FF);
-    if (opcode >= 0300) { // SLT, set key to 0 and save full PSW
+    if (opcode >= 0300) { // SLT: set key to 0 and save full PSW
         if (!((cpu->c[C_SLT] >> 27) & 1)) {
             do_except(cpu, X_USER);
             return;
@@ -1983,7 +2269,7 @@ void exec_local_trap(acr7k_cu_t *cpu, uint64_t inst) {
         cpu->a[15] = cpu->c[C_PSW];
         cpu->c[C_PSW] &= (1 << 27);
         set_pc(cpu, (cpu->c[C_SLT] + (opcode & 077)) & MASK_ADDR);
-    } else { // PLT, preserve key and save only program counter
+    } else { // PLT: preserve key and save only the program counter
         if (!((cpu->c[C_PLT] >> 27) & 1)) {
             do_except(cpu, X_USER);
             return;
@@ -1994,6 +2280,45 @@ void exec_local_trap(acr7k_cu_t *cpu, uint64_t inst) {
     cpu->a[14] = inst;
 }
 
+/**
+ * @brief Execute a system management instruction
+ *
+ * Major opcodes 010 and 070-076. Privileged: any nonzero key raises
+ * X_PPFS. The accumulator field (bits 23-26) is an operand register for
+ * most forms and a sub-opcode for the 010 group.
+ *
+ *   070 wait   - stop the CPU with stop code AC, resume PC = EA
+ *                (hlt = wait ac, .+1). The stop only takes effect if no
+ *                deliverable interrupt is pending; see run() for how a
+ *                stopped CPU sleeps or exits to the monitor.
+ *   071 intr   - programmed interrupt: PC = EA is recorded as the resume
+ *                point, then control enters interrupt level AC
+ *   010 sub-opcodes (in the AC field):
+ *     0 reti/retid - return from interrupt: restore the previous level's
+ *                    PSW/CW from the save area, then add EA to the
+ *                    restored PC (retid n resumes n words later)
+ *     1 retlmi     - load the interrupt mask from mem[EA], then return
+ *                    from interrupt
+ *     2 ldmask     - load the interrupt mask (popim = ldmask +1)
+ *     3 lmwait     - load the mask and wait for an interrupt; execution
+ *                    resumes at the next instruction
+ *     4 stmask     - store the interrupt mask (pushim = stmask =1)
+ *     5 invlsg     - invalidate the cached segment descriptor for EA
+ *     6 invlpg     - invalidate the TLB row for the page containing EA
+ *     7 retsv      - restore the full PSW from R15 (SLT trap return;
+ *                    retsvd additionally takes an address field, e.g. to
+ *                    pop with +n)
+ *   072 ldkey  - AC = storage key of the page containing EA
+ *   073 stkey  - set the storage key of the page at EA from AC
+ *   074 ldctl  - load control register (AC field) from mem[EA]; loading
+ *                SDR flushes non-sticky segment cache and TLB entries
+ *                (popcr = ldctl cr, +1)
+ *   075 stctl  - store control register to mem[EA] (pushcr = stctl =1)
+ *   076 ldtrt  - translate virtual address EA: on success the real
+ *                address is loaded into the accumulator selected by the
+ *                AC field and the next instruction is skipped; on
+ *                failure C_SF describes the fault and no skip occurs
+ */
 void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
     uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
     if (!key) {
@@ -2005,22 +2330,22 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
         
         uint64_t ac = (inst >> 23) & 0xF;
         switch ((inst >> 27) & 0x1FF) {
-            case 070: { // HLT
+            case 070: { // wait (hlt = wait ac, .+1)
                 halt(cpu);
                 cpu->stop_code = cpu->a[ac];
                 set_pc(cpu, ea);
             } break;
-            case 071: { // INT
+            case 071: { // intr - programmed interrupt to level AC
                 set_pc(cpu, ea);
                 do_intr(cpu, ac);
             } break;
-            case 010: { // various
+            case 010: { // sub-opcode in the AC field
                 switch (ac) {
-                    case 0: { // RFI
+                    case 0: { // reti/retid - return from interrupt
                         leave_intr(cpu);
                         set_pc(cpu, get_pc(cpu) + ea);
                     } break;
-                    case 1: { // RMSK
+                    case 1: { // retlmi - load mask, return from interrupt
                         uint64_t data = read_mem(cpu, 0, ea);
                         if (data == MEM_FAULT) {
                             do_except(cpu, X_MEMX);
@@ -2031,7 +2356,7 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                         intr_set_mask(cpu, data);
                         leave_intr(cpu);
                     } break;
-                    case 2: { // LDMSK
+                    case 2: { // ldmask (popim = ldmask +1)
                         uint64_t data = read_mem(cpu, 0, ea);
                         if (data == MEM_FAULT) {
                             do_except(cpu, X_MEMX);
@@ -2042,7 +2367,7 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                         intr_set_mask(cpu, data);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 3: { // MWAIT
+                    case 3: { // lmwait - load mask and wait for interrupt
                         uint64_t data = read_mem(cpu, 0, ea);
                         if (data == MEM_FAULT) {
                             do_except(cpu, X_MEMX);
@@ -2054,7 +2379,7 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                         halt(cpu);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 4: { // STMSK
+                    case 4: { // stmask (pushim = stmask =1)
                         uint64_t w_res = write_mem(cpu, 0, ea, cpu->mask);
                         if (w_res == MEM_FAULT) {
                             do_except(cpu, X_MEMX);
@@ -2062,15 +2387,15 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                         }
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 5: { // INVSM
+                    case 5: { // invlsg - invalidate segment cache row
                         seg_invalidate(cpu, ea >> 18);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 6: { // INVPG
+                    case 6: { // invlpg - invalidate TLB row
                         tlb_invalidate(cpu, (ea >> 9) & 0x1F);
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
-                    case 7: { // SLR
+                    case 7: { // retsv - restore PSW from R15
                         cpu->c[C_PSW] = cpu->a[15];
                     } break;
                     default: {
@@ -2079,16 +2404,17 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                     }
                 }
             } break;
-            case 072: { // LDK
+            case 072: { // ldkey - AC = page storage key
                 ea &= ~(0x1FF);
                 if (ea < cpu->mem_size) {
                     cpu->a[ac] = cpu->memory[ea] >> 36;
                 } else {
                     do_except(cpu, X_MEMX);
+                    return;
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 073: { // STK
+            case 073: { // stkey - set page storage key from AC
                 uint64_t w_res = set_key(cpu, cpu->a[ac], ea);
                 if (w_res == MEM_FAULT) {
                     do_except(cpu, X_MEMX);
@@ -2096,7 +2422,7 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 074: { // LCT
+            case 074: { // ldctl (popcr = ldctl cr, +1)
                 uint64_t data = read_mem(cpu, 0, ea);
                 if (data == MEM_FAULT) {
                     do_except(cpu, X_MEMX);
@@ -2111,7 +2437,7 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 075: { // STCTL
+            case 075: { // stctl (pushcr = stctl cr, =1)
                 uint64_t w_res = write_mem(cpu, 0, ea, cpu->c[ac & 0x7]);
                 if (w_res == MEM_FAULT) {
                     do_except(cpu, X_MEMX);
@@ -2119,7 +2445,7 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                 }
                 set_pc(cpu, get_pc(cpu) + 1);
             } break;
-            case 076: { // LXRT
+            case 076: { // ldtrt - translate virtual address, skip if OK
                 uint64_t vaddress = ea & MASK_ADDR;
         
                 seg_cache_t *seg = seg_lookup(cpu, vaddress >> 18);
@@ -2148,7 +2474,7 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                     address = entry->pg_base + (vaddress & 0x1FF);
                 }
                 
-                cpu->c[ac] = address;
+                cpu->a[ac] = address;
                 set_pc(cpu, get_pc(cpu) + 2);
             } break;
             default: {
@@ -2162,8 +2488,33 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Execute a programmed I/O instruction
+ *
+ * Major opcode 0640, privileged (nonzero key raises X_PPFS). Fields:
+ * accumulator bits 23-26, control pulse bits 16-17, transfer code bits
+ * 12-15, device id bits 0-11. The handler registered in cpu->io[device]
+ * receives the accumulator value plus the ctl and transfer codes; a
+ * missing device raises X_DEVX. What each transfer code addresses is up
+ * to the device, but the direction is fixed: even codes below 14 store
+ * the handler's result into the accumulator (device-to-CPU), odd codes
+ * are CPU-to-device only.
+ *
+ * asm2 encodes transfer = 2 x device register + direction:
+ *   rio ac, r, dev  - read device register r  (transfer 2r)
+ *   wio ac, r, dev  - write device register r (transfer 2r+1)
+ *   nio dev         - no transfer             (transfer 15)
+ * each optionally suffixed with a control pulse: -s(tart) ctl 1,
+ * -c(lear) ctl 2, -p(ulse) ctl 3 (e.g. nios, wioc).
+ *
+ * Transfer 14 is the status skip test: the handler returns Busy in bit 0
+ * and Done in bit 1, and ctl selects the condition as commented below:
+ *   tionb - skip if busy       tiobz - skip if not busy
+ *   tiond - skip if done       tiodn - skip if not done
+ * (so "tiond dev / jmp .-1" spins until the device is done).
+ */
 void exec_io1(acr7k_cu_t *cpu, uint64_t inst) {
-    
+
     uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
     if (!key) {
         uint64_t device = inst & 0xFFF;
@@ -2216,6 +2567,69 @@ void exec_io1(acr7k_cu_t *cpu, uint64_t inst) {
     }
 }
 
+/**
+ * @brief Evaluate an ALU (register-register) operation
+ *
+ * All words whose top three bits are 111 (leading octal digit 7) are ALU
+ * operations. Common fields:
+ *   bit  32     high bit of the ALU opcode
+ *   bit  31     no-load ("n" suffix): update carry/skip, discard result
+ *               (used by the canned cmp* mnemonics)
+ *   bits 27-30  ACS, source accumulator (operand a)
+ *   bits 23-26  ACD, destination accumulator (operand b)
+ *   bits 20-22  low three bits of the ALU opcode
+ *   bits 18-19  carry init: 0 keep, 1 zero ("z"), 2 one ("s"), 3
+ *               complement ("c")
+ *   bits 15-17  skip condition (below)
+ *   bit  14     mode, bit 13 submode - select one of three encodings:
+ *
+ * mode 0, "r"/"m" mnemonic forms - rotate and mask:
+ *   bit 13    rotate through carry, 37 bits ("t" suffix); otherwise
+ *             rotate 36 bits leaving the carry alone
+ *   bit 12    negate the mask count ("r" flag after an "m" form)
+ *   bits 6-11 mask count: after rotating, fill the top mk bits (bottom
+ *             -mk bits if negated) of the result with the carry value
+ *   bits 0-5  left rotate count (0-63, effectively mod 36/37)
+ *   asm2: "xxxr acs, acd[, rotate[, mask]]" with rotate first, or
+ *         "xxxm acs, acd[, mask[, rotate]]" with mask first
+ *
+ * mode 1 submode 0, "s" form - shift, with alternate destination:
+ *   bits 6-9  destination register, written instead of ACD (see the ADR
+ *             handling in exec_all)
+ *   bit 12    shift right instead of left ("r" flag)
+ *   bits 0-5  shift count; the vacated bit positions are filled with the
+ *             initialized carry, so "z" gives a logical shift
+ *   asm2: "xxxs acs, acd, dst[, count]"
+ *
+ * mode 1 submode 1, "i" form - immediate:
+ *   bits 0-12 signed 13-bit immediate used in place of operand b
+ *   asm2: "xxxi acs, acd, imm"
+ *
+ * ALU opcodes (bit 32, bits 20-22 - asm2 three-letter base mnemonics):
+ *   00 com (~a), 01 ngt (-a), 02 mov (a), 03 inc (a+1), 04 adc (~a+b),
+ *   05 sub (b-a), 06 add (a+b), 07 and, 12 bis (a|b), 16 xor,
+ *   17 pct (population count of a)
+ * As on the DG Nova the carry is never added into a sum; arithmetic ops
+ * merely invert the initialized carry when they carry/borrow out.
+ *
+ * Skip conditions (see skip() in alu.c). The asm2 ".xx" suffix names the
+ * condition under which the FOLLOWING instruction executes; the hardware
+ * skips on its complement:
+ *   0 never (no suffix)        1 .sk always skip
+ *   2 .cn skip if carry zero   3 .cz skip if carry one
+ *   4 .rn skip if result zero  5 .rz skip if result nonzero
+ *   6 .bn skip if result zero or carry zero
+ *   7 .bz skip if result nonzero and carry one
+ * The canned compares are no-load subtracts using these tests: after
+ * "cmp/cmpne/cmplt/cmple/cmpgt/cmpge a, b" the next instruction executes
+ * if a ==/!=/</<=/>/>= b (unsigned).
+ *
+ * @param inst Instruction
+ * @param a Value of ACS
+ * @param b Value of ACD (ignored for the immediate form)
+ * @param c Current carry flag
+ * @return ALU result: bits 0-35 value, bit 36 carry, bit 37 skip
+ */
 uint64_t exec_aa(
     uint64_t inst,
     uint64_t a, uint64_t b, int c
@@ -2261,9 +2675,32 @@ uint64_t exec_aa(
     return result;
 }
 
+/**
+ * @brief Decode and execute one instruction
+ *
+ * Dispatch on the major opcode, the top nine bits (first three octal
+ * digits) of the instruction word:
+ *   7xx        ALU register-register group     (exec_aa, handled here)
+ *   000        jumps, memory test/skips, calls (exec_mr)
+ *   001        fixed point multiply/divide     (exec_md)
+ *   010, 070-076  system management            (exec_smi)
+ *   041-066    accumulator-memory group        (exec_am)
+ *   0100-0104  byte load/store                 (exec_bx)
+ *   0200-0377  local traps, PLT/SLT            (exec_local_trap)
+ *   0400-0417  floating point memory ops       (exec_fm)
+ *   0440-0445  floating point register ops     (exec_fr)
+ *   0640       programmed I/O                  (exec_io1)
+ * Anything else raises the illegal instruction exception.
+ *
+ * For the ALU group this function also applies the result: it is written
+ * to ACD unless the no-load bit 31 is set - or, for the "s" (shift/ADR)
+ * encoding recognized by bits 13-14 == 10, to the alternate destination
+ * register in bits 6-9. Carry comes from bit 36 of the ALU result and a
+ * skip (PC += 2) is taken if the selected condition put a 1 in bit 37.
+ */
 void exec_all(acr7k_cu_t *cpu, uint64_t inst) {
     cpu->inst = inst;
-    
+
     if (inst >> 33 == 0x7) { // ALU operation
         uint64_t acs = (inst >> 27) & 0xF;
         uint64_t acd = (inst >> 23) & 0xF;
@@ -2361,6 +2798,29 @@ static void cpu_throttle(acr7k_cu_t *cpu) {
     }
 }
 
+/**
+ * @brief CPU thread main loop
+ *
+ * Each iteration executes a pending edit target if one is staged (see
+ * exec_am: an edit target runs in place of the next fetch, and edits
+ * then advances PC once more to skip the following instruction), takes
+ * the best pending interrupt if its level beats the current IRQL (CW
+ * bits 32-35), fetches and executes one instruction, and finally commits
+ * any deferred indirect-pointer writeback (do_inc, see comp_mr) and SP
+ * update (do_stack) - deferred so that a faulting instruction can be
+ * retried after e.g. a page-in.
+ *
+ * Interrupt entry (do_intr in cpu.h) vectors through low memory: words
+ * 2n and 2n+1 hold the new PSW and the CW direct-page bits for level n,
+ * and the interrupted PSW/CW pair is stashed at words 32+2*irql and
+ * 33+2*irql for leave_intr (reti) to restore. Level 0 is the exception
+ * level; do_except additionally deposits the X_* code in CW bits 24-27.
+ *
+ * When the CPU stops (wait/hlt/lmwait): at IRQL 0, or with an all-zero
+ * interrupt mask, nothing could ever wake it, so the thread exits back
+ * to the monitor; otherwise it sleeps on intr_cond until a device
+ * asserts an unmasked interrupt.
+ */
 void *run(void *vctx) {
     acr7k_cu_t *cpu = (acr7k_cu_t *) vctx;
 
@@ -2505,11 +2965,25 @@ void destroy_cpu(acr7k_cu_t *cpu) {
     fprintf(stderr, "CPU: deinitialized\n");
 }
 
+/*
+ * Interactive monitor. Commands operate on a current octal pointer:
+ *   /addr   set the pointer         ?       print the pointer
+ *   .n      dump n words            =v ...  deposit octal words
+ *   G[W|S]  set PC to the pointer (GW: run until halt, GS: run detached)
+ *   W       run until halt          S       single step
+ *   P       pause the CPU           F       print the FP registers
+ *   Tn      throttle to n memory accesses/ms (bare T disables)
+ *   X       exit
+ * The device set is hardcoded below. The words preloaded at 01000 are
+ * the assembled not_vibe_code/rimldr.a700, a relocatable loader for the
+ * paper tape (RIM) format emitted by asm2; monitor.ppt is mounted in the
+ * tape reader for it.
+ */
 int main(int argc, char *argv[]) {
     acr7k_cu_t cpu;
-    
-    
-    
+
+
+
     init_cpu(&cpu, 262144, 512);
 
     init_panel(&cpu, 16);
