@@ -153,6 +153,10 @@ static inline void set_pc(acr7k_cu_t *cpu, uint32_t new) {
     cpu->c[C_PSW] = (cpu->c[C_PSW] & ~MASK_ADDR) | (new & MASK_ADDR);
 }
 
+static inline uint64_t make_pc(acr7k_cu_t *cpu, uint32_t new) {
+    return (cpu->c[C_PSW] & ~MASK_ADDR) | (new & MASK_ADDR);
+}
+
 static inline int get_cf(acr7k_cu_t *cpu) {
     return !!(cpu->c[C_PSW] & (MASK_ADDR + 1));
 }

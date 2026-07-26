@@ -48,6 +48,7 @@
 #include "alu.h"
 #include "fpu.h"
 #include "cpu.h"
+#include "include/cpu.h"
 #include "ppt.h"
 #include "pch.h"
 #include "lpt.h"
@@ -2266,7 +2267,7 @@ void exec_local_trap(acr7k_cu_t *cpu, uint64_t inst) {
             do_except(cpu, X_USER);
             return;
         }
-        cpu->a[15] = cpu->c[C_PSW];
+        cpu->a[15] = make_pc(cpu, get_pc(cpu) + 1);
         cpu->c[C_PSW] &= (1 << 27);
         set_pc(cpu, (cpu->c[C_SLT] + (opcode & 077)) & MASK_ADDR);
     } else { // PLT: preserve key and save only the program counter
@@ -2274,7 +2275,7 @@ void exec_local_trap(acr7k_cu_t *cpu, uint64_t inst) {
             do_except(cpu, X_USER);
             return;
         }
-        cpu->a[15] = get_pc(cpu);
+        cpu->a[15] = (get_pc(cpu) + 1) & MASK_ADDR;
         set_pc(cpu, (cpu->c[C_PLT] + (opcode & 077)) & MASK_ADDR);
     }
     cpu->a[14] = inst;
@@ -2396,7 +2397,8 @@ void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
                         set_pc(cpu, get_pc(cpu) + 1);
                     } break;
                     case 7: { // retsv - restore PSW from R15
-                        cpu->c[C_PSW] = cpu->a[15];
+                        uint64_t new_pc = (cpu->a[15] + ea) & MASK_ADDR;
+                        cpu->c[C_PSW] = (cpu->a[15] & ~MASK_ADDR) | new_pc;
                     } break;
                     default: {
                         // Illegal
