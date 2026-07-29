@@ -44,7 +44,8 @@ temp3:      bss         1
         
             origin      1024
 
-ipl:        ldea        x0, .usr_rst
+ipl:        nioc        #00a            ; stop ppt 00a
+            ldea        x0, .usr_rst
             ldea        x1, .usr_save
             ld          0(x0)
             st          0(x1)

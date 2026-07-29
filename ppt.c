@@ -20,7 +20,7 @@ typedef struct {
     
     pthread_mutex_t lock;
     pthread_cond_t cmd_cond;
-    int running, command, done;
+    int loaded, running, command, done;
 } acr7k_ppt_t;
 
 static inline int msleep(long msec) {
@@ -47,6 +47,8 @@ void *ppt(void *vctx) {
     acr7k_cu_t *cpu = ctx->cpu;
     
     ctx->running = 1;
+    int whirr_count = 0;
+    
     while (ctx->running) {
         pthread_mutex_lock(&ctx->lock);
         while (!ctx->command) {
@@ -63,26 +65,39 @@ void *ppt(void *vctx) {
         
         else if (command == 1) {
             msleep(2);
-            int ch = fgetc(ctx->file);
-            if (ch == EOF) {
-                // fclose(ctx->file);
-                ctx->running = 0;
-                ctx->buf = 0;
-                fprintf(
-                    stderr,
-                    "PPT: %04o End of tape\n", ctx->id
-                );
+            if (ctx->loaded) {
+                int ch = fgetc(ctx->file);
+                if (ch == EOF) {
+                    pthread_mutex_lock(&ctx->lock);
+                    fclose(ctx->file);
+                    ctx->loaded = 0;
+                    pthread_mutex_unlock(&ctx->lock);
+                    
+                    fprintf(
+                        stderr,
+                        "PPT: %04o End of tape\n", ctx->id
+                    );
+                } else {
+                    ctx->buf = (uint8_t) ch;
+                    whirr_count = 0;
+                    
+                    pthread_mutex_lock(&ctx->lock);
+                    ctx->command = 0;
+                    if (!ctx->done) {
+                        ctx->done = 1;
+                        intr_assert(cpu, ctx->irq);
+                    }
+                    pthread_mutex_unlock(&ctx->lock);
+                }
             } else {
-                ctx->buf = (uint8_t) ch;
+                whirr_count = (whirr_count + 1) % 2048;
+                if (whirr_count == 0) {
+                    fprintf(
+                        stderr,
+                        "PPT: %04o whirrrrrrrr...\n", ctx->id
+                    );
+                }
             }
-            
-            pthread_mutex_lock(&ctx->lock);
-            ctx->command = 0;
-            if (!ctx->done) {
-                ctx->done = 1;
-                intr_assert(cpu, ctx->irq);
-            }
-            pthread_mutex_unlock(&ctx->lock);
         }
     }
     
@@ -143,7 +158,7 @@ void destroy_ppt(acr7k_cu_t *cpu, int id) {
     
     pthread_mutex_destroy(&ctx->lock);
     pthread_cond_destroy(&ctx->cmd_cond);
-    fclose(ctx->file);
+    if (ctx->loaded) fclose(ctx->file);
     free(ctx);
     
     fprintf(stderr, "PPT: %04o deinitialized\n", id);
@@ -159,6 +174,7 @@ void init_ppt_any(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
     ctx->id = id;
     ctx->irq = irq;
     ctx->file = fd;
+    if (fd != NULL) ctx->loaded = 1;
     
     pthread_mutex_init(&ctx->lock, NULL);
     pthread_cond_init(&ctx->cmd_cond, NULL);
