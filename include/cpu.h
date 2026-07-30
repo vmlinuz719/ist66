@@ -35,6 +35,18 @@ typedef uint64_t (*acr7k_io_t) (
     int /* transfer */
 );
 
+enum media_cmd {
+    MEDIA_SET,
+    MEDIA_UNSET,
+    MEDIA_GET
+};
+
+typedef int (*acr7k_media_cmd_t) (
+    void * /* ctx */,
+    enum media_cmd /* command */,
+    char * /* argument */
+);
+
 typedef void (*acr7k_io_dtor_t) (
     acr7k_cu_t * /* cpu */,
     int /* id */
@@ -77,6 +89,7 @@ struct acr7k_cu {
     
     acr7k_io_dtor_t *io_destroy;
     acr7k_io_t *io;
+    acr7k_media_cmd_t *media;
     void **ioctx;
     int max_io;
     
