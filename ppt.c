@@ -21,6 +21,8 @@ typedef struct {
     pthread_mutex_t lock;
     pthread_cond_t cmd_cond;
     int loaded, running, command, done;
+    
+    char media_name[256];
 } acr7k_ppt_t;
 
 static inline int msleep(long msec) {
@@ -149,6 +151,59 @@ uint64_t ppt_io(
     else return 0;
 }
 
+int media (
+    void *vctx,
+    enum media_cmd command,
+    char *argument
+) {
+    acr7k_ppt_t *ctx = (acr7k_ppt_t *) vctx;
+    
+    switch (command) {
+        case MEDIA_GET: {
+            snprintf(argument, sizeof(ctx->media_name), "%s", ctx->media_name);
+        } break;
+        
+        case MEDIA_SET: {
+            pthread_mutex_lock(&ctx->lock);
+            
+            if (ctx->loaded) {
+                fclose(ctx->file);
+                ctx->loaded = 0;
+            }
+            
+            FILE *fd = fopen(argument, "rb");
+            if (fd == NULL) {
+                pthread_mutex_unlock(&ctx->lock);
+                fprintf(stderr, "PPT: file error\n");
+                return -1;
+            }
+            
+            ctx->file = fd;
+            ctx->loaded = 1;
+            snprintf(ctx->media_name, sizeof(ctx->media_name), "%s", argument);
+            
+            fprintf(stderr, "PPT: file %s\n", argument);
+            
+            pthread_mutex_unlock(&ctx->lock);
+        } break;
+        
+        case MEDIA_UNSET: {
+            pthread_mutex_lock(&ctx->lock);
+            
+            if (ctx->loaded) {
+                fclose(ctx->file);
+                ctx->loaded = 0;
+            }
+            
+            fprintf(stderr, "PPT: unloaded\n");
+            
+            pthread_mutex_unlock(&ctx->lock);
+        } break;
+    }
+    
+    return 0;
+}
+
 void destroy_ppt(acr7k_cu_t *cpu, int id) {
     acr7k_ppt_t *ctx = (acr7k_ppt_t *) cpu->ioctx[id];
     
@@ -169,6 +224,7 @@ void init_ppt_any(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_ppt;
     cpu->io[id] = ppt_io;
+    cpu->media[id] = media;
     
     ctx->cpu = cpu;
     ctx->id = id;
@@ -183,8 +239,8 @@ void init_ppt_any(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
 }
 
 void init_ppt(acr7k_cu_t *cpu, int id, int irq) {
-    init_ppt_any(cpu, id, irq, stdin);
-    fprintf(stderr, "PPT: %04o IRQ %02o, file STDIN\n", id, irq);
+    init_ppt_any(cpu, id, irq, NULL);
+    fprintf(stderr, "PPT: %04o IRQ %02o\n", id, irq);
 }
 
 void init_ppt_ex(acr7k_cu_t *cpu, int id, int irq, char *fname) {

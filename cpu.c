@@ -2906,6 +2906,7 @@ void init_cpu(acr7k_cu_t *cpu, uint64_t mem_size, int max_io) {
     
     cpu->io_destroy = calloc(sizeof(acr7k_io_dtor_t), max_io);
     cpu->io = calloc(sizeof(acr7k_io_t), max_io);
+    cpu->media = calloc(sizeof(acr7k_media_cmd_t), max_io);
     cpu->ioctx = calloc(sizeof(void *), max_io);
     cpu->max_io = max_io;
     cpu->mask = 0xFFFF;
@@ -2960,6 +2961,7 @@ void destroy_cpu(acr7k_cu_t *cpu) {
     free(cpu->memory);
     free(cpu->io_destroy);
     free(cpu->io);
+    free(cpu->media);
     free(cpu->ioctx);
     pthread_mutex_destroy(&cpu->lock);
     pthread_cond_destroy(&cpu->intr_cond);
@@ -3183,6 +3185,26 @@ int main(int argc, char *argv[]) {
             
             else if (cmd[i] == 'X') {
                 running = 0;
+            }
+            
+            else if (cmd[i] == 'M') {
+                if (ptr >= cpu.max_io || cpu.media[ptr] == NULL) {
+                    printf("? Unsupported\n");
+                    continue;
+                }
+                
+                i++;
+                while (
+                    (cmd[i] == ' ' || cmd[i] == '\t')
+                    && i < sizeof(cmd) - 1
+                ) i++;
+                
+                if (cmd[i] == '\0') {
+                    cpu.media[ptr](cpu.ioctx[ptr], MEDIA_UNSET, NULL);
+                } else {
+                    cpu.media[ptr](cpu.ioctx[ptr], MEDIA_SET, &cmd[i]);
+                }
+                
             }
         }
     }
