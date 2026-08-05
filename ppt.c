@@ -151,7 +151,7 @@ uint64_t ppt_io(
     else return 0;
 }
 
-int media (
+int ppt_media (
     void *vctx,
     enum media_cmd command,
     char *argument
@@ -224,7 +224,7 @@ void init_ppt_any(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_ppt;
     cpu->io[id] = ppt_io;
-    cpu->media[id] = media;
+    cpu->media[id] = ppt_media;
     
     ctx->cpu = cpu;
     ctx->id = id;

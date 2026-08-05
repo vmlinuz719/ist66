@@ -20,7 +20,9 @@ typedef struct {
     
     pthread_mutex_t lock;
     pthread_cond_t cmd_cond;
-    int running, command, done;
+    int loaded, running, command, done;
+    
+    char media_name[256];
 } acr7k_pch_t;
 
 static inline int msleep(long msec) {
@@ -47,6 +49,8 @@ void *pch(void *vctx) {
     acr7k_cu_t *cpu = ctx->cpu;
     
     ctx->running = 1;
+    int buzz_count = 0;
+    
     while (ctx->running) {
         pthread_mutex_lock(&ctx->lock);
         while (!ctx->command) {
@@ -62,7 +66,20 @@ void *pch(void *vctx) {
         }
         
         else if (command == 1) {
-            fputc(ctx->buf, ctx->file);
+            if (ctx->loaded) {
+                fputc(ctx->buf, ctx->file);
+                buzz_count = 0;
+            } else {
+                buzz_count = (buzz_count + 1) % 256;
+                if (buzz_count == 0) {
+                    fprintf(
+                        stderr,
+                        "PCH: %04o BZZZZZZZZZT!!!\n", ctx->id
+                    );
+                }
+            }
+        
+        
             msleep(16);
             
             pthread_mutex_lock(&ctx->lock);
@@ -123,6 +140,59 @@ uint64_t pch_io(
     else return 0;
 }
 
+int pch_media (
+    void *vctx,
+    enum media_cmd command,
+    char *argument
+) {
+    acr7k_pch_t *ctx = (acr7k_pch_t *) vctx;
+    
+    switch (command) {
+        case MEDIA_GET: {
+            snprintf(argument, sizeof(ctx->media_name), "%s", ctx->media_name);
+        } break;
+        
+        case MEDIA_SET: {
+            pthread_mutex_lock(&ctx->lock);
+            
+            if (ctx->loaded) {
+                fclose(ctx->file);
+                ctx->loaded = 0;
+            }
+            
+            FILE *fd = fopen(argument, "wb");
+            if (fd == NULL) {
+                pthread_mutex_unlock(&ctx->lock);
+                fprintf(stderr, "PCH: file error\n");
+                return -1;
+            }
+            
+            ctx->file = fd;
+            ctx->loaded = 1;
+            snprintf(ctx->media_name, sizeof(ctx->media_name), "%s", argument);
+            
+            fprintf(stderr, "PCH: file %s\n", argument);
+            
+            pthread_mutex_unlock(&ctx->lock);
+        } break;
+        
+        case MEDIA_UNSET: {
+            pthread_mutex_lock(&ctx->lock);
+            
+            if (ctx->loaded) {
+                fclose(ctx->file);
+                ctx->loaded = 0;
+            }
+            
+            fprintf(stderr, "PCH: unloaded\n");
+            
+            pthread_mutex_unlock(&ctx->lock);
+        } break;
+    }
+    
+    return 0;
+}
+
 void destroy_pch(acr7k_cu_t *cpu, int id) {
     acr7k_pch_t *ctx = (acr7k_pch_t *) cpu->ioctx[id];
     
@@ -132,7 +202,7 @@ void destroy_pch(acr7k_cu_t *cpu, int id) {
     
     pthread_mutex_destroy(&ctx->lock);
     pthread_cond_destroy(&ctx->cmd_cond);
-    fclose(ctx->file);
+    if (ctx->loaded) fclose(ctx->file);
     free(ctx);
     
     fprintf(stderr, "PCH: %04o deinitialized\n", id);
@@ -143,11 +213,13 @@ void init_pch_any(acr7k_cu_t *cpu, int id, int irq, FILE *fd) {
     cpu->ioctx[id] = ctx;
     cpu->io_destroy[id] = destroy_pch;
     cpu->io[id] = pch_io;
+    cpu->media[id] = pch_media;
     
     ctx->cpu = cpu;
     ctx->id = id;
     ctx->irq = irq;
     ctx->file = fd;
+    if (fd != NULL) ctx->loaded = 1;
     
     pthread_mutex_init(&ctx->lock, NULL);
     pthread_cond_init(&ctx->cmd_cond, NULL);
