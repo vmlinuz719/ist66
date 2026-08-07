@@ -334,8 +334,16 @@ int acr7k_fconorm(
         return F_INSG;
     }
 
+    /*
+     * The lesser operand keeps its OWN sign. It used to inherit the sign of the
+     * greater-exponent operand, which is invisible for normalized operands --
+     * alignment only shrinks the lesser significand, so greater exponent implies
+     * greater magnitude and the two signs agree. With an unnormalized operand
+     * the aligned lesser can outweigh the greater, acr7k_fadd then selects the
+     * result sign from it, and the answer comes back with the wrong sign.
+     */
     if (diff_exp == 64) {
-        dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
+        dst_l->sign_exp = greater_exp | (lesser.sign_exp & 0x8000);
         dst_l->signif   = (lesser.signif >> 63) & 1;   // just the round bit
         return 0;
     }
@@ -343,10 +351,10 @@ int acr7k_fconorm(
     if (diff_exp) {
         uint64_t round_one = (lesser.signif >> (diff_exp - 1)) & 1;
         uint64_t new_signif = (lesser.signif >> diff_exp) + round_one;
-        dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
+        dst_l->sign_exp = greater_exp | (lesser.sign_exp & 0x8000);
         dst_l->signif = new_signif;
     } else {
-        dst_l->sign_exp = greater_exp | (dst_g->sign_exp & 0x8000);
+        dst_l->sign_exp = greater_exp | (lesser.sign_exp & 0x8000);
         dst_l->signif = lesser.signif;
     }
 
@@ -563,11 +571,18 @@ int acr7k_fdiv(
     a <<= 64;
     unsigned __int128 c_lll = a / b;
     
+    /*
+     * The quotient is scaled by 2^64 but a significand is scaled by 2^63, so one
+     * right shift is always required; the loop below shifts further to renormalize
+     * an oversized quotient, which only occurs when the divisor is unnormalized.
+     * Round half-up ONCE, on the last bit discarded -- round_one must therefore
+     * not be applied here, only after the final shift.
+     */
     int round_one = c_lll & 1;
-    c_lll = (c_lll >> 1) + round_one;
-    
+    c_lll = (c_lll >> 1);
+
     int exp_dst = exp_src - exp_tgt;
-    
+
     unsigned __int128 mask = 0xFFFFFFFFFFFFFFFF;
     mask <<= 64;
     while ((c_lll & mask)) {
