@@ -1115,19 +1115,8 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             
             ldea        ac, 12
             wio         ac, 0, #01c
+            ldea        ac, .chpgm
             wios        ac, 1, #01c
-            
-            ldea        ac, 5
-            wio         ac, 0, #02c
-            wios        ac, 1, #02c
-            
-            ldea        ac, 11
-            wio         ac, 0, #01c
-            wios        ac, 1, #01c
-            
-            ldea        ac, 7
-            wio         ac, 0, #02c
-            wios        ac, 1, #02c
 
             hlt
             
@@ -1138,6 +1127,11 @@ lic_fail:   ldea        x0, .msg_licens
             wio         ac, 1, #010
             ldctl       psw1, .zero
             hlt
+
+chpgm:      dw          0001012345670
+            dw          0211012345670
+            dw          0421012345670
+            dw          0630012345670
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

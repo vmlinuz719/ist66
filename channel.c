@@ -8,6 +8,8 @@
 
 #include "cpu.h"
 
+#define MASK_36 0xFFFFFFFFFL
+
 static inline int msleep(long msec) {
     struct timespec ts;
     int res;
@@ -101,6 +103,7 @@ void *subch(void *vctx) {
     free(vctx);
 
     acr7k_subch_t *subchannel = &(channel->subchannel[sc_id]);
+    acr7k_cu_t *cpu = channel->cpu;
     
     subchannel->running = 1;
     
@@ -120,20 +123,45 @@ void *subch(void *vctx) {
         }
         
         else {
-            fprintf(
-                stderr, "MSC: %03X.%01X busy\n",
-                channel->id, sc_id
-            );
-            
-            msleep(1000);
-            
-            fprintf(
-                stderr, "MSC: %03X.%01X done\n",
-                channel->id, sc_id
-            );
+            while (subchannel->running && subchannel->command) {
+                // fetch CCW
+                // first fail out if CAW is not valid
+                if (subchannel->caw >= cpu->mem_size) {
+                    // TODO: handle CCW load check
+                    fprintf(stderr, "MSC: %04o:%02o CCW Load Check\n", channel->id, sc_id);
+                    subchannel->command = 0;
+                    break;
+                }
+                
+                uint64_t ccw = cpu->memory[subchannel->caw] & MASK_36;
+                
+                uint64_t opcode = (ccw >> 30) & 0xF;
+                uint64_t op_type = ccw >> 34;
+                uint64_t chain = (ccw >> 27) & 1;
+                uint64_t data_addr = ccw & MASK_ADDR;
+                
+                const char *ops[] = {
+                    "SENSE",
+                    "CONTROL",
+                    "READ",
+                    "WRITE"
+                };
+                
+                fprintf(stderr, "MSC: %04o:%02o CCW %s(%02o, %09o)\n",
+                    channel->id, sc_id, ops[op_type], (unsigned int) opcode, (unsigned int) data_addr);
+                
+                if (chain) {
+                    subchannel->caw++;
+                    msleep(100);
+                } else {
+                    fprintf(stderr, "MSC: %04o:%02o CCW End Program\n", channel->id, sc_id);
+                    subchannel->command = 0;
+                    break;
+                }
+            }
             
             pthread_mutex_lock(&channel->status_lock);
-            subchannel->command = 0;
+            if (subchannel->command != -1) subchannel->command = 0;
             set_done(channel, sc_id);
             pthread_mutex_unlock(&channel->status_lock);
         }
