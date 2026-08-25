@@ -139,6 +139,8 @@ void *subch(void *vctx) {
         }
     }
     
+    fprintf(stderr, "MSC: %04o:%02o detached\n", channel->id, sc_id);
+    
     return NULL;
 }
 
@@ -228,6 +230,47 @@ void destroy_msch(acr7k_cu_t *cpu, int id) {
     fprintf(stderr, "MSC: %04o deinitialized\n", id);
 }
 
+int sc_attach(acr7k_cu_t *cpu, int id, int sc_id) {
+    acr7k_msch_t *ctx = (acr7k_msch_t *) cpu->ioctx[id];// Unsafe horrible hack
+    
+    if (sc_id < 0 || sc_id > 15) {
+        fprintf(stderr, "MSC: %04o invalid subchannel %02o\n", id, sc_id);
+        return -1;
+    }
+    
+    else if (ctx->subchannel[sc_id].running) {
+        fprintf(stderr, "MSC: %04o:%02o already attached\n", id, sc_id);
+        return -1;
+    }
+    
+    msch_arg_t *msch_arg = malloc(sizeof(msch_arg_t));
+    msch_arg->msch = ctx;
+    msch_arg->subchannel = sc_id;
+    pthread_create(&ctx->subchannel[sc_id].thread, NULL, subch, msch_arg);
+    
+    fprintf(stderr, "MSC: %04o:%02o attached\n", id, sc_id);
+    return 0;
+}
+
+int sc_detach(acr7k_cu_t *cpu, int id, int sc_id) {
+    acr7k_msch_t *ctx = (acr7k_msch_t *) cpu->ioctx[id];// Unsafe horrible hack
+    
+    if (sc_id < 0 || sc_id > 15) {
+        fprintf(stderr, "MSC: %04o invalid subchannel %02o\n", id, sc_id);
+        return -1;
+    }
+    
+    else if (!ctx->subchannel[sc_id].running) {
+        fprintf(stderr, "MSC: %04o:%02o already detached\n", id, sc_id);
+        return -1;
+    }
+    
+    ctx->subchannel[sc_id].running = 0;
+    // TODO: call some kind of detach handler?
+    pthread_cancel(ctx->subchannel[sc_id].thread);
+    return 0;
+}
+
 void init_msch(acr7k_cu_t *cpu, int id, int irq) {
     acr7k_msch_t *ctx = calloc(sizeof(acr7k_msch_t), 1);
     cpu->ioctx[id] = ctx;
@@ -243,12 +286,9 @@ void init_msch(acr7k_cu_t *cpu, int id, int irq) {
     pthread_mutex_init(&ctx->status_lock, NULL);
     
     for (int i = 0; i < 16; i++) {
-        msch_arg_t *msch_arg = malloc(sizeof(msch_arg_t));
-        msch_arg->msch = ctx;
-        msch_arg->subchannel = i;
         
         pthread_cond_init(&ctx->subchannel[i].cmd_cond, NULL);
-        pthread_create(&ctx->subchannel[i].thread, NULL, subch, msch_arg);
+        
     }
     
     fprintf(stderr, "MSC: %04o IRQ %02o\n", id, irq);
