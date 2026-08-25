@@ -267,7 +267,7 @@ int sc_detach(acr7k_cu_t *cpu, int id, int sc_id) {
     
     ctx->subchannel[sc_id].running = 0;
     // TODO: call some kind of detach handler?
-    pthread_cancel(ctx->subchannel[sc_id].thread);
+    // pthread_cancel(ctx->subchannel[sc_id].thread);
     return 0;
 }
 
