@@ -1113,9 +1113,18 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Test some channels
             
-            ldea        ac, 12
+            ldea        12
             wio         ac, 0, #01c
-            ldea        ac, .chpgm
+            
+            ldea        .chcdl_r
+            or          .ch_read
+            st          .ch_read
+            
+            ldea        .chcdl_w
+            or          .ch_write
+            st          .ch_write
+            
+            ldea        .chpgm
             wios        ac, 1, #01c
 
             hlt
@@ -1130,8 +1139,15 @@ lic_fail:   ldea        x0, .msg_licens
 
 chpgm:      dw          0001012345670
             dw          0211012345670
-            dw          0421012345670
-            dw          0630012345670
+ch_read:    dw          0421000000000
+ch_write:   dw          0630000000000
+
+chcdl_r:    dw          0003012000000
+            dw          0000004345670
+            dw          0000010121212
+            dw          0000014312312
+
+chcdl_w:    dw          0000012000000
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

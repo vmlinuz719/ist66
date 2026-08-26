@@ -9,6 +9,7 @@
 #include "cpu.h"
 
 #define MASK_36 0xFFFFFFFFFL
+#define MASK_18 0x3FFFFL
 
 static inline int msleep(long msec) {
     struct timespec ts;
@@ -150,11 +151,66 @@ void *subch(void *vctx) {
                 fprintf(stderr, "MSC: %04o:%02o CCW %s(%02o, %09o)\n",
                     channel->id, sc_id, ops[op_type], (unsigned int) opcode, (unsigned int) data_addr);
                 
+                if (op_type > 1) { // read/write transaction
+                    if (data_addr >= cpu->mem_size) {
+                        // TODO: handle count/displacement list check
+                        fprintf(stderr, "MSC: %04o:%02o CDL Load Check\n", channel->id, sc_id);
+                        subchannel->command = 0;
+                        break;
+                    }
+                    
+                    int status_ok = 1;
+                    uint64_t cdl_header = cpu->memory[data_addr];
+                    uint64_t cdl_len = cdl_header >> 27;
+                    uint64_t cdl_base = cdl_header & MASK_ADDR;
+                    
+                    if (cdl_len == 0) {
+                        fprintf(stderr, "MSC: %04o:%02o Begin Transaction %s(%02o) (Suppressed)\n",
+                            channel->id, sc_id, ops[op_type], (unsigned int) opcode);
+                        fprintf(stderr, "MSC: %04o:%02o End Transaction\n", channel->id, sc_id);
+                    } else {
+                        fprintf(stderr, "MSC: %04o:%02o Begin Transaction %s(%02o)\n",
+                            channel->id, sc_id, ops[op_type], (unsigned int) opcode);
+                        
+                        int current_cdl_entry = 1;
+                        while (current_cdl_entry <= cdl_len) {
+                            uint64_t cdl_entry_addr = (data_addr + current_cdl_entry) & MASK_ADDR;
+                            if (cdl_entry_addr >= cpu->mem_size) {
+                                // TODO: handle count/displacement list check
+                                fprintf(stderr, "MSC: %04o:%02o CDL Load Check\n", channel->id, sc_id);
+                                subchannel->command = 0;
+                                status_ok = 0;
+                                break;
+                            }
+                            
+                            uint64_t cdl_entry = cpu->memory[cdl_entry_addr];
+                            
+                            uint64_t cdl_entry_count = cdl_entry >> 18;
+                            uint64_t cdl_entry_disp = cdl_entry & MASK_18;
+                            uint64_t cdl_tx_addr = (cdl_entry_disp + cdl_base) & MASK_ADDR;
+                            
+                            // TODO: make device API call
+                            fprintf(
+                                stderr,
+                                "MSC: %04o:%02o     %09o:%03o\n",
+                                channel->id, sc_id,
+                                (unsigned int) cdl_tx_addr, (unsigned int) cdl_entry_count
+                            );
+                            
+                            current_cdl_entry++;
+                        }
+                        
+                        fprintf(stderr, "MSC: %04o:%02o End Transaction\n", channel->id, sc_id);
+                    }
+                    
+                    if (!status_ok) break;
+                }
+                
                 if (chain) {
                     subchannel->caw++;
-                    msleep(100);
+                    subchannel->caw &= MASK_ADDR;
                 } else {
-                    fprintf(stderr, "MSC: %04o:%02o CCW End Program\n", channel->id, sc_id);
+                    fprintf(stderr, "MSC: %04o:%02o Channel Program Completed\n", channel->id, sc_id);
                     subchannel->command = 0;
                     break;
                 }
