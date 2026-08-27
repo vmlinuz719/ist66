@@ -7,6 +7,7 @@
 #include <errno.h>    
 
 #include "cpu.h"
+#include "msc.h"
 
 #define MASK_36 0xFFFFFFFFFL
 #define MASK_18 0x3FFFFL
@@ -29,28 +30,6 @@ static inline int msleep(long msec) {
 
     return res;
 }
-
-typedef struct {
-    pthread_t thread;
-    
-    int attached;
-    uint64_t caw;
-    
-    // use status_lock
-    pthread_cond_t cmd_cond;
-    int command, done;
-} acr7k_subch_t;
-
-typedef struct {
-    acr7k_cu_t *cpu;
-    int id, irq;
-    
-    int subch_select;
-    
-    pthread_mutex_t status_lock;
-    acr7k_subch_t subchannel[16];
-    int lowest_subch_done;          // 16 if no channels done
-} acr7k_msch_t;
 
 typedef struct {
     acr7k_msch_t *msch;
