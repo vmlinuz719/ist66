@@ -33,7 +33,7 @@ static inline int msleep(long msec) {
 typedef struct {
     pthread_t thread;
     
-    int running;
+    int attached;
     uint64_t caw;
     
     // use status_lock
@@ -106,9 +106,9 @@ void *subch(void *vctx) {
     acr7k_subch_t *subchannel = &(channel->subchannel[sc_id]);
     acr7k_cu_t *cpu = channel->cpu;
     
-    subchannel->running = 1;
+    subchannel->attached = 1;
     
-    while (subchannel->running) {
+    while (subchannel->attached) {
         pthread_mutex_lock(&channel->status_lock);
         while (!subchannel->command) {
             pthread_cond_wait(&subchannel->cmd_cond, &channel->status_lock);
@@ -120,11 +120,11 @@ void *subch(void *vctx) {
         pthread_mutex_unlock(&channel->status_lock);
         
         if (command == -1) {
-            subchannel->running = 0;
+            subchannel->attached = 0;
         }
         
         else {
-            while (subchannel->running && subchannel->command) {
+            while (subchannel->attached && subchannel->command) {
                 // fetch CCW
                 // first fail out if CAW is not valid
                 if (subchannel->caw >= cpu->mem_size) {
@@ -302,7 +302,7 @@ void destroy_msch(acr7k_cu_t *cpu, int id) {
     acr7k_msch_t *ctx = (acr7k_msch_t *) cpu->ioctx[id];
     
     for (int i = 0; i < 16; i++) {
-        if (ctx->subchannel[i].running) {
+        if (ctx->subchannel[i].attached) {
             pthread_cancel(ctx->subchannel[i].thread);
         }
         pthread_cond_destroy(&ctx->subchannel[i].cmd_cond);
@@ -322,7 +322,7 @@ int sc_attach(acr7k_cu_t *cpu, int id, int sc_id) {
         return -1;
     }
     
-    else if (ctx->subchannel[sc_id].running) {
+    else if (ctx->subchannel[sc_id].attached) {
         fprintf(stderr, "MSC: %04o:%02o already attached\n", id, sc_id);
         return -1;
     }
@@ -344,12 +344,12 @@ int sc_detach(acr7k_cu_t *cpu, int id, int sc_id) {
         return -1;
     }
     
-    else if (!ctx->subchannel[sc_id].running) {
+    else if (!ctx->subchannel[sc_id].attached) {
         fprintf(stderr, "MSC: %04o:%02o already detached\n", id, sc_id);
         return -1;
     }
     
-    ctx->subchannel[sc_id].running = 0;
+    ctx->subchannel[sc_id].attached = 0;
     // TODO: call some kind of detach handler?
     // pthread_cancel(ctx->subchannel[sc_id].thread);
     return 0;
