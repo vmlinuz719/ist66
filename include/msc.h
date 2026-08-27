@@ -16,12 +16,18 @@ typedef struct acr7k_subch {
     
     void *device;
     
+    // TODO: define what these return and call them in the channel emulation
+    
     void (*detach)(void *device);
     
     uint64_t (*sense_reg)(void *device);
     
-    int (*sense)(acr7k_cu_t *cpu, void *device, uint8_t opcode, uint32_t addr);
-    int (*control)(acr7k_cu_t *cpu, void *device, uint8_t opcode, uint32_t addr);
+    int (*sense)(acr7k_cu_t *cpu, void *device, uint8_t opcode, uint64_t addr);
+    int (*control)(acr7k_cu_t *cpu, void *device, uint8_t opcode, uint64_t addr);
+    
+    int (*start_transact)(acr7k_cu_t *cpu, void *device, int write, uint8_t opcode);
+    int (*transfer)(acr7k_cu_t *cpu, void *device, uint64_t tx_addr, uint64_t count);
+    int (*end_transact)(acr7k_cu_t *cpu, void *device);
     
     // use status_lock
     pthread_cond_t cmd_cond;
