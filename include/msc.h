@@ -8,11 +8,23 @@ void init_msch(acr7k_cu_t *cpu, int id, int irq);
 int sc_attach(acr7k_cu_t *cpu, int id, int sc_id);
 int sc_detach(acr7k_cu_t *cpu, int id, int sc_id);
 
+#define CH_UNIT_INDICATOR   1
+#define CH_UNIT_EXCEPTION   2
+#define CH_ATTENTION        4
+
+#define CH_BUSY             8
+#define CH_INTERFACE_CHECK  16
+#define CH_DATA_CHECK       32
+#define CH_COMMAND_CHECK    64
+#define CH_INCORRECT_LENGTH 128
+#define CH_PROGRAM_INTR     256
+
 typedef struct acr7k_subch {
     pthread_t thread;
     
     int attached;
     uint64_t caw;
+    uint64_t flags, addr_list_entry, residual;
     
     void *device;
     
