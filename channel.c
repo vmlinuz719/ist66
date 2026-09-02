@@ -315,7 +315,7 @@ void destroy_msch(acr7k_cu_t *cpu, int id) {
     
     for (int i = 0; i < 16; i++) {
         if (ctx->subchannel[i].attached) {
-            pthread_cancel(ctx->subchannel[i].thread);
+            ctx->subchannel[i].detach(&ctx->subchannel[i]);
         }
         pthread_cond_destroy(&ctx->subchannel[i].cmd_cond);
     }
