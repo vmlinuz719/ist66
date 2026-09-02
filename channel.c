@@ -173,6 +173,7 @@ void *subch(void *vctx) {
                             subchannel->transfer(cpu, subchannel, cdl_tx_addr, cdl_entry_count);
                             
                             if (
+                                // over-read residual count
                                 ((!suppress_ili) && (subchannel->flags & CH_INCORRECT_LENGTH)) ||
                                 (subchannel->flags & CH_UNIT_EXCEPTION) ||
                                 (subchannel->flags & CH_INTERFACE_CHECK) ||
@@ -190,6 +191,7 @@ void *subch(void *vctx) {
                         if (status_ok) {
                             subchannel->end_transact(cpu, subchannel);
                             subchannel->addr_list_entry = 0;
+                            // under-read residual count
                             if ((!suppress_ili) && (subchannel->flags & CH_INCORRECT_LENGTH)) {
                                 subchannel->command = 0;
                                 status_ok = 0;
