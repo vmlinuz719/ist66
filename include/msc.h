@@ -63,4 +63,7 @@ typedef struct {
     int lowest_subch_done;          // 16 if no channels done
 } acr7k_msch_t;
 
+// TODO: give this its own header
+void init_7310(acr7k_cu_t *cpu, int id, int sc_id);
+
 #endif
