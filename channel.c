@@ -200,6 +200,20 @@ void *subch(void *vctx) {
                     
                     if (!status_ok) break;
                 }
+                else if (op_type == 0) { // sense
+                    subchannel->sense(cpu, subchannel, opcode, data_addr);
+                    if (subchannel->flags) {
+                        subchannel->command = 0;
+                        break;
+                    }
+                }
+                else if (op_type == 1) { // control
+                    subchannel->control(cpu, subchannel, opcode, data_addr);
+                    if (subchannel->flags) {
+                        subchannel->command = 0;
+                        break;
+                    }
+                }
                 
                 if (chain) {
                     subchannel->caw++;
