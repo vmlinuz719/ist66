@@ -28,6 +28,7 @@ typedef struct acr7k_subch {
     
     // TODO: define what these return and call them in the channel emulation
     
+    // stop the thread and clean up
     void (*detach)(struct acr7k_subch *subch);
     
     uint64_t (*sense_reg)(struct acr7k_subch *subch);
