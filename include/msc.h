@@ -10,7 +10,6 @@ int sc_detach(acr7k_cu_t *cpu, int id, int sc_id);
 
 #define CH_UNIT_INDICATOR   1
 #define CH_UNIT_EXCEPTION   2
-#define CH_ATTENTION        4
 
 #define CH_BUSY             8
 #define CH_INTERFACE_CHECK  16
