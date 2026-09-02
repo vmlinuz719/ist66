@@ -270,9 +270,11 @@ uint64_t msch_io(
     if (transfer != 14) {
         switch (ctl) {
             case 1: {
-                subchannel->command = 1;
-                clear_done(ctx, ctx->subch_select);
-                pthread_cond_signal(&subchannel->cmd_cond);
+                if (subchannel->attached) {
+                    subchannel->command = 1;
+                    clear_done(ctx, ctx->subch_select);
+                    pthread_cond_signal(&subchannel->cmd_cond);
+                }
             } break;
             case 2: {
                 // ctx->command = 0;
