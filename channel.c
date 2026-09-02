@@ -105,11 +105,12 @@ void *subch(void *vctx) {
         else {
             while (subchannel->attached && subchannel->command) {
                 // fetch CCW
+                subchannel->flags = 0;
                 // first fail out if CAW is not valid
                 if (subchannel->caw >= cpu->mem_size) {
-                    // TODO: handle CCW load check
-                    fprintf(stderr, "MSC: %04o:%02o CCW Load Check\n", channel->id, sc_id);
                     subchannel->command = 0;
+                    subchannel->flags = CH_COMMAND_CHECK;
+                    subchannel->addr_list_entry = subchannel->residual = 0;
                     break;
                 }
                 
@@ -118,23 +119,14 @@ void *subch(void *vctx) {
                 uint64_t opcode = (ccw >> 30) & 0xF;
                 uint64_t op_type = ccw >> 34;
                 uint64_t chain = (ccw >> 27) & 1;
+                uint64_t suppress_ili = (ccw >> 28) & 1;
                 uint64_t data_addr = ccw & MASK_ADDR;
                 
-                const char *ops[] = {
-                    "SENSE",
-                    "CONTROL",
-                    "READ",
-                    "WRITE"
-                };
-                
-                fprintf(stderr, "MSC: %04o:%02o CCW %s(%02o, %09o)\n",
-                    channel->id, sc_id, ops[op_type], (unsigned int) opcode, (unsigned int) data_addr);
-                
-                if (op_type > 1) { // read/write transaction
+                if (op_type > 1) { // read (2) / write (3) transaction
                     if (data_addr >= cpu->mem_size) {
-                        // TODO: handle count/displacement list check
-                        fprintf(stderr, "MSC: %04o:%02o CDL Load Check\n", channel->id, sc_id);
                         subchannel->command = 0;
+                        subchannel->flags = CH_DATA_CHECK;
+                        subchannel->addr_list_entry = subchannel->residual = 0;
                         break;
                     }
                     
@@ -144,20 +136,30 @@ void *subch(void *vctx) {
                     uint64_t cdl_base = cdl_header & MASK_ADDR;
                     
                     if (cdl_len == 0) {
-                        fprintf(stderr, "MSC: %04o:%02o Begin Transaction %s(%02o) (Suppressed)\n",
-                            channel->id, sc_id, ops[op_type], (unsigned int) opcode);
-                        fprintf(stderr, "MSC: %04o:%02o End Transaction\n", channel->id, sc_id);
+                        subchannel->start_transact(cpu, subchannel, op_type == 3, opcode);
+                        if (subchannel->flags & CH_COMMAND_CHECK) {
+                            subchannel->command = 0;
+                            subchannel->addr_list_entry = subchannel->residual = 0;
+                            break;
+                        }
+                        
+                        subchannel->end_transact(cpu, subchannel);
                     } else {
-                        fprintf(stderr, "MSC: %04o:%02o Begin Transaction %s(%02o)\n",
-                            channel->id, sc_id, ops[op_type], (unsigned int) opcode);
+                        subchannel->start_transact(cpu, subchannel, op_type == 3, opcode);
+                        if (subchannel->flags & CH_COMMAND_CHECK) {
+                            subchannel->command = 0;
+                            subchannel->addr_list_entry = subchannel->residual = 0;
+                            break;
+                        }
                         
                         int current_cdl_entry = 1;
                         while (current_cdl_entry <= cdl_len) {
+                            subchannel->addr_list_entry = current_cdl_entry;
                             uint64_t cdl_entry_addr = (data_addr + current_cdl_entry) & MASK_ADDR;
                             if (cdl_entry_addr >= cpu->mem_size) {
-                                // TODO: handle count/displacement list check
-                                fprintf(stderr, "MSC: %04o:%02o CDL Load Check\n", channel->id, sc_id);
                                 subchannel->command = 0;
+                                subchannel->end_transact(cpu, subchannel);
+                                subchannel->flags |= CH_DATA_CHECK;
                                 status_ok = 0;
                                 break;
                             }
@@ -168,18 +170,32 @@ void *subch(void *vctx) {
                             uint64_t cdl_entry_disp = cdl_entry & MASK_18;
                             uint64_t cdl_tx_addr = (cdl_entry_disp + cdl_base) & MASK_ADDR;
                             
-                            // TODO: make device API call
-                            fprintf(
-                                stderr,
-                                "MSC: %04o:%02o     %09o:%03o\n",
-                                channel->id, sc_id,
-                                (unsigned int) cdl_tx_addr, (unsigned int) cdl_entry_count
-                            );
+                            subchannel->transfer(cpu, subchannel, cdl_tx_addr, cdl_entry_count);
+                            
+                            if (
+                                ((!suppress_ili) && (subchannel->flags & CH_INCORRECT_LENGTH)) ||
+                                (subchannel->flags & CH_UNIT_EXCEPTION) ||
+                                (subchannel->flags & CH_INTERFACE_CHECK) ||
+                                (subchannel->flags & CH_DATA_CHECK)
+                            ) {
+                                subchannel->command = 0;
+                                subchannel->end_transact(cpu, subchannel);
+                                status_ok = 0;
+                                break;
+                            }
                             
                             current_cdl_entry++;
                         }
                         
-                        fprintf(stderr, "MSC: %04o:%02o End Transaction\n", channel->id, sc_id);
+                        if (status_ok) {
+                            subchannel->end_transact(cpu, subchannel);
+                            subchannel->addr_list_entry = 0;
+                            if ((!suppress_ili) && (subchannel->flags & CH_INCORRECT_LENGTH)) {
+                                subchannel->command = 0;
+                                status_ok = 0;
+                                break;
+                             }
+                        }
                     }
                     
                     if (!status_ok) break;
@@ -189,7 +205,6 @@ void *subch(void *vctx) {
                     subchannel->caw++;
                     subchannel->caw &= MASK_ADDR;
                 } else {
-                    fprintf(stderr, "MSC: %04o:%02o Channel Program Completed\n", channel->id, sc_id);
                     subchannel->command = 0;
                     break;
                 }
