@@ -137,7 +137,11 @@ void *subch(void *vctx) {
                     
                     if (cdl_len == 0) {
                         subchannel->start_transact(cpu, subchannel, op_type == 3, opcode);
-                        if (subchannel->flags & CH_COMMAND_CHECK) {
+                        if (
+                            (subchannel->flags & CH_UNIT_EXCEPTION) ||
+                            (subchannel->flags & CH_INTERFACE_CHECK) ||
+                            (subchannel->flags & CH_COMMAND_CHECK)
+                        ) {
                             subchannel->command = 0;
                             subchannel->addr_list_entry = subchannel->residual = 0;
                             break;
@@ -146,11 +150,11 @@ void *subch(void *vctx) {
                         subchannel->end_transact(cpu, subchannel);
                     } else {
                         subchannel->start_transact(cpu, subchannel, op_type == 3, opcode);
-                        if (subchannel->flags & CH_COMMAND_CHECK) {
-                            subchannel->command = 0;
-                            subchannel->addr_list_entry = subchannel->residual = 0;
-                            break;
-                        }
+                        if (
+                            (subchannel->flags & CH_UNIT_EXCEPTION) ||
+                            (subchannel->flags & CH_INTERFACE_CHECK) ||
+                            (subchannel->flags & CH_COMMAND_CHECK)
+                        ) break;
                         
                         int current_cdl_entry = 1;
                         while (current_cdl_entry <= cdl_len) {
@@ -211,7 +215,7 @@ void *subch(void *vctx) {
                 }
                 else if (op_type == 1) { // control
                     subchannel->control(cpu, subchannel, opcode, data_addr);
-                    if (subchannel->flags) {
+                    if ((subchannel->flags & ~CH_UNIT_INDICATOR)) {
                         subchannel->command = 0;
                         break;
                     }

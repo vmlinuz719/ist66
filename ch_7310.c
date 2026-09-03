@@ -57,6 +57,8 @@ typedef struct {
     int tx_type;
     int write;
     
+    FILE *file;
+    
     int ch_id, sch_id;
 } ch7310_device_t;
 
@@ -64,6 +66,7 @@ void ch7310_detach(acr7k_subch_t *subch) {
     ch7310_device_t *device = subch->device;
     
     pthread_cancel(subch->thread);
+    if (device->file != NULL) fclose(device->file);
     fprintf(stderr, "7310: %04o:%02o detached\n",
         device->ch_id, device->sch_id);
     free(subch->device);
@@ -87,6 +90,66 @@ void ch7310_sense(
         (unsigned int) opcode, (unsigned int) addr);
 }
 
+void ch7310_fopen7(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch,
+    uint64_t addr,
+    int writable
+) {
+    ch7310_device_t *device = subch->device;
+    
+    if (addr >= cpu->mem_size) {
+        subch->flags |= CH_DATA_CHECK;
+        subch->residual = 0;
+        return;
+    }
+    
+    uint64_t size = cpu->memory[addr];
+    if (size > 255) {
+        subch->flags |= CH_DATA_CHECK;
+        subch->residual = 0;
+        return;
+    }
+    
+    char *fname = calloc(size + 1, sizeof(char));
+    for (int i = 0; i < size; i++) {
+        addr = inc_byte_index(addr, 7);
+        
+        int64_t ch = load_byte(cpu, addr, 7);
+        if (ch < 0) {
+            subch->flags |= CH_DATA_CHECK;
+            subch->residual = size - i;
+            free(fname);
+            return;
+        }
+        
+        fname[i] = ch;
+    }
+    
+    if (device->file != NULL) {
+        fclose(device->file);
+        device->file = NULL;
+    }
+    
+    device->file = fopen(fname, writable ? "wb+" : "rb");
+    
+    if (device->file == NULL) {
+        fprintf(stderr, "7310: %04o:%02o Open File %s FAILED\n",
+            device->ch_id, device->sch_id,
+            fname);
+        subch->flags |= CH_UNIT_EXCEPTION;
+    }
+    
+    else {
+        fprintf(stderr, "7310: %04o:%02o Open File %s %s\n",
+            device->ch_id, device->sch_id,
+            fname, writable ? "READ/WRITE" : "READ");
+    }
+    
+    free(fname);
+    subch->residual = 0;
+}
+
 void ch7310_control(
     acr7k_cu_t *cpu,
     acr7k_subch_t *subch,
@@ -94,9 +157,16 @@ void ch7310_control(
     uint64_t addr
 ) {
     ch7310_device_t *device = subch->device;
-    fprintf(stderr, "7310: %04o:%02o CONTROL(%02o, %09o)\n",
-        device->ch_id, device->sch_id,
-        (unsigned int) opcode, (unsigned int) addr);
+    
+    if (opcode == 0 || opcode == 1) {
+        ch7310_fopen7(cpu, subch, addr, opcode);
+    }
+    
+    else {
+        fprintf(stderr, "7310: %04o:%02o CONTROL(%02o, %09o)\n",
+            device->ch_id, device->sch_id,
+            (unsigned int) opcode, (unsigned int) addr);
+    }
 }
 
 void ch7310_start_transact(
