@@ -9,6 +9,50 @@
 
 /* ACR 7310 Channel Debug Thingy */
 
+int64_t load_byte(acr7k_cu_t *cpu, uint64_t index, unsigned int size) {
+    uint64_t ea = index & MASK_ADDR;
+    uint64_t sh = index >> 27;
+    if (sh > 36) sh = 36;
+    
+    if (ea >= cpu->mem_size) return -1;
+    
+    uint64_t data = cpu->memory[ea] & 0xFFFFFFFFF;
+    
+    data >>= sh;
+    data &= (1L << size) - 1;
+    return (int64_t) data;
+}
+
+int store_byte(acr7k_cu_t *cpu, uint64_t index, unsigned int size, uint64_t b) {
+    uint64_t ea = index & MASK_ADDR;
+    uint64_t sh = index >> 27;
+    if (sh > 36) sh = 36;
+    
+    if (ea >= cpu->mem_size) return -1;
+    
+    uint64_t data = cpu->memory[ea] & 0xFFFFFFFFF;
+    uint64_t mask = ((1L << size) - 1) << sh;
+    uint64_t wr_data = (b << sh) & mask;
+    data &= ~mask;
+    data |= wr_data;
+    
+    cpu->memory[ea] = data;
+    return 0;
+}
+
+uint64_t inc_byte_index(uint64_t index, unsigned int size) {
+    uint64_t ea = index & MASK_ADDR;
+    uint64_t sh = index >> 27;
+    
+    sh -= size;
+    if (sh > 36) {
+        sh = (36 - size) & 0x3F;
+        ea = (ea + 1) & MASK_ADDR;
+    }
+    
+    return ea | (sh << 27);
+}
+
 typedef struct {
     int tx_type;
     int write;
