@@ -153,7 +153,8 @@ void ch7310_fopen7(
 void ch7310_fseek(
     acr7k_cu_t *cpu,
     acr7k_subch_t *subch,
-    uint64_t addr
+    uint64_t addr,
+    int whence
 ) {
     ch7310_device_t *device = subch->device;
     
@@ -165,7 +166,7 @@ void ch7310_fseek(
     }
     
     else {
-        if (fseek(device->file, addr, SEEK_CUR)) {
+        if (fseek(device->file, addr, whence)) {
             fprintf(stderr, "7310: %04o:%02o Seek +%09o FAILED (drive error)\n",
                 device->ch_id, device->sch_id,
                 (unsigned int) addr);
@@ -235,10 +236,13 @@ void ch7310_control(
     
     switch (opcode) {
         case 0: {  // SEEK
-            ch7310_fseek(cpu, subch, addr);
+            ch7310_fseek(cpu, subch, addr, SEEK_CUR);
         } break;
         case 1: {  // REWIND
             ch7310_rewind(cpu, subch);
+        } break;
+        case 2: {  // SEEK DIRECT
+            ch7310_fseek(cpu, subch, addr, SEEK_SET);
         } break;
         
         case 8:    // MOUNT WRITE-PROTECTED
