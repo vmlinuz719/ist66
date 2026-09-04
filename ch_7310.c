@@ -247,7 +247,7 @@ void ch7310_control(
         
         case 8:    // MOUNT WRITE-PROTECTED
         case 9: {  // MOUNT
-            ch7310_fopen7(cpu, subch, addr, opcode);
+            ch7310_fopen7(cpu, subch, addr, opcode & 1);
         } break;
         
         case 10: { // EJECT
