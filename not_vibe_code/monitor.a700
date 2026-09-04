@@ -1142,7 +1142,7 @@ lic_fail:   ldea        x0, .msg_licens
             hlt
 
 chpgm:      dw          0001012345670
-ch_open:    dw          0201000000000
+ch_open:    dw          0301000000000
 ch_read:    dw          0421000000000
 ch_write:   dw          0630000000000
             dw          0241012345670

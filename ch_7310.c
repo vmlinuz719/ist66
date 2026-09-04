@@ -134,7 +134,7 @@ void ch7310_fopen7(
     device->file = fopen(fname, writable ? "wb+" : "rb");
     
     if (device->file == NULL) {
-        fprintf(stderr, "7310: %04o:%02o Open File %s FAILED\n",
+        fprintf(stderr, "7310: %04o:%02o Open File %s FAILED (no media)\n",
             device->ch_id, device->sch_id,
             fname);
         subch->flags |= CH_UNIT_EXCEPTION;
@@ -150,6 +150,81 @@ void ch7310_fopen7(
     subch->residual = 0;
 }
 
+void ch7310_fseek(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch,
+    uint64_t addr
+) {
+    ch7310_device_t *device = subch->device;
+    
+    if (device->file == NULL) {
+        fprintf(stderr, "7310: %04o:%02o Seek +%09o FAILED (no media)\n",
+            device->ch_id, device->sch_id,
+            (unsigned int) addr);
+        subch->flags |= CH_UNIT_EXCEPTION;
+    }
+    
+    else {
+        if (fseek(device->file, addr, SEEK_CUR)) {
+            fprintf(stderr, "7310: %04o:%02o Seek +%09o FAILED (drive error)\n",
+                device->ch_id, device->sch_id,
+                (unsigned int) addr);
+            subch->flags |= CH_UNIT_EXCEPTION;
+        }
+        
+        else {
+            fprintf(stderr, "7310: %04o:%02o Seek +%09o\n",
+                device->ch_id, device->sch_id,
+                (unsigned int) addr);
+        }
+    }
+    
+    subch->residual = 0;
+    return;
+}
+
+void ch7310_rewind(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch
+) {
+    ch7310_device_t *device = subch->device;
+    
+    if (device->file == NULL) {
+        fprintf(stderr, "7310: %04o:%02o Rewind FAILED (no media)\n",
+            device->ch_id, device->sch_id);
+        subch->flags |= CH_UNIT_EXCEPTION;
+    }
+    
+    else {
+        fprintf(stderr, "7310: %04o:%02o Rewind\n",
+            device->ch_id, device->sch_id);
+        rewind(device->file);
+    }
+    
+    subch->residual = 0;
+    return;
+}
+
+void ch7310_eject(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch
+) {
+    ch7310_device_t *device = subch->device;
+    
+    if (device->file == NULL) {
+        fprintf(stderr, "7310: %04o:%02o Eject FAILED (no media)\n",
+            device->ch_id, device->sch_id);
+        subch->flags |= CH_UNIT_EXCEPTION;
+    }
+    
+    else {
+        fclose(device->file);
+        device->file = NULL;
+    }
+
+    subch->residual = 0;
+}
+
 void ch7310_control(
     acr7k_cu_t *cpu,
     acr7k_subch_t *subch,
@@ -158,14 +233,28 @@ void ch7310_control(
 ) {
     ch7310_device_t *device = subch->device;
     
-    if (opcode == 0 || opcode == 1) {
-        ch7310_fopen7(cpu, subch, addr, opcode);
-    }
+    switch (opcode) {
+        case 0: {  // SEEK
+            ch7310_fseek(cpu, subch, addr);
+        } break;
+        case 1: {  // REWIND
+            ch7310_rewind(cpu, subch);
+        } break;
+        
+        case 8:    // MOUNT WRITE-PROTECTED
+        case 9: {  // MOUNT
+            ch7310_fopen7(cpu, subch, addr, opcode);
+        } break;
+        
+        case 10: { // EJECT
+            ch7310_eject(cpu, subch);
+        } break;
     
-    else {
-        fprintf(stderr, "7310: %04o:%02o CONTROL(%02o, %09o)\n",
-            device->ch_id, device->sch_id,
-            (unsigned int) opcode, (unsigned int) addr);
+        default: {
+            fprintf(stderr, "7310: %04o:%02o CONTROL(%02o, %09o)\n",
+                device->ch_id, device->sch_id,
+                (unsigned int) opcode, (unsigned int) addr);
+        }
     }
 }
 
