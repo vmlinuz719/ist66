@@ -45,6 +45,7 @@ typedef struct acr7k_subch {
     
     // sets flags and residual
     // may set DATA_CHECK, UNIT_EXCEPTION or UNIT_INDICATOR
+    // tally residual count internally instead of transferring data if needed
     void (*transfer)(acr7k_cu_t *cpu, struct acr7k_subch *subch, uint64_t tx_addr, uint64_t count);
     
     // use status_lock
