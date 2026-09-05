@@ -189,13 +189,6 @@ void *subch(void *vctx) {
                                 break;
                             }
                             
-                            else if ((subchannel->flags & CH_INCORRECT_LENGTH)) {
-                                if (!suppress_ili) {
-                                    transact_ok = 0;
-                                }
-                                break;
-                            }
-                            
                             current_cdl_entry++;
                         }
                         
@@ -203,8 +196,8 @@ void *subch(void *vctx) {
                         
                         if (transact_ok) {
                             // transaction residual count if supported
-                            if ((!suppress_ili) && (subchannel->flags & CH_INCORRECT_LENGTH)) {
-                                transact_ok = 0;
+                            if ((subchannel->flags & CH_INCORRECT_LENGTH)) {
+                                if (!suppress_ili) transact_ok = 0;
                                 subchannel->addr_list_entry = 0;
                             }
                         }
