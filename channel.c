@@ -110,7 +110,7 @@ void *subch(void *vctx) {
                 if (subchannel->caw >= cpu->mem_size) {
                     subchannel->command = 0;
                     subchannel->flags = CH_COMMAND_CHECK;
-                    subchannel->addr_list_entry = subchannel->residual = 0;
+                    subchannel->residual = 0;
                     break;
                 }
                 
@@ -126,7 +126,7 @@ void *subch(void *vctx) {
                     if (data_addr >= cpu->mem_size) {
                         subchannel->command = 0;
                         subchannel->flags = CH_DATA_CHECK;
-                        subchannel->addr_list_entry = subchannel->residual = 0;
+                        subchannel->residual = 0;
                         break;
                     }
                     
@@ -144,7 +144,7 @@ void *subch(void *vctx) {
                             (subchannel->flags & CH_COMMAND_CHECK)
                         ) {
                             transact_ok = 0;
-                            subchannel->addr_list_entry = subchannel->residual = 0;
+                            subchannel->residual = 0;
                         }
                         
                         subchannel->end_transact(cpu, subchannel);
@@ -157,14 +157,12 @@ void *subch(void *vctx) {
                             (subchannel->flags & CH_COMMAND_CHECK)
                         ) {
                             subchannel->command = 0;
-                            subchannel->addr_list_entry = subchannel->residual = 0;
+                            subchannel->residual = 0;
                             break;
                         }
                         
                         int current_cdl_entry = 1;
                         while (current_cdl_entry <= cdl_len) {
-                            subchannel->addr_list_entry = current_cdl_entry;
-                            
                             uint64_t cdl_entry_addr = (data_addr + current_cdl_entry) & MASK_ADDR;
                             if (cdl_entry_addr >= cpu->mem_size) {
                                 subchannel->flags |= CH_DATA_CHECK;
@@ -195,10 +193,9 @@ void *subch(void *vctx) {
                         subchannel->end_transact(cpu, subchannel);
                         
                         if (transact_ok) {
-                            // transaction residual count if supported
+                            // transaction residual count should have been tallied
                             if ((subchannel->flags & CH_INCORRECT_LENGTH)) {
                                 if (!suppress_ili) transact_ok = 0;
-                                subchannel->addr_list_entry = 0;
                             }
                         }
                     }

@@ -22,7 +22,7 @@ typedef struct acr7k_subch {
     
     int attached;
     uint64_t caw;
-    uint64_t flags, addr_list_entry, residual;
+    uint64_t flags, residual;
     
     void *device;
     
