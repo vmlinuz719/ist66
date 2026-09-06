@@ -28,6 +28,14 @@
 
 typedef struct acr7k_cu acr7k_cu_t;
 
+/* Bits of acr7k_cu.deferred - work staged by an instruction and committed
+ * by the run loop after that instruction retires. Kept in one word so the
+ * run loop's fast path can test all of them with a single load. */
+#define DEF_EDIT  1     // xeq_inst runs in place of the next fetch
+#define DEF_EDSK  2     // ...and then the following instruction is skipped
+#define DEF_INC   4     // inc_data must be written back to inc_addr
+#define DEF_STACK 8     // next_stack must be committed to SP
+
 typedef uint64_t (*acr7k_io_t) (
     void * /* ctx */,
     uint64_t /* accumulator */,
@@ -82,7 +90,14 @@ struct acr7k_cu {
     uint64_t stop_code, cycles;
     
     uint64_t xeq_inst, inc_addr, inc_data, next_stack;
-    int do_edit, do_edsk, do_inc, do_stack;
+    int deferred;   // DEF_* bits, see above
+
+    /* Nonzero when the run loop must leave its fast path before the next
+     * fetch: a deferred edit, a pending interrupt, a halt or stop request,
+     * or an active throttle. Set by intr_assert/intr_release/
+     * intr_set_mask/halt/leave_intr/stop_cpu/start_cpu/exec_smi and
+     * recomputed by cpu_event_state at the end of every slow-path pass. */
+    int event;
     
     uint64_t *memory;
     uint32_t mem_size;
@@ -117,6 +132,7 @@ static inline void halt(acr7k_cu_t *cpu) {
     uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
     if (cpu->min_pending >= current_irql) {
         cpu->running = 0;
+        cpu->event = 1;
     }
     pthread_mutex_unlock(&(cpu->lock));
 }
@@ -128,10 +144,7 @@ static inline void do_intr(acr7k_cu_t *cpu, int irq) {
     cpu->c[C_CW] = (((uint64_t) irq) << 32) | (current_irql << 28);
     cpu->c[C_CW] |= cpu->memory[1 + 2 * irq] & 0x3FFFF;
     cpu->c[C_PSW] = cpu->memory[2 * irq] & 0xFF7FFFFFF;
-    cpu->do_inc = 0;
-    cpu->do_edit = 0;
-    cpu->do_edsk = 0;
-    cpu->do_stack = 0;
+    cpu->deferred = 0;
 }
 
 #define X_USER      0   // unimplemented instruction
@@ -153,6 +166,7 @@ static inline void do_except(acr7k_cu_t *cpu, int exc) {
 }
 
 static inline void leave_intr(acr7k_cu_t *cpu) {
+    cpu->event = 1;     // IRQL drops; re-check for pending interrupts
     uint64_t old_irql = (cpu->c[C_CW] >> 28) & 0xF;
     cpu->c[C_PSW] = cpu->memory[32 + 2 * old_irql];
     cpu->c[C_CW] = cpu->memory[33 + 2 * old_irql];

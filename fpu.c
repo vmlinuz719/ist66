@@ -239,10 +239,16 @@ void acr7k_fnorm(acr7k_float_t *src, acr7k_float_t *dst) {
 
     uint16_t new_exp = src->sign_exp & 0x7FFF;
     uint64_t new_signif = src->signif;
-    while (new_exp > 1 && !(new_signif & (1ULL << 63))) {
-        new_signif <<= 1;
-        new_exp--;
-    }
+
+    /* Shift the significand up until bit 63 is set, or until the exponent
+     * bottoms out at 1. The zero case is excluded above, so clzll gives the
+     * whole shift count at once instead of looping a bit at a time. */
+    unsigned shift = __builtin_clzll(new_signif);
+    if (new_exp <= 1) shift = 0;
+    else if (shift > (unsigned) (new_exp - 1)) shift = new_exp - 1;
+    new_signif <<= shift;
+    new_exp -= shift;
+
     dst->sign_exp = (src->sign_exp & 0x8000) | new_exp;
     dst->signif = new_signif;
 }

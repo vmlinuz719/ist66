@@ -195,6 +195,7 @@ void seg_invalidate_all(acr7k_cu_t *cpu) {
  */
 void intr_assert(acr7k_cu_t *cpu, int irq) {
     pthread_mutex_lock(&(cpu->lock));
+    cpu->event = 1;
     cpu->pending[irq]++;
     if (irq < cpu->min_pending && ((cpu->mask >> irq) & 1)) {
         cpu->min_pending = irq;
@@ -225,6 +226,7 @@ void intr_release(acr7k_cu_t *cpu, int irq) {
         new_min_pending++;
     }
     cpu->min_pending = new_min_pending;
+    cpu->event = 1;
     pthread_mutex_unlock(&(cpu->lock));
 }
 
@@ -250,6 +252,7 @@ void intr_set_mask(acr7k_cu_t *cpu, uint16_t mask) {
         new_min_pending++;
     }
     cpu->min_pending = new_min_pending;
+    cpu->event = 1;
     pthread_mutex_unlock(&(cpu->lock));
 }
 
@@ -357,16 +360,16 @@ uint64_t read_mem(acr7k_cu_t *cpu, uint8_t key, uint32_t address) {
     if (address >= cpu->mem_size) {
         return MEM_FAULT;
     }
-    else if ((uint8_t) (cpu->memory[address & ~(0x1FF)] >> 36) == 0xFE) {
-        return cpu->memory[address] & MASK_36; // public read
+
+    /* A key of 0 (supervisor) reads anything, so skip the page key word
+     * entirely - it lives in another cache line from the datum. */
+    if (key) {
+        uint8_t pkey = (uint8_t) (cpu->memory[address & ~(0x1FF)] >> 36);
+        // 0xFE public read, 0xFF public read/write
+        if (pkey != key && pkey < 0xFE) return KEY_FAULT;
     }
-    else if ((uint8_t) (cpu->memory[address & ~(0x1FF)] >> 36) == 0xFF) {
-        return cpu->memory[address] & MASK_36; // public read/write
-    }
-    else if (key && (uint8_t) (cpu->memory[address & ~(0x1FF)] >> 36) != key) {
-        return KEY_FAULT;
-    }
-    else return cpu->memory[address] & MASK_36;
+
+    return cpu->memory[address] & MASK_36;
 }
 
 /**
@@ -475,15 +478,14 @@ uint64_t write_mem(
     if (address >= cpu->mem_size) {
         return MEM_FAULT;
     }
-    else if ((uint8_t) (cpu->memory[address & ~(0x1FF)] >> 36) == 0xFF) {
-        uint64_t old_tag = cpu->memory[address] & ~(MASK_36); // public r/w
-        cpu->memory[address] = old_tag | (data & MASK_36);
-        return 0;
+
+    /* As in read_mem: key 0 writes anything, so don't touch the key word. */
+    if (key) {
+        uint8_t pkey = (uint8_t) (cpu->memory[address & ~(0x1FF)] >> 36);
+        // 0xFF public read/write; 0xFE is read-only to non-matching keys
+        if (pkey != key && pkey != 0xFF) return KEY_FAULT;
     }
-    else if (key && (uint8_t) (cpu->memory[address & ~(0x1FF)] >> 36) != key) {
-        return KEY_FAULT;
-    }
-    
+
     uint64_t old_tag = cpu->memory[address] & ~(MASK_36);
     cpu->memory[address] = old_tag | (data & MASK_36);
     return 0;
@@ -530,7 +532,7 @@ uint64_t set_key(acr7k_cu_t *cpu, uint8_t key, uint32_t address) {
  *          direction; pop/popim/popcr are aliases using +1
  *    - 15: SP -= disp first, address is the new SP (=disp) - the "push"
  *          direction; push/pushim/pushcr are aliases using =1
- * The SP update of modes 14/15 is staged in next_stack/do_stack and only
+ * The SP update of modes 14/15 is staged in next_stack/DEF_STACK and only
  * committed once the instruction completes, so a faulting instruction can
  * be retried.
  *
@@ -548,7 +550,7 @@ uint64_t set_key(acr7k_cu_t *cpu, uint8_t key, uint32_t address) {
  *    - 5ii: pre-decrement - subtract increment ii, then use the address
  *    - 6xx, 7xx: reserved (MEM_FAULT)
  *
- * The modified pointer is written back to memory (via do_inc/inc_addr/
+ * The modified pointer is written back to memory (via DEF_INC/inc_addr/
  * inc_data) after the successful completion of the instruction that
  * computed it. Should the instruction fail, all internal state pertaining
  * to this operation is cleared so it may be retried.
@@ -575,12 +577,12 @@ uint64_t comp_mr(acr7k_cu_t *cpu, uint64_t inst) {
             ea_l = (cpu->c[C_PSW] & MASK_ADDR) + disp;
         } break;
         case 14: {
-            cpu->do_stack = 1;
+            cpu->deferred |= DEF_STACK;
             ea_l = cpu->a[13];
             cpu->next_stack = (cpu->a[13] + disp) & MASK_36;
         } break;
         case 15: {
-            cpu->do_stack = 1;
+            cpu->deferred |= DEF_STACK;
             cpu->next_stack = (cpu->a[13] - disp) & MASK_36;
             ea_l = cpu->next_stack;
         } break;
@@ -608,7 +610,7 @@ uint64_t comp_mr(acr7k_cu_t *cpu, uint64_t inst) {
             uint64_t disp = new_ea & MASK_ADDR;
             
             if (mode == 0) {
-                cpu->do_inc = 1;
+                cpu->deferred |= DEF_INC;
                 cpu->inc_addr = ea_l;
                 cpu->inc_data = (
                     ((disp + inc) & MASK_ADDR)
@@ -618,7 +620,7 @@ uint64_t comp_mr(acr7k_cu_t *cpu, uint64_t inst) {
             }
             
             else if (mode == 1) {
-                cpu->do_inc = 1;
+                cpu->deferred |= DEF_INC;
                 cpu->inc_addr = ea_l;
                 cpu->inc_data = (
                     ((disp - inc) & MASK_ADDR)
@@ -1107,7 +1109,7 @@ void exec_md(acr7k_cu_t *cpu, uint64_t inst) {
  * Major opcodes 041-066, any accumulator in bits 23-26, standard address
  * field (comp_mr):
  *   041 edit   - execute the word (mem | AC) as an instruction; it runs
- *                in place of the next fetch (see do_edit in run)
+ *                in place of the next fetch (see DEF_EDIT in run)
  *   042 edits  - as edit, but also skip the instruction following the
  *                edits after the target has executed
  *   043 ldea   - AC = effective address
@@ -1158,7 +1160,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             uint64_t result = compute(
                 data, cpu->a[ac], get_cf(cpu), 10, 0, 0, 0, 0, 0
             );
-            cpu->do_edit = 1;
+            cpu->deferred |= DEF_EDIT;
             cpu->xeq_inst = result & MASK_36;
         } break;
         case 042: { // edits - edit, then skip the following instruction
@@ -1175,8 +1177,7 @@ void exec_am(acr7k_cu_t *cpu, uint64_t inst) {
             uint64_t result = compute(
                 data, cpu->a[ac], get_cf(cpu), 10, 0, 0, 0, 0, 0
             );
-            cpu->do_edit = 1;
-            cpu->do_edsk = 1;
+            cpu->deferred |= DEF_EDIT | DEF_EDSK;
             cpu->xeq_inst = result & MASK_36;
         } break;
         case 043: { // ldea - AC = effective address
@@ -2321,6 +2322,10 @@ void exec_local_trap(acr7k_cu_t *cpu, uint64_t inst) {
  *                failure C_SF describes the fault and no skip occurs
  */
 void exec_smi(acr7k_cu_t *cpu, uint64_t inst) {
+    /* reti/ldctl/ldmask/wait can lower IRQL, change the mask or stop the
+     * CPU; make the run loop re-evaluate its state before the next fetch. */
+    cpu->event = 1;
+
     uint64_t key = (cpu->c[C_PSW] >> 28) & 0xFF;
     if (!key) {
         uint64_t ea = comp_mr(cpu, inst);
@@ -2701,7 +2706,6 @@ uint64_t exec_aa(
  * skip (PC += 2) is taken if the selected condition put a 1 in bit 37.
  */
 void exec_all(acr7k_cu_t *cpu, uint64_t inst) {
-    cpu->inst = inst;
 
     if (inst >> 33 == 0x7) { // ALU operation
         uint64_t acs = (inst >> 27) & 0xF;
@@ -2803,13 +2807,19 @@ static void cpu_throttle(acr7k_cu_t *cpu) {
 /**
  * @brief CPU thread main loop
  *
- * Each iteration executes a pending edit target if one is staged (see
- * exec_am: an edit target runs in place of the next fetch, and edits
- * then advances PC once more to skip the following instruction), takes
- * the best pending interrupt if its level beats the current IRQL (CW
- * bits 32-35), fetches and executes one instruction, and finally commits
- * any deferred indirect-pointer writeback (do_inc, see comp_mr) and SP
- * update (do_stack) - deferred so that a faulting instruction can be
+ * The loop has two paths. While cpu->event is zero - the overwhelmingly
+ * common case - it simply fetches, executes and commits, reloading only
+ * event and deferred from the CPU context per instruction. Anything that
+ * needs attention before a fetch (a staged edit target, a pending
+ * interrupt, a halt or stop request, an active throttle) sets event and
+ * diverts the next pass to the slow path, which does the full sequence:
+ * it executes a pending edit target if one is staged (see exec_am: an
+ * edit target runs in place of the next fetch, and edits then advances
+ * PC once more to skip the following instruction), takes the best
+ * pending interrupt if its level beats the current IRQL (CW bits 32-35),
+ * fetches and executes one instruction, and finally commits
+ * any deferred indirect-pointer writeback (DEF_INC, see comp_mr) and SP
+ * update (DEF_STACK) - deferred so that a faulting instruction can be
  * retried after e.g. a page-in.
  *
  * Interrupt entry (do_intr in cpu.h) vectors through low memory: words
@@ -2823,73 +2833,121 @@ static void cpu_throttle(acr7k_cu_t *cpu) {
  * to the monitor; otherwise it sleeps on intr_cond until a device
  * asserts an unmasked interrupt.
  */
+/*
+ * Commit the indirect-pointer writeback and stack pointer update staged by
+ * the instruction that just retired (see comp_mr). This must happen in the
+ * same pass as that instruction: a following instruction may read SP.
+ */
+static void commit_deferred(acr7k_cu_t *cpu) {
+    if (cpu->deferred & DEF_INC) {
+        uint64_t w_res =
+            write_mem(cpu, cpu->c[C_PSW] >> 28, cpu->inc_addr, cpu->inc_data);
+        if (w_res == MEM_FAULT) {
+            do_except(cpu, X_MEMX);
+        } else if (w_res == KEY_FAULT) {
+            do_except(cpu, X_PPFW);
+        }
+        cpu->deferred &= ~DEF_INC;
+    }
+    if (cpu->deferred & DEF_STACK) {
+        cpu->a[13] = cpu->next_stack;
+        cpu->deferred &= ~DEF_STACK;
+    }
+}
+
+/*
+ * Everything the run loop must deal with before the next fetch. While this
+ * is zero the loop stays on its fast path and only two fields of the CPU
+ * context (event and deferred) are reloaded per instruction.
+ */
+static int cpu_event_state(acr7k_cu_t *cpu) {
+    return cpu->throttle
+        || cpu->exit
+        || !cpu->running
+        || (cpu->deferred & DEF_EDIT)
+        || (cpu->min_pending < (int) ((cpu->c[C_CW] >> 32) & 0xF));
+}
+
 void *run(void *vctx) {
     acr7k_cu_t *cpu = (acr7k_cu_t *) vctx;
 
     fprintf(stderr, "CPU: starting\n");
 
-    do {
-        cpu_throttle(cpu);
-        
-        int done_edit = 0;
-        if (cpu->do_edit) {
-            exec_all(cpu, cpu->xeq_inst);
-            cpu->do_edit = 0;
-            if (cpu->do_edsk) {
-                set_pc(cpu, get_pc(cpu) + 1);
-                cpu->do_edsk = 0;
-            }
-            done_edit = 1;
-        }
-        
-        uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
-        if (cpu->min_pending < current_irql) {
-            // fprintf(stderr, "%ld -> %d\n", current_irql, cpu->min_pending);
-            do_intr(cpu, cpu->min_pending);
-        }
-        
-        if (cpu->running) {
-            if (!done_edit) {
-                uint64_t inst = read_mem(cpu, cpu->c[C_PSW] >> 28, get_pc(cpu));
-                if (inst == MEM_FAULT) {
-                    do_except(cpu, X_MEMX);
-                } else if (inst == KEY_FAULT) {
-                    do_except(cpu, X_PPFR);
-                } else {
-                    exec_all(cpu, inst);
+    for (;;) {
+        /*
+         * Slow path: an asynchronous event (pending interrupt, halt, stop
+         * request, throttle) or a staged edit target is waiting. One load
+         * and one well-predicted branch keeps all of that off the fast
+         * path below, where essentially every instruction runs.
+         */
+        if (__builtin_expect(cpu->event != 0, 0)) {
+            cpu_throttle(cpu);
+
+            int done_edit = 0;
+            if (cpu->deferred & DEF_EDIT) {
+                exec_all(cpu, cpu->xeq_inst);
+                cpu->deferred &= ~DEF_EDIT;
+                if (cpu->deferred & DEF_EDSK) {
+                    set_pc(cpu, get_pc(cpu) + 1);
+                    cpu->deferred &= ~DEF_EDSK;
                 }
+                done_edit = 1;
             }
+
+            uint64_t current_irql = (cpu->c[C_CW] >> 32) & 0xF;
+            if (cpu->min_pending < current_irql) {
+                do_intr(cpu, cpu->min_pending);
+            }
+
+            if (cpu->running) {
+                if (!done_edit) {
+                    uint64_t inst =
+                        read_mem(cpu, cpu->c[C_PSW] >> 28, get_pc(cpu));
+                    if (inst == MEM_FAULT) {
+                        do_except(cpu, X_MEMX);
+                    } else if (inst == KEY_FAULT) {
+                        do_except(cpu, X_PPFR);
+                    } else {
+                        exec_all(cpu, inst);
+                    }
+                }
+            } else {
+                pthread_mutex_lock(&cpu->lock);
+                if (current_irql == 0x0 || cpu->mask == 0) {
+                    cpu->exit = 1;
+                } else if (!cpu->exit) {
+                    while (!cpu->running) {
+                        pthread_cond_wait(&cpu->intr_cond, &cpu->lock);
+                    }
+                }
+                pthread_mutex_unlock(&cpu->lock);
+            }
+
+            // NOTE: this already gets cancelled on exception, see cpu.h
+            commit_deferred(cpu);
+            cpu->cycles++;
+            cpu->event = cpu_event_state(cpu);
+
+            if (cpu->exit && !(cpu->deferred & DEF_EDIT)) break;
+            continue;
+        }
+
+        /* Fast path: fetch, execute, commit. */
+        uint64_t inst = read_mem(cpu, cpu->c[C_PSW] >> 28, get_pc(cpu));
+        if (__builtin_expect(inst == MEM_FAULT, 0)) {
+            do_except(cpu, X_MEMX);
+        } else if (__builtin_expect(inst == KEY_FAULT, 0)) {
+            do_except(cpu, X_PPFR);
         } else {
-            pthread_mutex_lock(&cpu->lock);
-            if (current_irql == 0x0 || cpu->mask == 0) {
-                cpu->exit = 1;
-            } else if (!cpu->exit) {
-                while (!cpu->running) {
-                    pthread_cond_wait(&cpu->intr_cond, &cpu->lock);
-                }
-            }
-            pthread_mutex_unlock(&cpu->lock);
+            exec_all(cpu, inst);
         }
-        
-        // NOTE: this already gets cancelled on exception
-        // see cpu.h
-        if (cpu->do_inc) {
-            uint64_t w_res =
-                write_mem
-                    (cpu, cpu->c[C_PSW] >> 28, cpu->inc_addr, cpu->inc_data);
-            if (w_res == MEM_FAULT) {
-                do_except(cpu, X_MEMX);
-            } else if (w_res == KEY_FAULT) {
-                do_except(cpu, X_PPFW);
-            }
-            cpu->do_inc = 0;
-        }
-        if (cpu->do_stack) {
-            cpu->a[13] = cpu->next_stack;
-            cpu->do_stack = 0;
+
+        if (__builtin_expect(cpu->deferred != 0, 0)) {
+            commit_deferred(cpu);
+            if (cpu->deferred & DEF_EDIT) cpu->event = 1;
         }
         cpu->cycles++;
-    } while (!cpu->exit || cpu->do_edit);
+    }
     
     cpu->running = 0;
     fprintf(stderr, "CPU: halted, code %012lo after %ld instructions\n", 
@@ -2922,6 +2980,7 @@ void start_cpu(acr7k_cu_t *cpu, int do_step) {
     if (cpu->exit) {
         cpu->running = 1;
         cpu->exit = do_step;
+        cpu->event = 1;     // take the slow path once to settle loop state
         pthread_create(&cpu->thread, NULL, run, cpu);
         if (do_step) {
             pthread_join(cpu->thread, NULL);
@@ -2936,6 +2995,7 @@ void stop_cpu(acr7k_cu_t *cpu) {
     if (!(cpu->exit)) {
         cpu->running = 1;
         cpu->exit = 1;
+        cpu->event = 1;
         pthread_cond_signal(&cpu->intr_cond);
         pthread_join(cpu->thread, NULL);
         cpu->running = 0;
@@ -3161,6 +3221,7 @@ int main(int argc, char *argv[]) {
                     printf("? Bad throttle\n");
                 } else {
                     cpu.throttle = (int) val;
+                    cpu.event = 1;
                     cpu.throttle_n0 = cpu.mem_accesses;
                     clock_gettime(CLOCK_MONOTONIC, &cpu.throttle_t0);
                     printf("Throttle set to %d accesses/ms\n", cpu.throttle);
