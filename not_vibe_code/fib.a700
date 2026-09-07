@@ -51,6 +51,8 @@ start:      ldea        sp, stack
 
             rio         x0, 0, #010
             calls       .fib
+            wio         ac, 1, #010
+            ld          .ccw
             wio         ac, 0, #010
 
 done:       ldctl       psw1, .zero
@@ -58,6 +60,8 @@ done:       ldctl       psw1, .zero
             hlt
 
 zero:       dw          0
+
+ccw:        cdata       056, stack
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

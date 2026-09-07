@@ -222,6 +222,8 @@ void ch7310_eject(
     
     else {
         fclose(device->file);
+        fprintf(stderr, "7310: %04o:%02o Eject\n",
+            device->ch_id, device->sch_id);
         device->file = NULL;
     }
 
@@ -291,6 +293,12 @@ void ch7310_end_transact(
     fprintf(stderr, "7310: %04o:%02o End Transaction %s(%02o)\n",
         device->ch_id, device->sch_id,
         device->write ? "WRITE" : "READ", (unsigned int) device->tx_type);
+
+    if (subch->flags & CH_INCORRECT_LENGTH) {
+        fprintf(stderr, "7310: %04o:%02o Transaction ended with residual count %lu\n",
+            device->ch_id, device->sch_id,
+            subch->residual);
+    }
     
     device->write = 0;
     device->tx_type = 0;

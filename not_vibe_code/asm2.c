@@ -701,6 +701,93 @@ int assemble_directive(assembler_ctx_t *ctx, uint64_t opcode) {
     return 0;
 }
 
+int assemble_ccw(assembler_ctx_t *ctx, uint64_t opcode) {
+    read_symbol(ctx);
+    enum event_type evt = get_symbol_type(ctx);
+    if (
+        evt != LIST_ITEM
+    ) return -1;
+    int64_t command = get_num(16, ctx->buf, NULL, 10);
+    if (command < 0) return -1;
+
+    read_symbol(ctx);
+    evt = get_symbol_type(ctx);
+    if (
+        evt != LIST_END
+    ) return -1;
+
+    uint64_t address = 0;
+    int status = parse_number_or_label(
+        ctx, ctx->buf, 27, 0, 1, &address, NULL
+    );
+    if (status == -1) return -1;
+
+    ctx->work_area[assembler_next(ctx)] = (opcode << 27) | (command << 30) | address;
+    return 0;
+}
+
+int assemble_clist(assembler_ctx_t *ctx, uint64_t opcode) {
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    char *field = ctx->buf;
+    uint64_t arg1;
+    if (*field == '0') {
+        arg1 = (uint64_t) strtoull(field + 1, &field, 8);
+        if (arg1 > 0777) return -1;
+    } else if (isdigit(*field)) {
+        arg1 = (uint64_t) strtoull(field, &field, 10);
+        if (arg1 > 0777) return -1;
+    } else if (*field == '#') {
+        arg1 = (uint64_t) strtoull(field + 1, &field, 16);
+        if (arg1 > 0777) return -1;
+    } else return -1;
+
+    read_symbol(ctx);
+    if (
+        get_symbol_type(ctx) != LIST_END
+    ) return -1;
+
+    uint64_t address = 0;
+    int status = parse_number_or_label(
+        ctx, ctx->buf, 27, 0, 1, &address, NULL
+    );
+    if (status == -1) return -1;
+
+    ctx->work_area[assembler_next(ctx)] = (arg1 << 27) | address;
+    return 0;
+}
+
+int assemble_cdata(assembler_ctx_t *ctx, uint64_t opcode) {
+    read_symbol(ctx);
+    if (get_symbol_type(ctx) != LIST_ITEM) return -1;
+    char *field = ctx->buf;
+    uint64_t arg1;
+    if (*field == '0') {
+        arg1 = (uint64_t) strtoull(field + 1, &field, 8);
+        if (arg1 > 0777777) return -1;
+    } else if (isdigit(*field)) {
+        arg1 = (uint64_t) strtoull(field, &field, 10);
+        if (arg1 > 0777777) return -1;
+    } else if (*field == '#') {
+        arg1 = (uint64_t) strtoull(field + 1, &field, 16);
+        if (arg1 > 0777777) return -1;
+    } else return -1;
+
+    read_symbol(ctx);
+    if (
+        get_symbol_type(ctx) != LIST_END
+    ) return -1;
+
+    uint64_t address = 0;
+    int status = parse_number_or_label(
+        ctx, ctx->buf, 18, 0, 1, &address, NULL
+    );
+    if (status == -1) return -1;
+
+    ctx->work_area[assembler_next(ctx)] = (arg1 << 18) | address;
+    return 0;
+}
+
 int assemble_string(assembler_ctx_t *ctx, uint64_t opcode) {
     enum event_type evt;
     int shift = 29;
@@ -1342,6 +1429,29 @@ assembler_entry_t instructions[] = {
     {"save",    3,              assemble_directive},
     {"ds",      0,              assemble_string},
     {"dsn",     1,              assemble_string},
+
+    {"sch",     0000,           assemble_ccw},
+    {"schc",    0001,           assemble_ccw},
+    {"schs",    0002,           assemble_ccw},
+    {"schsc",   0003,           assemble_ccw},
+
+    {"cch",     0200,           assemble_ccw},
+    {"cchc",    0201,           assemble_ccw},
+    {"cchs",    0202,           assemble_ccw},
+    {"cchsc",   0203,           assemble_ccw},
+
+    {"rch",     0400,           assemble_ccw},
+    {"rchc",    0401,           assemble_ccw},
+    {"rchs",    0402,           assemble_ccw},
+    {"rchsc",   0403,           assemble_ccw},
+
+    {"wch",     0600,           assemble_ccw},
+    {"wchc",    0601,           assemble_ccw},
+    {"wchs",    0602,           assemble_ccw},
+    {"wchsc",   0603,           assemble_ccw},
+
+    {"clist",   0,              assemble_clist},
+    {"cdata",   0,              assemble_cdata},
     
     {"nop",     0000002000001,  assemble_unary},
     {"retr",    0000014000000,  assemble_unary},
