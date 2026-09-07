@@ -58,7 +58,7 @@ typedef struct {
     int write;
     
     FILE *file;
-    
+
     int ch_id, sch_id;
 } ch7310_device_t;
 
@@ -75,6 +75,7 @@ void ch7310_detach(acr7k_subch_t *subch) {
 uint64_t ch7310_sense_reg(acr7k_subch_t *subch) {
     ch7310_device_t *device = subch->device;
     
+    // TODO: add error info
     return (device->write << 4) | device->tx_type;
 }
 
@@ -85,9 +86,10 @@ void ch7310_sense(
     uint64_t addr
 ) {
     ch7310_device_t *device = subch->device;
-    fprintf(stderr, "7310: %04o:%02o SENSE(%02o, %09o)\n",
+    fprintf(stderr, "7310: %04o:%02o Unsupported SENSE(%02o, %09o)\n",
         device->ch_id, device->sch_id,
         (unsigned int) opcode, (unsigned int) addr);
+    subch->flags |= CH_UNIT_EXCEPTION; // not yet supported
 }
 
 void ch7310_fopen7(
@@ -255,9 +257,10 @@ void ch7310_control(
         } break;
     
         default: {
-            fprintf(stderr, "7310: %04o:%02o CONTROL(%02o, %09o)\n",
+            fprintf(stderr, "7310: %04o:%02o Unsupported CONTROL(%02o, %09o)\n",
                 device->ch_id, device->sch_id,
                 (unsigned int) opcode, (unsigned int) addr);
+            subch->flags |= CH_UNIT_EXCEPTION; // not yet supported
         }
     }
 }
@@ -296,6 +299,120 @@ void ch7310_end_transact(
     subch->residual = 0;
 }
 
+void ch7310_read_bytes(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch,
+    uint64_t tx_addr,
+    uint64_t count,
+    int size
+) {
+    ch7310_device_t *device = subch->device;
+    tx_addr = inc_byte_index((tx_addr - 1) & MASK_ADDR, size);
+
+    while (count) {
+        int octet = fgetc(device->file);
+
+        if (octet == EOF) {
+            if (ferror(device->file)) {
+                subch->flags |= CH_UNIT_EXCEPTION;
+            } else {
+                subch->flags |= CH_UNIT_INDICATOR | CH_INCORRECT_LENGTH;
+                subch->residual = count;
+            }
+            return;
+        }
+
+        if (store_byte(cpu, tx_addr, size, octet & ((1 << size) - 1))) {
+            subch->flags |= CH_DATA_CHECK;
+            return;
+        }
+
+        tx_addr = inc_byte_index(tx_addr, size);
+        count--;
+    }
+}
+
+void ch7310_read_dwords(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch,
+    uint64_t tx_addr,
+    uint64_t count
+) {
+    ch7310_device_t *device = subch->device;
+
+    uint8_t dword[9];
+
+    while (count) {
+        int got_data = fread(dword, 9, 1, device->file);
+
+        if (!got_data) {
+            if (ferror(device->file)) {
+                subch->flags |= CH_UNIT_EXCEPTION;
+            } else {
+                subch->flags |= CH_UNIT_INDICATOR | CH_INCORRECT_LENGTH;
+                subch->residual = count;
+            }
+            return;
+        }
+
+        if (tx_addr + 1 >= cpu->mem_size) {
+            subch->flags |= CH_DATA_CHECK;
+            return;
+        }
+
+        uint64_t first_word = (
+            (((uint64_t) dword[0]) << 28) |
+            (((uint64_t) dword[1]) << 20) |
+            (((uint64_t) dword[2]) << 12) |
+            (((uint64_t) dword[3]) << 4) |
+            (((uint64_t) dword[4]) >> 4)
+        ) & 0xFFFFFFFFF;
+        cpu->memory[tx_addr] = first_word;
+        uint64_t second_word = (
+            (((uint64_t) dword[4]) << 32) |
+            (((uint64_t) dword[5]) << 24) |
+            (((uint64_t) dword[6]) << 16) |
+            (((uint64_t) dword[7]) << 8) |
+            ((uint64_t) dword[8])
+        ) & 0xFFFFFFFFF;
+        cpu->memory[tx_addr + 1] = second_word;
+
+        tx_addr += 2;
+        count--;
+    }
+}
+
+void ch7310_read(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch,
+    uint64_t tx_addr,
+    uint64_t count
+) {
+    ch7310_device_t *device = subch->device;
+
+    switch (device->tx_type) {
+        case 0: { // READ OCTETS
+            ch7310_read_bytes(cpu, subch, tx_addr, count, 8);
+        } break;
+
+        case 1: { // READ OCTETS TO NONETS
+            ch7310_read_bytes(cpu, subch, tx_addr, count, 9);
+        } break;
+
+        case 2: { // READ ASCII
+            ch7310_read_bytes(cpu, subch, tx_addr, count, 7);
+        } break;
+
+        case 3: { // READ DOUBLE WORDS
+            ch7310_read_dwords(cpu, subch, tx_addr, count);
+        } break;
+
+        default: {
+            subch->flags |= CH_UNIT_EXCEPTION; // not yet supported
+        }
+    }
+}
+
 void ch7310_transfer(
     acr7k_cu_t *cpu,
     acr7k_subch_t *subch,
@@ -307,6 +424,16 @@ void ch7310_transfer(
         device->ch_id, device->sch_id,
         device->write ? "WRITE" : "READ", (unsigned int) device->tx_type,
         (unsigned int) tx_addr, (unsigned int) count);
+
+    if ((subch->flags & CH_INCORRECT_LENGTH)) {
+        subch->residual += count;
+    } else {
+        if (device->write) {
+            subch->flags |= CH_UNIT_EXCEPTION; // not yet supported
+        } else {
+            ch7310_read(cpu, subch, tx_addr, count);
+        }
+    }
 }
 
 void init_7310(acr7k_cu_t *cpu, int id, int sc_id) {

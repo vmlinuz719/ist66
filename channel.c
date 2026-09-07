@@ -292,6 +292,8 @@ uint64_t msch_io(
         result = intr_poll_result;
     }
     
+    // TODO: status polling, CSW, sense
+
     /*
     if (transfer == 14) {
         int status = (ctx->done << 1) | (ctx->command & 1);
