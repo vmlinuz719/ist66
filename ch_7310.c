@@ -340,6 +340,42 @@ void ch7310_read_bytes(
     }
 }
 
+void ch7310_write_bytes(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch,
+    uint64_t tx_addr,
+    uint64_t count,
+    int size
+) {
+    ch7310_device_t *device = subch->device;
+    tx_addr = inc_byte_index((tx_addr - 1) & MASK_ADDR, size);
+
+    while (count) {
+        int64_t byte = load_byte(cpu, tx_addr, size);
+        
+        if (byte == -1) {
+            subch->flags |= CH_DATA_CHECK;
+            return;
+        }
+        
+        tx_addr = inc_byte_index(tx_addr, size);
+        
+        byte &= 0xFF;
+        
+        int result = fputc((int) byte, device->file);
+        
+        if (result == EOF) {
+            if (ferror(device->file)) {
+                subch->flags |= CH_UNIT_EXCEPTION;
+            } else {
+                subch->flags |= CH_UNIT_INDICATOR | CH_INCORRECT_LENGTH;
+                subch->residual = count;
+            }
+            return;
+        }
+    }
+}
+
 void ch7310_read_dwords(
     acr7k_cu_t *cpu,
     acr7k_subch_t *subch,
@@ -421,6 +457,39 @@ void ch7310_read(
     }
 }
 
+void ch7310_write(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch,
+    uint64_t tx_addr,
+    uint64_t count
+) {
+    ch7310_device_t *device = subch->device;
+
+    switch (device->tx_type) {
+        case 0: { // WRITE OCTETS
+            ch7310_write_bytes(cpu, subch, tx_addr, count, 8);
+        } break;
+
+        case 1: { // WRITE NONETS TO OCTETS
+            ch7310_write_bytes(cpu, subch, tx_addr, count, 9);
+        } break;
+
+        case 2: { // WRITE ASCII
+            ch7310_write_bytes(cpu, subch, tx_addr, count, 7);
+        } break;
+
+        /*
+        case 3: { // WRITE DOUBLE WORDS
+            ch7310_write_dwords(cpu, subch, tx_addr, count);
+        } break;
+        */
+
+        default: {
+            subch->flags |= CH_UNIT_EXCEPTION; // not yet supported
+        }
+    }
+}
+
 void ch7310_transfer(
     acr7k_cu_t *cpu,
     acr7k_subch_t *subch,
@@ -437,7 +506,7 @@ void ch7310_transfer(
         subch->residual += count;
     } else {
         if (device->write) {
-            subch->flags |= CH_UNIT_EXCEPTION; // not yet supported
+            ch7310_write(cpu, subch, tx_addr, count);
         } else {
             ch7310_read(cpu, subch, tx_addr, count);
         }
