@@ -1120,10 +1120,8 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             wios        ac, 1, #01c
 
             hlt
-
-            ldea        x0, .chdsn
-            calls       .writeld
-            hlt
+            
+            jmp         .-1
             
 lic_fail:   ldea        x0, .msg_licens
             calls       .writeld
@@ -1133,17 +1131,14 @@ lic_fail:   ldea        x0, .msg_licens
             ldctl       psw1, .zero
             hlt
 
-chpgm:      cchc        8, fname                ; mount write-protected
-            rchsc       2, buflist              ; read ASCII 7-bit bytes
+chpgm:      cchc        9, fname                ; mount r/w
+            wchsc       3, buflist              ; read ASCII 7-bit bytes
             cch         10, 0                   ; eject
-buflist:    clist       1, chbuf
-            cdata       50, 0
+buflist:    clist       1, ipl
+            cdata       1024, 0
 
 
-fname:      dsn         "/tmp/hello.txt"
-
-chdsn:      dw          5
-chbuf:      bss         16
+fname:      dsn         "/tmp/memdump.bin"
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
