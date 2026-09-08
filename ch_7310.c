@@ -399,7 +399,7 @@ void ch7310_read_dwords(
             return;
         }
 
-        if (tx_addr + 1 >= cpu->mem_size) {
+        if (tx_addr >= cpu->mem_size || tx_addr + 1 >= cpu->mem_size) {
             subch->flags |= CH_DATA_CHECK;
             return;
         }
@@ -421,6 +421,45 @@ void ch7310_read_dwords(
         ) & 0xFFFFFFFFF;
         cpu->memory[tx_addr + 1] = second_word;
 
+        tx_addr += 2;
+        count--;
+    }
+}
+
+void ch7310_write_dwords(
+    acr7k_cu_t *cpu,
+    acr7k_subch_t *subch,
+    uint64_t tx_addr,
+    uint64_t count
+) {
+    ch7310_device_t *device = subch->device;
+
+    uint8_t dword[9];
+
+    while (count) {
+        if (tx_addr >= cpu->mem_size || tx_addr + 1 >= cpu->mem_size) {
+            subch->flags |= CH_DATA_CHECK;
+            return;
+        }
+        
+        uint64_t a = cpu->memory[tx_addr], b = cpu->memory[tx_addr + 1];
+        
+        dword[0] = a >> 28;
+        dword[1] = a >> 20;
+        dword[2] = a >> 12;
+        dword[3] = a >> 4;
+        dword[4] = a << 4 | b >> 32;
+        dword[5] = b >> 24;
+        dword[6] = b >> 16;
+        dword[7] = b >> 8;
+        dword[8] = b;
+        
+        int wrote_data = fwrite(dword, 9, 1, device->file);
+        
+        if (!wrote_data) {
+            subch->flags |= CH_UNIT_EXCEPTION;
+        }
+        
         tx_addr += 2;
         count--;
     }
@@ -478,11 +517,9 @@ void ch7310_write(
             ch7310_write_bytes(cpu, subch, tx_addr, count, 7);
         } break;
 
-        /*
         case 3: { // WRITE DOUBLE WORDS
             ch7310_write_dwords(cpu, subch, tx_addr, count);
         } break;
-        */
 
         default: {
             subch->flags |= CH_UNIT_EXCEPTION; // not yet supported
