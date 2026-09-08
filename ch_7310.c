@@ -458,6 +458,7 @@ void ch7310_write_dwords(
         
         if (!wrote_data) {
             subch->flags |= CH_UNIT_EXCEPTION;
+            return;
         }
         
         tx_addr += 2;
