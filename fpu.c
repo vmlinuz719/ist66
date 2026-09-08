@@ -3,6 +3,16 @@
 #include "fpu.h"
 
 /*
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_clzll)
+#define HAVE_BUILTIN_CLZLL 1
+#endif
+#elif defined(__GNUC__) && (__GNUC__ >= 4)
+#define HAVE_BUILTIN_CLZLL 1
+#endif
+*/
+
+/*
  * ACR 7000 floating point format
  *
  * Single-precision: 1-bit sign, 8-bit excess-127 exponent, 27-bit significand
@@ -239,10 +249,24 @@ void acr7k_fnorm(acr7k_float_t *src, acr7k_float_t *dst) {
 
     uint16_t new_exp = src->sign_exp & 0x7FFF;
     uint64_t new_signif = src->signif;
+
+/*
+#ifdef HAVE_BUILTIN_CLZLL
+    unsigned shift = __builtin_clzll(new_signif);
+    if (new_exp <= 1) shift = 0;
+    else if (shift > (unsigned) (new_exp - 1)) shift = new_exp - 1;
+    new_signif <<= shift;
+    new_exp -= shift;
+#else
+*/
     while (new_exp > 1 && !(new_signif & (1ULL << 63))) {
         new_signif <<= 1;
         new_exp--;
     }
+/*
+#endif
+*/
+
     dst->sign_exp = (src->sign_exp & 0x8000) | new_exp;
     dst->signif = new_signif;
 }
