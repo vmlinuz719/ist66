@@ -952,6 +952,24 @@ b_ea_table: dw          b_ea_none,              ; NOP
                         b_ea_none               ; TRAP
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; b_fetchOpr:
+        ;
+        ;   X0:     bobctx pointer
+
+b_fetchOpr: ld          x1, bc_ir(x0)
+            movrz       x1, x1, 12, 32
+
+            addin.cz    x1, x1, -4              ; if flag set then x1 was >= 4
+            addizn.cn   x1, x1, -7              ; if flag set then x1 was > 6
+            retr
+
+            ld          x1, bc_mar(x0)
+            add         x1, bc_p_ram(x0)        ; ir = mdr = ram[mar]
+            ld          (x1)
+            st          bc_mdr(x0)
+            retr
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Start MP/7000 execution...
 
 start:      ldea        sp, stack
