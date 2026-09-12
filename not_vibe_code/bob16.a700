@@ -1083,14 +1083,14 @@ mp_init1:   ldea        x0, .bang               ; phase 1: dump unusable pages
             ldea        x0, .done
             calls       .writeld
 
-            ldea        x0, .garlic
+            ldea        x0, .bob
             calls       .writeld
 
             hlt
             
             jmp         .-1
 
-garlic:     dsn         "Aged garlic", 13, 10
+bob:        dsn         "bob", 13, 10
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
