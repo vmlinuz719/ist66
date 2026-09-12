@@ -851,6 +851,8 @@ enumdone:   xorrts      ac, ac, 1
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; Begin bob16 implementation (see bobctx)
+        ; Bastardized from:
+        ;   https://github.com/somerandomviolinkid/bob16/blob/main/main.c
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ; b_updateCC:
