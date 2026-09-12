@@ -901,11 +901,38 @@ b_evalAddr: ld          x1, bc_ir(x0)
 
 b_ea_none:  retr
 
-b_ea_1:     ; ...
+b_ea_1:     ld          x1, bc_ir(x0)
+            movrtn      x1, x1, 9
+            movm        x1, x1, 27
+            add         x1, bc_pc(x0)
+            movmz       x1, x1, 20
+            st          x1, bc_mar(x0)
+            retr
 
-b_ea_2:     ; ...
+b_ea_2:     ld          x1, bc_ir(x0)           ; dedupe?
+            movrtn      x1, x1, 9               ; maybe move away from a jump
+            movm        x1, x1, 27              ; table?
+            add         x1, bc_pc(x0)
+            movmz       x1, x1, 20
+            st          x1, bc_mar(x0)
 
-b_ea_3:     ; ...
+            add         x1, bc_p_ram(x0)
+            ld          (x1)
+            st          bc_mdr(x0)
+            st          bc_mar(x0)
+            retr
+
+b_ea_3:     ld          x1, bc_ir(x0)
+            movrtn      x1, x1, 6
+            movm        x1, x1, 30
+
+            ld          x2, bc_ir(x0)
+            movrz       x2, x2, 6, 33
+            addr        x0, x2
+
+            add         x1, (x2)
+            st          x1, bc_mar(x0)
+            retr
 
 b_ea_table: dw          b_ea_none,              ; NOP
                         b_ea_none,              ; ADD
